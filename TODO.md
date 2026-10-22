@@ -28,7 +28,7 @@ Priority levels:
 - STEMCraft HTTP adapter compatible with the deployed aggregate payload and username-only `players` array, plus older `online_players`, `player_list`, or camel-case arrays. It accepts optional bearer authentication and removes UUIDs/other identity fields at the integration boundary.
 - Workshop synchronization job with new, meaningful update, and `sm:statusCode=cancelled` announcements. It does not infer cancellations from missing feed items, and each delivery is persisted with a feed fingerprint, pending event kind, and Discord message ID.
 - 24-hour and 1-hour reminders driven by the workshop start instant. Late polling after a restart can still deliver a reminder while the workshop is in the future; cancelled workshops are skipped.
-- Workshop announcements and reminders use structured Discord embeds with workshop metadata and registration calls to action. Feed descriptions are cleaned for Discord display and workshop images are omitted from the card.
+- Workshop announcements and reminders use structured Discord embeds with a linked title in the announcement line, workshop metadata, and registration calls to action. Feed descriptions are cleaned for Discord display and workshop images are omitted from the card.
 - Persistent atomic JSON state mounted by Docker. Reminder keys and announcement fingerprints survive restarts and prevent normal duplicate delivery.
 - Tests for configuration validation, RSS parsing and date conversion, legacy XML compatibility, STEMCraft response compatibility, command formatting and permissions, workshop lifecycle announcements, reminder idempotency, and the existing state store.
 - README and `.env.example` updated for the implemented commands, contracts, deployment, security, and remaining blockers.

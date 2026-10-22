@@ -396,8 +396,6 @@ function formatWorkshopCard(
 
   const description = formatWorkshopDescription(workshop.description);
   const embed: APIEmbed = {
-    title: workshop.title,
-    url: workshop.url,
     color,
     fields,
     footer: { text: 'STEMMechanics Workshops' },
@@ -405,7 +403,7 @@ function formatWorkshopCard(
   };
 
   return {
-    content: `${heading}: **${workshop.title}**`,
+    content: `${heading}: [${workshop.title}](${workshop.url})`,
     embeds: [embed],
   };
 }
