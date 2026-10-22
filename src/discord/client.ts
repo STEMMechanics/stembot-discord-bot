@@ -1,4 +1,5 @@
 import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
@@ -29,7 +30,35 @@ export function createDiscordGateway(
   });
 
   client.once(Events.ClientReady, (readyClient) => {
-    logger.info({ userTag: readyClient.user.tag }, 'Discord client ready');
+    logger.info(
+      {
+        userTag: readyClient.user.tag,
+        processId: process.pid,
+        host: hostname(),
+      },
+      'Discord client ready',
+    );
+  });
+
+  client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
+    logger.warn(
+      { shardId, closeCode: closeEvent.code, processId: process.pid, host: hostname() },
+      'Discord gateway disconnected',
+    );
+  });
+
+  client.on(Events.ShardReconnecting, (shardId) => {
+    logger.warn(
+      { shardId, processId: process.pid, host: hostname() },
+      'Discord gateway reconnecting',
+    );
+  });
+
+  client.on(Events.ShardResume, (shardId, replayedEvents) => {
+    logger.info(
+      { shardId, replayedEvents, processId: process.pid, host: hostname() },
+      'Discord gateway resumed',
+    );
   });
 
   client.on(Events.InteractionCreate, (interaction) => {

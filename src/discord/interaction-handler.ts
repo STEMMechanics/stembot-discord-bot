@@ -1,4 +1,5 @@
 import { MessageFlags, type Interaction } from 'discord.js';
+import { hostname } from 'node:os';
 
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { AppLogger } from '../logging/logger.js';
@@ -54,24 +55,30 @@ export async function handleInteraction(
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),
   };
 
+  const commandStartedAtMs = Date.now();
   try {
     await command.execute(interaction, commandContext);
   } catch (error: unknown) {
+    const commandDurationMs = Date.now() - commandStartedAtMs;
     if (isUnknownInteractionError(error)) {
       context.logger.warn(
         {
           commandName: interaction.commandName,
           interactionId: interaction.id,
-          interactionAgeMs: Math.max(0, Date.now() - interaction.createdTimestamp),
+          receivedInteractionAgeMs: interactionAgeMs,
+          failedInteractionAgeMs: Math.max(0, Date.now() - interaction.createdTimestamp),
+          commandDurationMs,
+          processId: process.pid,
+          host: hostname(),
           err: error,
         },
-        'Discord interaction expired or was acknowledged by another bot process',
+        'Discord interaction expired, was acknowledged elsewhere, or its callback was delayed',
       );
       return;
     }
 
     context.logger.error(
-      { commandName: interaction.commandName, err: error },
+      { commandName: interaction.commandName, commandDurationMs, err: error },
       'Discord command failed',
     );
 
