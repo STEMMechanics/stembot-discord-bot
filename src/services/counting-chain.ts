@@ -194,6 +194,15 @@ export class PersistentCountingChainService implements CountingChainService {
     );
     const latestMessage = findLatestRelevantHistoryMessage(history);
     if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
+      this.dependencies.logger.info(
+        {
+          channelId,
+          historyCount: history.length,
+          relevantMessageId: latestMessage?.id,
+          historyOutcome: latestMessage ? 'failure-marker' : 'no-relevant-image',
+        },
+        'Counting chain history did not contain an accepted image; starting at one',
+      );
       await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
       return;
     }

@@ -148,10 +148,67 @@ export class WebsiteRssIntegration implements WebsiteIntegration {
       }
     }
 
-    return workshops.sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime());
+    const enrichedWorkshops = await Promise.all(
+      workshops.map((workshop) => this.enrichWorkshopDescription(workshop, signal)),
+    );
+
+    return enrichedWorkshops.sort(
+      (left, right) => left.startsAt.getTime() - right.startsAt.getTime(),
+    );
   }
 
   private async fetchFeed(signal?: AbortSignal): Promise<string> {
+    return this.fetchText(
+      this.options.feedUrl,
+      'application/rss+xml, application/xml, text/xml',
+      signal,
+      'Workshop RSS',
+    );
+  }
+
+  private async enrichWorkshopDescription(
+    workshop: WorkshopRecord,
+    signal?: AbortSignal,
+  ): Promise<WorkshopRecord> {
+    if (!shouldFetchWorkshopPage(workshop.description)) {
+      return workshop;
+    }
+
+    try {
+      const page = await this.fetchWorkshopPage(workshop.url, signal);
+      const description = extractWorkshopArticle(page);
+      if (!description) {
+        this.options.logger.warn(
+          { workshopId: workshop.externalId, workshopUrl: workshop.url },
+          'Workshop page did not contain a usable content article; using RSS description',
+        );
+        return workshop;
+      }
+
+      return { ...workshop, description };
+    } catch (error: unknown) {
+      if (signal?.aborted) {
+        throw error;
+      }
+
+      this.options.logger.warn(
+        { err: error, workshopId: workshop.externalId, workshopUrl: workshop.url },
+        'Workshop page could not be read; using RSS description',
+      );
+      return workshop;
+    }
+  }
+
+  private async fetchWorkshopPage(url: string, signal?: AbortSignal): Promise<string> {
+    return this.fetchText(url, 'text/html, application/xhtml+xml', signal, 'Workshop page');
+  }
+
+  private async fetchText(
+    url: string,
+    accept: string,
+    signal: AbortSignal | undefined,
+    resourceName: string,
+  ): Promise<string> {
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), this.options.requestTimeoutMs);
     const abortListener = (): void => timeoutController.abort(signal?.reason);
@@ -165,21 +222,21 @@ export class WebsiteRssIntegration implements WebsiteIntegration {
     }
 
     try {
-      const response = await this.fetchImplementation(this.options.feedUrl, {
+      const response = await this.fetchImplementation(url, {
         headers: {
-          Accept: 'application/rss+xml, application/xml, text/xml',
+          Accept: accept,
         },
         signal: timeoutController.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`Workshop RSS request failed with HTTP ${response.status}`);
+        throw new Error(`${resourceName} request failed with HTTP ${response.status}`);
       }
 
       return await response.text();
     } catch (error: unknown) {
       if (timeoutController.signal.aborted && !signal?.aborted) {
-        throw new Error('Workshop RSS request timed out', { cause: error });
+        throw new Error(`${resourceName} request timed out`, { cause: error });
       }
 
       throw error;
@@ -188,6 +245,30 @@ export class WebsiteRssIntegration implements WebsiteIntegration {
       signal?.removeEventListener('abort', abortListener);
     }
   }
+}
+
+const FEED_METADATA_SUFFIX =
+  /\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm)\s+·\s+[^\r\n]+$/i;
+
+function shouldFetchWorkshopPage(description: string | undefined): boolean {
+  if (!description) {
+    return true;
+  }
+
+  const withoutFeedMetadata = description.replace(FEED_METADATA_SUFFIX, '').trim();
+  return /(?:\.\.\.|…)$/u.test(withoutFeedMetadata);
+}
+
+function extractWorkshopArticle(html: string): string | undefined {
+  for (const match of html.matchAll(/<article\b([^>]*)>([\s\S]*?)<\/article>/gi)) {
+    const attributes = match[1] ?? '';
+    const body = match[2]?.trim();
+    if (body && /\bclass\s*=\s*["'][^"']*\bcontent\b[^"']*["']/i.test(attributes)) {
+      return body;
+    }
+  }
+
+  return undefined;
 }
 
 export function createWebsiteIntegration(

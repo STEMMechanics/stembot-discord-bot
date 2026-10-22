@@ -284,6 +284,28 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('recovers from history longer than the previous 50-message window', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(263),
+    };
+    const service = createService(state, recognizer);
+    const latestAccepted = createHistoryMessage('user-263', 'history-263');
+    const olderMessages = Array.from({ length: 262 }, (_, index) =>
+      createHistoryMessage('user-old', `history-old-${index}`, { attachments: [] }),
+    );
+
+    await service.initialize(() => Promise.resolve([latestAccepted, ...olderMessages]));
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 264,
+        lastMessageId: 'history-263',
+      },
+    });
+  });
+
   it('treats an empty legacy game record as missing and writes the single-game shape', async () => {
     const state = new MemoryStateStore();
     state.state = {

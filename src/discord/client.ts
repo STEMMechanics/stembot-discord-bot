@@ -52,6 +52,11 @@ export function createDiscordGateway(
     intents,
   });
 
+  let resolveClientReady!: () => void;
+  const clientReady = new Promise<void>((resolve) => {
+    resolveClientReady = resolve;
+  });
+
   client.once(Events.ClientReady, (readyClient) => {
     logger.info(
       {
@@ -77,11 +82,24 @@ export function createDiscordGateway(
           )
         : undefined;
 
-      void dependencies.countingChain.initialize(
-        () => fetchCountingChainHistory(client, config.countingChain.channelId!),
-        infoPublisher,
-      );
+      void dependencies.countingChain
+        .initialize(
+          () => fetchCountingChainHistory(client, config.countingChain.channelId!),
+          infoPublisher,
+        )
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.countingChain.channelId },
+            'Counting chain startup initialization failed',
+          );
+        })
+        .finally(() => {
+          resolveClientReady();
+        });
+      return;
     }
+
+    resolveClientReady();
   });
 
   client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
@@ -130,6 +148,7 @@ export function createDiscordGateway(
   return {
     async start(): Promise<void> {
       await client.login(config.discord.token);
+      await clientReady;
     },
 
     async stop(): Promise<void> {
@@ -231,8 +250,32 @@ async function fetchCountingChainHistory(
     throw new Error(`Counting chain channel is not a readable text channel: ${channelId}`);
   }
 
-  const messages = await channel.messages.fetch({ limit: 50 });
-  return [...messages.values()].map(toCountingChainHistoryMessage);
+  const pageSize = 100;
+  const messages: Message[] = [];
+  let before: string | undefined;
+
+  while (true) {
+    const page = await channel.messages.fetch({
+      limit: pageSize,
+      ...(before ? { before } : {}),
+    });
+    messages.push(...page.values());
+
+    if (page.size < pageSize) {
+      break;
+    }
+
+    const oldestMessage = page.last();
+    if (!oldestMessage) {
+      break;
+    }
+
+    before = oldestMessage.id;
+  }
+
+  return messages
+    .sort((left, right) => right.createdTimestamp - left.createdTimestamp)
+    .map(toCountingChainHistoryMessage);
 }
 
 function createCountingChainInfoPublisher(

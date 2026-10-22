@@ -188,8 +188,10 @@ describe('persistent workshop notifications', () => {
     expect(message.content).toContain('**Try different designs.**');
     expect(message.content).toContain('**When:** 24 Oct 2026, 4:00 pm–5:00 pm');
     expect(message.content).toMatch(
-      /(?:Want to be part of it\?|Keen to join us\?|Interested in taking part\?|Want to join in\?|Fancy taking part\?) - \[Register interest\]\(https:\/\/example\.test\/interest\)/,
+      /\n\n(?:Want to be part of it\?|Keen to join us\?|Interested in taking part\?|Want to join in\?|Fancy taking part\?) - \[Register interest\]\(https:\/\/example\.test\/interest\)\n\n/,
     );
+    expect(message.content).not.toContain('**Details:**');
+    expect(message.content).not.toContain('[Details](');
     expect(message.content).not.toContain('Learning Outcomes');
     expect(message).not.toHaveProperty('embeds');
     expect(message.heroImageUrl).toBe(

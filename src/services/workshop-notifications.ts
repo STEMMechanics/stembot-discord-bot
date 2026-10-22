@@ -454,14 +454,14 @@ function formatWorkshopContent(title: string, description: string, details: stri
 
 function formatWorkshopDetails(workshop: WorkshopRecord, timeZone: string): string {
   const registrationCallToAction = formatWorkshopRegistrationCallToAction(workshop);
-  return [
-    `**When:** ${formatWorkshopDateRange(workshop, timeZone)}`,
-    ...(workshop.location ? [`**Where:** ${formatInlineValue(workshop.location)}`] : []),
-    ...(workshop.price ? [`**Price:** ${formatInlineValue(workshop.price)}`] : []),
-    ...(workshop.ages ? [`**Ages:** ${formatInlineValue(workshop.ages)}`] : []),
-    `**Details:** [Details](${workshop.url})`,
-    ...(registrationCallToAction ? [registrationCallToAction] : []),
-  ].join('\n');
+  return (
+    [
+      `**When:** ${formatWorkshopDateRange(workshop, timeZone)}`,
+      ...(workshop.location ? [`**Where:** ${formatInlineValue(workshop.location)}`] : []),
+      ...(workshop.price ? [`**Price:** ${formatInlineValue(workshop.price)}`] : []),
+      ...(workshop.ages ? [`**Ages:** ${formatInlineValue(workshop.ages)}`] : []),
+    ].join('\n') + (registrationCallToAction ? `\n\n${registrationCallToAction}\n\n` : '')
+  );
 }
 
 function formatWorkshopRegistrationCallToAction(workshop: WorkshopRecord): string | undefined {

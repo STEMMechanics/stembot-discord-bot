@@ -77,6 +77,52 @@ describe('Website RSS integration', () => {
     );
   });
 
+  it('loads the full workshop body when the RSS description is truncated', async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          `<rss xmlns:sm="https://stemmechanics.com/ns/rss/workshop"><channel>
+            <item>
+              <title>Redstone Music Challenge</title>
+              <link>https://example.test/workshops/redstone</link>
+              <sm:id>redstone-id</sm:id>
+              <sm:startDate>2026-10-24T16:00:00+10:00</sm:startDate>
+              <description>Can you build a musical machine...\n\nSat 24 Oct 2026 4:00pm · STEMCraft</description>
+            </item>
+          </channel></rss>`,
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          `<html><body><article class="content my-4">
+            <p>Can you build a musical machine?</p>
+            <p>Use redstone and note blocks to create your own song.</p>
+            <h3>Learning Outcomes</h3>
+            <ul><li>Build a circuit.</li></ul>
+          </article></body></html>`,
+        ),
+      );
+
+    const integration = new WebsiteRssIntegration({
+      feedUrl: 'https://example.test/workshops/feed',
+      requestTimeoutMs: 1000,
+      logger,
+      fetchImplementation,
+    });
+
+    const [workshop] = await integration.getWorkshops();
+
+    expect(workshop?.description).toContain('Use redstone and note blocks');
+    expect(fetchImplementation).toHaveBeenNthCalledWith(
+      2,
+      'https://example.test/workshops/redstone',
+      expect.objectContaining({
+        headers: { Accept: 'text/html, application/xhtml+xml' },
+      }),
+    );
+  });
+
   it('parses every final registration type, including duplicate titles and missing optional fields', async () => {
     const item = (id: string, registration: string, value = '') => `
       <item>
