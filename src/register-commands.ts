@@ -14,8 +14,8 @@ interface CurrentApplicationResponse {
 /**
  * Replaces the supported command set in the configured Discord application.
  *
- * Global commands are always replaced. When DISCORD_GUILD_ID is configured,
- * that guild's command set is replaced as well.
+ * Global commands are cleared and the supported command set is registered only
+ * in the configured guild. This deployment is intentionally single-server.
  */
 export async function registerCommands(
   config: AppConfig = loadConfig(),
@@ -36,6 +36,7 @@ export async function registerCommands(
       rest,
       config.discord.clientId,
       config.discord.guildId,
+      [],
       commandDefinitions,
     );
 
@@ -47,12 +48,6 @@ export async function registerCommands(
       },
       'Discord application commands synchronized',
     );
-
-    if (!config.discord.guildId) {
-      logger.warn(
-        'DISCORD_GUILD_ID is not configured; global commands were synchronized but no guild scope was changed',
-      );
-    }
   } catch (error: unknown) {
     logger.error({ err: error }, 'Failed to synchronize Discord application commands');
     throw error;

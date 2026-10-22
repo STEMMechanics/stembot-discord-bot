@@ -15,7 +15,7 @@ Priority levels:
 - Strict TypeScript/NodeNext project with ESLint, Prettier, Vitest, build validation, and a locked dependency tree.
 - Environment-based configuration for Discord credentials, external URLs, request timeouts, polling, timezone, channel IDs, reminder switches, announcement switches, optional STEMCraft bearer token, state path, and shutdown deadline.
 - Discord client using only the `Guilds` gateway intent, structured Pino logging, interaction routing, graceful shutdown, and generic command error handling.
-- Slash commands `/ping`, `/workshops`, `/schedule`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It replaces the global set and, when `DISCORD_GUILD_ID` is configured, the selected guild set; the same operation remains available as an explicit manual command.
+- Slash commands `/ping`, `/workshops`, `/schedule`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It clears the global set and replaces the configured single guild set; the same operation remains available as an explicit manual command.
 - `/workshops` lists future non-cancelled feed items, sorts by start time, formats offset-aware dates in the configured timezone, and uses a registration link when the feed supplies one or the details link otherwise.
 - `/schedule` lists future items whose final feed `sm:type` is `stemcraft`.
 - `/minecraft` reports online state, maintenance, player count, capacity, version, and an optional status message.

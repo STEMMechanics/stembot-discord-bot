@@ -8,12 +8,14 @@ describe('/ping', () => {
     expect(getPingResponse(42)).toBe('Pong! Gateway latency: 42ms');
   });
 
-  it('replies to the Discord interaction', async () => {
-    const reply = vi.fn().mockResolvedValue(undefined);
-    const interaction = { reply } as unknown as ChatInputCommandInteraction;
+  it('defers and edits the Discord interaction', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
 
     await pingCommand.execute(interaction, { getGatewayPing: () => 37 });
 
-    expect(reply).toHaveBeenCalledWith({ content: 'Pong! Gateway latency: 37ms' });
+    expect(deferReply).toHaveBeenCalledOnce();
+    expect(editReply).toHaveBeenCalledWith({ content: 'Pong! Gateway latency: 37ms' });
   });
 });

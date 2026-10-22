@@ -24,33 +24,22 @@ describe('Discord command synchronization', () => {
     ]);
   });
 
-  it('targets only global commands when no guild is configured', () => {
-    const clientId = '123456789012345678';
-
-    expect(getCommandRegistrationTargets(clientId)).toEqual([
-      {
-        scope: 'global',
-        route: Routes.applicationCommands(clientId),
-      },
-    ]);
-  });
-
-  it('replaces each selected scope with exactly the supported commands', async () => {
+  it('clears global commands and registers only the supported guild commands', async () => {
     const clientId = '123456789012345678';
     const guildId = '987654321098765432';
     const definitions = getCommandDefinitions();
-    const put = vi.fn().mockResolvedValue(definitions);
+    const put = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce(definitions);
     const rest = { put } as unknown as Pick<REST, 'put'>;
 
-    const results = await replaceCommandScopes(rest, clientId, guildId, definitions);
+    const results = await replaceCommandScopes(rest, clientId, guildId, [], definitions);
 
     expect(results).toEqual([
-      { scope: 'global', commandCount: 5 },
+      { scope: 'global', commandCount: 0 },
       { scope: 'guild', commandCount: 5 },
     ]);
     expect(put).toHaveBeenCalledTimes(2);
     expect(put).toHaveBeenNthCalledWith(1, Routes.applicationCommands(clientId), {
-      body: definitions,
+      body: [],
     });
     expect(put).toHaveBeenNthCalledWith(2, Routes.applicationGuildCommands(clientId, guildId), {
       body: definitions,

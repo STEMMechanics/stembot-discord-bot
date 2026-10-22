@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config/env.js';
 
 describe('loadConfig', () => {
-  it('loads defaults and optional guild configuration', () => {
+  it('loads defaults and the required target guild configuration', () => {
     const config = loadConfig({
       DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
       DISCORD_TOKEN: 'test-token',
       NODE_ENV: 'test',
     });
@@ -13,6 +14,7 @@ describe('loadConfig', () => {
     expect(config).toEqual({
       discord: {
         clientId: '1234567890',
+        guildId: '2234567890',
         token: 'test-token',
       },
       environment: 'test',
@@ -46,9 +48,19 @@ describe('loadConfig', () => {
     expect(() => loadConfig({})).toThrow(/DISCORD_TOKEN/);
   });
 
+  it('rejects a missing target guild', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_TOKEN: 'test-token',
+      }),
+    ).toThrow(/DISCORD_GUILD_ID/);
+  });
+
   it('parses notification settings and optional external credentials', () => {
     const config = loadConfig({
       DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
       DISCORD_TOKEN: 'test-token',
       DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID: '123456789012345678',
       DISCORD_WORKSHOP_REMINDER_CHANNEL_ID: '223456789012345678',
@@ -74,6 +86,7 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({
         DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
         DISCORD_TOKEN: 'test-token',
         WORKSHOP_TIME_ZONE: 'not-a-time-zone',
       }),

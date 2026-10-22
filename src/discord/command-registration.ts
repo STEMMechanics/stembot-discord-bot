@@ -19,12 +19,12 @@ export interface CommandRegistrationResult {
 /**
  * Returns the application command scopes that this deployment is allowed to replace.
  *
- * Global commands are always synchronized. A guild scope is included only when
- * DISCORD_GUILD_ID is configured, so the script cannot guess or alter unrelated guilds.
+ * The global scope is included so stale global commands can be cleared. The
+ * configured guild scope is the only scope that receives supported commands.
  */
 export function getCommandRegistrationTargets(
   clientId: string,
-  guildId?: string,
+  guildId: string,
 ): CommandRegistrationTarget[] {
   const targets: CommandRegistrationTarget[] = [
     {
@@ -33,33 +33,36 @@ export function getCommandRegistrationTargets(
     },
   ];
 
-  if (guildId) {
-    targets.push({
-      scope: 'guild',
-      route: Routes.applicationGuildCommands(clientId, guildId),
-    });
-  }
+  targets.push({
+    scope: 'guild',
+    route: Routes.applicationGuildCommands(clientId, guildId),
+  });
 
   return targets;
 }
 
 /**
- * Replaces each selected Discord command scope with the complete supported command set.
- * Discord removes commands that are absent from the PUT body.
+ * Replaces the global and configured guild command scopes. Discord removes
+ * commands that are absent from the PUT body. The caller supplies an empty
+ * global body to clear global registrations and the supported body for the
+ * single target guild.
  */
 export async function replaceCommandScopes(
   rest: Pick<REST, 'put'>,
   clientId: string,
-  guildId: string | undefined,
-  commandDefinitions: RESTPostAPIChatInputApplicationCommandsJSONBody[],
+  guildId: string,
+  globalCommandDefinitions: RESTPostAPIChatInputApplicationCommandsJSONBody[],
+  guildCommandDefinitions: RESTPostAPIChatInputApplicationCommandsJSONBody[],
 ): Promise<CommandRegistrationResult[]> {
   const results: CommandRegistrationResult[] = [];
 
   for (const target of getCommandRegistrationTargets(clientId, guildId)) {
+    const definitions =
+      target.scope === 'guild' ? guildCommandDefinitions : globalCommandDefinitions;
     const response = await rest.put(target.route, {
-      body: commandDefinitions,
+      body: definitions,
     });
-    const commandCount = Array.isArray(response) ? response.length : commandDefinitions.length;
+    const commandCount = Array.isArray(response) ? response.length : definitions.length;
     results.push({ scope: target.scope, commandCount });
   }
 

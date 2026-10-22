@@ -50,7 +50,7 @@ function positiveMilliseconds(defaultValue: number, maximum: number) {
 const environmentSchema = z.object({
   DISCORD_TOKEN: z.string().trim().min(1, 'is required'),
   DISCORD_CLIENT_ID: z.string().trim().regex(/^\d+$/, 'must be a Discord application ID'),
-  DISCORD_GUILD_ID: optionalDiscordId,
+  DISCORD_GUILD_ID: z.string().trim().regex(/^\d+$/, 'must be a Discord guild ID'),
   NODE_ENV: z.enum(ENVIRONMENTS).default('production'),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
   STATE_PATH: z.string().trim().min(1).default('./data/state.json'),
@@ -86,7 +86,7 @@ export interface AppConfig {
   discord: {
     token: string;
     clientId: string;
-    guildId?: string;
+    guildId: string;
   };
   website: {
     feedUrl: string;
@@ -142,7 +142,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     discord: {
       token: values.DISCORD_TOKEN,
       clientId: values.DISCORD_CLIENT_ID,
-      ...(values.DISCORD_GUILD_ID ? { guildId: values.DISCORD_GUILD_ID } : {}),
+      guildId: values.DISCORD_GUILD_ID,
     },
     website: {
       feedUrl: values.WORKSHOP_FEED_URL,

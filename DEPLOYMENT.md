@@ -54,10 +54,10 @@ can still deliver reminders that are already due for future workshops.
 
 ## Validate and start
 
-Use the same `.env` for the container and command synchronization. Set
-DISCORD_GUILD_ID to synchronize the target guild as well as global commands.
-Omit it only when a global-only synchronization is intentional. The running
-service synchronizes commands automatically before connecting to Discord.
+Use the same `.env` for the container and command synchronization. Set the
+single target `DISCORD_GUILD_ID`; it is required for this deployment. The
+running service synchronizes commands automatically before connecting to
+Discord.
 
 Select the persistent dataset through the Compose variable, validate the
 Compose file, pull the published image and start the service:
@@ -83,17 +83,17 @@ production notification channels.
 ## Discord command synchronization
 
 The service synchronizes commands on every process startup, before the Discord
-gateway connection is opened. It replaces the complete global command set and,
-when DISCORD_GUILD_ID is configured, the selected guild command set with
-`/ping`, `/workshops`, `/schedule`, `/minecraft` and `/players`.
+gateway connection is opened. It clears the global command set and replaces the
+single configured guild command set with `/ping`, `/workshops`, `/schedule`,
+`/minecraft` and `/players`.
 
 If synchronization fails, the process exits before the bot connects. The
 Compose restart policy can then retry startup, preventing the bot from running
 while Discord has an unverified command set.
 
-1. Put `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` and, when needed, the target
-   `DISCORD_GUILD_ID` in the deployment `.env`. The token and application ID
-   must belong to the same Discord application.
+1. Put `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` and the target `DISCORD_GUILD_ID`
+   in the deployment `.env`. The token and application ID must belong to the
+   same Discord application.
 2. Pull and start the approved image as shown above:
 
        docker compose pull
@@ -110,7 +110,8 @@ directory containing the deployment `docker-compose.yml` and `.env`:
 This executes the compiled command synchronizer inside the running container
 using its existing environment.
 
-Guild commands should update quickly; global command propagation can take time.
+Guild commands should update quickly; removal of old global registrations can
+take time to propagate through Discord.
 
 If TrueNAS manages the application without a Compose file in the current
 directory, use the running container directly:
@@ -129,12 +130,8 @@ The message `no configuration file provided: not found` means that
 Either change to that directory, pass `-f /path/to/docker-compose.yml` and
 `--env-file /path/to/.env`, or use the direct `docker exec` form above.
 
-If more than one guild has legacy commands, run the same command once for
-each approved guild by changing `DISCORD_GUILD_ID` in `.env` and recreating the
-service environment if necessary. The startup synchronizer never enumerates or
-modifies other Discord applications, and it cannot change an unconfigured
-guild. For a global-only update, remove `DISCORD_GUILD_ID` from `.env` before
-restarting or running the manual command.
+The synchronizer only modifies the configured application and target guild. It
+does not enumerate or modify other Discord applications or other guilds.
 
 ## Operations
 
@@ -177,7 +174,7 @@ the production image selection:
       docker compose exec -T stembot node dist/register-commands.js
 
   Then check the intended application and guild IDs, the bot installation
-  scope, and allow Discord time to propagate global commands.
+  scope, and allow Discord time to remove old global registrations.
 
 - **No workshop announcements:** verify the announcement channel ID,
   WORKSHOP_ANNOUNCEMENTS_ENABLED, channel permissions and the state file.
