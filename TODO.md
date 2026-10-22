@@ -19,7 +19,7 @@ Priority levels:
 - Production Compose configuration provides configurable explicit DNS resolvers for deployments whose default container resolver cannot reach Discord reliably.
 - Slash commands `/ping`, `/workshops`, `/schedule`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It explicitly removes existing global registrations, clears the global set, and replaces the configured single guild set; the same operation remains available as an explicit manual command.
 - `/ping` uses one immediate Discord response. Interaction handling records IDs for a short deduplication window and identifies expired acknowledgements without attempting a second invalid response.
-- `/workshops` lists future non-cancelled feed items, sorts by start time, formats offset-aware dates in the configured timezone, and uses a registration link when the feed supplies one or the details link otherwise.
+- `/workshops` lists future non-cancelled feed items, sorts by start time, formats offset-aware dates in the configured timezone, and uses a single `Details` link for each workshop.
 - `/schedule` lists future items whose final feed `sm:type` is `stemcraft`.
 - `/minecraft` reports online state, maintenance, player count, capacity, version, and an optional status message.
 - `/players` is available without a role gate and outputs usernames only. The adapter rejects the operation with a specific capability result when the upstream response has no player array.

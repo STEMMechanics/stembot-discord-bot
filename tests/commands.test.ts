@@ -96,18 +96,23 @@ describe('Discord commands', () => {
     expect(workshops.map((candidate) => candidate.externalId)).toEqual(['display-cancelled']);
   });
 
-  it('formats registration links when supplied and otherwise uses the details link', () => {
+  it('uses one Details link for each workshop', () => {
     const content = formatWorkshopList(
       [
         workshop({ registrationUrl: 'https://example.test/register' }),
-        workshop({ externalId: 'second', title: 'Paper Speakers' }),
+        workshop({
+          externalId: 'second',
+          title: 'Paper Speakers',
+          url: 'https://example.test/workshops/paper-speakers',
+        }),
       ],
       'Australia/Brisbane',
       'Upcoming workshops',
     );
 
-    expect(content).toContain('[Register](https://example.test/register)');
+    expect(content).not.toContain('https://example.test/register');
     expect(content).toContain('[Details](https://example.test/workshops/redstone)');
+    expect(content).toContain('[Details](https://example.test/workshops/paper-speakers)');
     expect(content).toContain('STEMCraft');
 
     const noRegistration = formatWorkshopList(
@@ -115,7 +120,7 @@ describe('Discord commands', () => {
       'Australia/Brisbane',
       'Upcoming workshops',
     );
-    expect(noRegistration).toContain('No registration required');
+    expect(noRegistration).not.toContain('No registration required');
     expect(noRegistration).toContain('[Details](https://example.test/workshops/redstone)');
   });
 

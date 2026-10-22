@@ -11,7 +11,6 @@ import {
   type StemCraftIntegration,
 } from '../integrations/stemcraft.js';
 import {
-  formatWorkshopRegistration,
   getWorkshopStatusCode,
   isStemCraftWorkshop,
   type WebsiteIntegration,
@@ -174,16 +173,7 @@ export function formatWorkshopList(
     const status = formatStatus(workshop);
     const location = workshop.location ? ` · ${workshop.location}` : '';
     const details = `[Details](${workshop.url})`;
-    let registration = formatWorkshopRegistration(workshop) ?? details;
-    if (
-      !registration.includes(details) &&
-      (!workshop.registrationUrl ||
-        workshop.registrationType === 'none' ||
-        workshop.registrationType === 'message')
-    ) {
-      registration = `${registration} · ${details}`;
-    }
-    const metadata = [status, location.slice(3), registration].filter(Boolean).join(' · ');
+    const metadata = [status, location.slice(3), details].filter(Boolean).join(' · ');
 
     return `• **${workshop.title}** — ${formatDateRange(workshop, timeZone)}${metadata ? ` · ${metadata}` : ''}`;
   });

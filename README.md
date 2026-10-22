@@ -40,7 +40,7 @@ The command layer depends on `WebsiteIntegration` and `StemCraftIntegration` int
 Synchronize these application commands with `npm run sync:commands`:
 
 - `/ping` — Discord gateway latency.
-- `/workshops` — upcoming public workshops, sorted by start time with local formatting and registration/details links.
+- `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/schedule` — upcoming workshops whose feed `sm:type` is `stemcraft`.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
