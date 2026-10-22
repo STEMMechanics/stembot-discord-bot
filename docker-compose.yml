@@ -1,0 +1,22 @@
+services:
+  stembot:
+    build:
+      context: .
+    container_name: stembot
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      STATE_PATH: /app/data/state.json
+    init: true
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    volumes:
+      - ${STEMBOT_DATA_DIR:-./data}:/app/data

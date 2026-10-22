@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+
+import { loadConfig } from '../src/config/env.js';
+
+describe('loadConfig', () => {
+  it('loads defaults and optional guild configuration', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_TOKEN: 'test-token',
+      NODE_ENV: 'test',
+    });
+
+    expect(config).toEqual({
+      discord: {
+        clientId: '1234567890',
+        token: 'test-token',
+      },
+      environment: 'test',
+      logLevel: 'info',
+      website: {
+        feedUrl: 'https://www.stemmechanics.com.au/workshops/feed',
+        requestTimeoutMs: 15000,
+      },
+      stemcraft: {
+        requestTimeoutMs: 5000,
+        statusUrl: 'http://play.stemcraft.com.au:8950/status',
+      },
+      workshops: {
+        announcementsEnabled: true,
+        announceInitialSync: false,
+        pollIntervalMs: 300000,
+        reminder1HourEnabled: true,
+        reminder24HoursEnabled: true,
+        remindersEnabled: true,
+        timeZone: 'Australia/Brisbane',
+      },
+      streaming: {
+        notificationsEnabled: false,
+      },
+      shutdownTimeoutMs: 30000,
+      statePath: './data/state.json',
+    });
+  });
+
+  it('rejects missing credentials', () => {
+    expect(() => loadConfig({})).toThrow(/DISCORD_TOKEN/);
+  });
+
+  it('parses notification settings and optional external credentials', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_TOKEN: 'test-token',
+      DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID: '123456789012345678',
+      DISCORD_WORKSHOP_REMINDER_CHANNEL_ID: '223456789012345678',
+      STEMCRAFT_STATUS_TOKEN: 'status-token',
+      WORKSHOP_ANNOUNCEMENTS_ENABLED: 'false',
+      WORKSHOP_POLL_INTERVAL_MS: '60000',
+      WORKSHOP_REMINDER_1H_ENABLED: '0',
+      WORKSHOP_TIME_ZONE: 'UTC',
+    });
+
+    expect(config.workshops).toMatchObject({
+      announcementsEnabled: false,
+      pollIntervalMs: 60000,
+      reminder1HourEnabled: false,
+      timeZone: 'UTC',
+      announcementChannelId: '123456789012345678',
+      reminderChannelId: '223456789012345678',
+    });
+    expect(config.stemcraft.token).toBe('status-token');
+  });
+
+  it('rejects an invalid workshop timezone', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_TOKEN: 'test-token',
+        WORKSHOP_TIME_ZONE: 'not-a-time-zone',
+      }),
+    ).toThrow(/WORKSHOP_TIME_ZONE/);
+  });
+});

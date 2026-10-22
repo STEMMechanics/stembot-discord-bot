@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.env
+.env.*
+!.env.example
+coverage
+data
+dist
+node_modules
+*.log
