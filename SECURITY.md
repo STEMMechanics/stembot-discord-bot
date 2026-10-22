@@ -28,6 +28,10 @@ credential may have been exposed, say which kind so it can be rotated quickly.
   privileged Message Content intent because Discord attachment data is needed;
   review that access and the counting channel when the bot is installed or
   moved.
+- The optional counting-chain information channel requires message-history
+  access so STEMBot can find or recover the existing status message. Configure
+  an explicit message ID when possible so the bot edits only the intended
+  STEMBot-authored message.
 - /players exposes Minecraft usernames only and is intended for authorised
   access to the protected STEMCraft response. Do not add UUIDs, account
   metadata, Discord identities or other personal information to public

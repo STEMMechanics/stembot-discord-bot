@@ -25,8 +25,35 @@ export interface CountingChainMessage {
   reply(content: string): Promise<void>;
 }
 
+export interface CountingChainHistoryMessage extends CountingChainMessage {
+  content: string;
+  botReactionEmojis: readonly string[];
+}
+
+export type CountingChainHistoryProvider = () => Promise<readonly CountingChainHistoryMessage[]>;
+
+export interface CountingChainGameStatus {
+  expectedNumber: number;
+  lastAuthorId: string | null;
+  lastMessageId: string | null;
+  updatedAt: string;
+  highScore: number;
+  highScoreAt: string | null;
+  lastRound: number;
+  lastRoundAt: string | null;
+  lastRoundReason: string | null;
+}
+
+export interface CountingChainInfoPublisher {
+  update(status: CountingChainGameStatus, messageId?: string): Promise<string | undefined>;
+}
+
 export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
+  initialize(
+    historyProvider: CountingChainHistoryProvider,
+    infoPublisher?: CountingChainInfoPublisher,
+  ): Promise<void>;
 }
 
 export interface CountingChainServiceDependencies {
@@ -38,16 +65,12 @@ export interface CountingChainServiceDependencies {
   clock?: () => Date;
 }
 
-interface CountingChainGameState {
-  expectedNumber: number;
-  lastAuthorId: string | null;
-  lastMessageId: string | null;
-  updatedAt: string;
-}
+type CountingChainGameState = CountingChainGameStatus;
 
 interface CountingChainState {
   version: 1;
   games: Record<string, CountingChainGameState>;
+  infoMessageId: string | null;
 }
 
 const STATE_KEY = 'countingChain';
@@ -60,9 +83,37 @@ const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp
 export class PersistentCountingChainService implements CountingChainService {
   private readonly queues = new Map<string, Promise<void>>();
   private readonly fetchImplementation: typeof fetch;
+  private initializationPromise: Promise<void> | undefined;
+  private infoPublisher: CountingChainInfoPublisher | undefined;
 
   public constructor(private readonly dependencies: CountingChainServiceDependencies) {
     this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
+  }
+
+  public initialize(
+    historyProvider: CountingChainHistoryProvider,
+    infoPublisher?: CountingChainInfoPublisher,
+  ): Promise<void> {
+    if (infoPublisher) {
+      this.infoPublisher = infoPublisher;
+    }
+
+    if (!this.initializationPromise) {
+      this.initializationPromise = (async (): Promise<void> => {
+        try {
+          await this.recoverMissingState(historyProvider);
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, channelId: this.dependencies.config.channelId },
+            'Counting chain history recovery failed; starting from the default state',
+          );
+        }
+
+        await this.publishInfo();
+      })();
+    }
+
+    return this.initializationPromise;
   }
 
   public handleMessage(message: CountingChainMessage): Promise<void> {
@@ -78,6 +129,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const previous = this.queues.get(message.channelId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
+      .then(() => this.initializationPromise)
       .then(() => this.processMessage(message))
       .catch((error: unknown) => {
         this.dependencies.logger.error(
@@ -93,6 +145,88 @@ export class PersistentCountingChainService implements CountingChainService {
 
     this.queues.set(message.channelId, next);
     return next;
+  }
+
+  private async recoverMissingState(historyProvider: CountingChainHistoryProvider): Promise<void> {
+    const channelId = this.dependencies.config.channelId;
+    if (!this.dependencies.config.enabled || !channelId) {
+      return;
+    }
+
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY]);
+    if (state.games[channelId]) {
+      return;
+    }
+
+    const history = await historyProvider();
+    const latestMessage = findLatestRelevantHistoryMessage(history);
+    if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
+      await saveInitialState(
+        rootState,
+        state,
+        channelId,
+        this.currentTime(),
+        this.dependencies.state,
+      );
+      return;
+    }
+
+    const attachment = selectImageAttachment(latestMessage.attachments);
+    if (!attachment) {
+      await saveInitialState(
+        rootState,
+        state,
+        channelId,
+        this.currentTime(),
+        this.dependencies.state,
+      );
+      return;
+    }
+
+    try {
+      const image = await this.downloadImage(attachment);
+      const recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
+      if (recognizedNumber === null) {
+        throw new Error('Counting chain history image could not be read');
+      }
+
+      state.games[channelId] = {
+        expectedNumber: recognizedNumber + 1,
+        lastAuthorId: latestMessage.authorId,
+        lastMessageId: latestMessage.id,
+        updatedAt: this.currentTime().toISOString(),
+        highScore: recognizedNumber,
+        highScoreAt: this.currentTime().toISOString(),
+        lastRound: recognizedNumber,
+        lastRoundAt: this.currentTime().toISOString(),
+        lastRoundReason: null,
+      };
+      rootState[STATE_KEY] = state;
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        {
+          channelId,
+          messageId: latestMessage.id,
+          authorId: latestMessage.authorId,
+          recognizedNumber,
+          expectedNumber: recognizedNumber + 1,
+        },
+        'Counting chain state recovered from Discord history',
+      );
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId, messageId: latestMessage.id },
+        'Counting chain history image could not be read; silently resetting',
+      );
+      await saveInitialState(
+        rootState,
+        state,
+        channelId,
+        this.currentTime(),
+        this.dependencies.state,
+      );
+    }
   }
 
   private async processMessage(message: CountingChainMessage): Promise<void> {
@@ -134,21 +268,39 @@ export class PersistentCountingChainService implements CountingChainService {
       recognizedNumber === game.expectedNumber && message.authorId !== game.lastAuthorId;
 
     if (passes) {
+      const now = this.currentTime();
+      const highScore = Math.max(game.highScore, recognizedNumber);
       state.games[message.channelId] = {
         expectedNumber: recognizedNumber + 1,
         lastAuthorId: message.authorId,
         lastMessageId: message.id,
-        updatedAt: this.currentTime().toISOString(),
+        updatedAt: now.toISOString(),
+        highScore,
+        highScoreAt: recognizedNumber > game.highScore ? now.toISOString() : game.highScoreAt,
+        lastRound: game.lastRound,
+        lastRoundAt: game.lastRoundAt,
+        lastRoundReason: game.lastRoundReason,
       };
       rootState[STATE_KEY] = state;
       await this.dependencies.state.save(rootState);
+      await this.publishInfo();
       await this.react(message, PASS_REACTION);
       return;
     }
 
-    state.games[message.channelId] = createInitialGameState(this.currentTime());
+    const now = this.currentTime();
+    const roundScore = Math.max(0, game.expectedNumber - 1);
+    const highScore = Math.max(game.highScore, roundScore);
+    state.games[message.channelId] = createInitialGameState(now, {
+      highScore,
+      highScoreAt: roundScore > game.highScore ? now.toISOString() : game.highScoreAt,
+      lastRound: roundScore,
+      lastRoundAt: now.toISOString(),
+      lastRoundReason: message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number',
+    });
     rootState[STATE_KEY] = state;
     await this.dependencies.state.save(rootState);
+    await this.publishInfo();
     await this.react(message, RULE_FAILURE_REACTION);
     await this.reply(
       message,
@@ -203,6 +355,30 @@ export class PersistentCountingChainService implements CountingChainService {
     }
   }
 
+  private async publishInfo(): Promise<void> {
+    const channelId = this.dependencies.config.channelId;
+    if (!this.infoPublisher || !channelId) {
+      return;
+    }
+
+    try {
+      const rootState = await this.dependencies.state.load();
+      const state = readCountingChainState(rootState[STATE_KEY]);
+      const game = state.games[channelId] ?? createInitialGameState(this.currentTime());
+      const infoMessageId = await this.infoPublisher.update(game, state.infoMessageId ?? undefined);
+      if (infoMessageId && infoMessageId !== state.infoMessageId) {
+        state.infoMessageId = infoMessageId;
+        rootState[STATE_KEY] = state;
+        await this.dependencies.state.save(rootState);
+      }
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId },
+        'Counting chain information message could not be updated',
+      );
+    }
+  }
+
   private async giveFeedback(
     message: CountingChainMessage,
     emoji: string,
@@ -234,9 +410,53 @@ export function createCountingChainService(
   return new PersistentCountingChainService(dependencies);
 }
 
+async function saveInitialState(
+  rootState: JsonState,
+  state: CountingChainState,
+  channelId: string,
+  now: Date,
+  stateStore: StateStore<JsonState>,
+): Promise<void> {
+  state.games[channelId] = createInitialGameState(now);
+  rootState[STATE_KEY] = state;
+  await stateStore.save(rootState);
+}
+
+function findLatestRelevantHistoryMessage(
+  history: readonly CountingChainHistoryMessage[],
+): CountingChainHistoryMessage | undefined {
+  for (const message of history) {
+    if (message.authorIsBot) {
+      if (isCountingChainFailureMessage(message)) {
+        return message;
+      }
+      continue;
+    }
+
+    if (selectImageAttachment(message.attachments)) {
+      return message;
+    }
+  }
+
+  return undefined;
+}
+
+function isCountingChainFailureMessage(message: CountingChainHistoryMessage): boolean {
+  if (
+    message.content.startsWith('Counting chain over —') ||
+    message.content.startsWith('I could not read that image.')
+  ) {
+    return true;
+  }
+
+  return message.botReactionEmojis.some(
+    (emoji) => emoji === RULE_FAILURE_REACTION || emoji === RECOGNITION_FAILURE_REACTION,
+  );
+}
+
 function readCountingChainState(value: unknown): CountingChainState {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.games)) {
-    return { version: 1, games: {} };
+    return { version: 1, games: {}, infoMessageId: null };
   }
 
   const games: Record<string, CountingChainGameState> = {};
@@ -249,6 +469,15 @@ function readCountingChainState(value: unknown): CountingChainState {
     const lastAuthorId = candidate.lastAuthorId;
     const lastMessageId = candidate.lastMessageId;
     const updatedAt = candidate.updatedAt;
+    const legacyScore =
+      typeof expectedNumber === 'number' && Number.isSafeInteger(expectedNumber)
+        ? Math.max(0, expectedNumber - 1)
+        : undefined;
+    const highScore = readNonNegativeInteger(candidate.highScore, legacyScore);
+    const lastRound = readNonNegativeInteger(candidate.lastRound, highScore);
+    const highScoreAt = readNullableString(candidate.highScoreAt);
+    const lastRoundAt = readNullableString(candidate.lastRoundAt);
+    const lastRoundReason = readNullableString(candidate.lastRoundReason);
     if (
       typeof expectedNumber === 'number' &&
       Number.isSafeInteger(expectedNumber) &&
@@ -257,20 +486,55 @@ function readCountingChainState(value: unknown): CountingChainState {
       (typeof lastMessageId === 'string' || lastMessageId === null) &&
       typeof updatedAt === 'string'
     ) {
-      games[channelId] = { expectedNumber, lastAuthorId, lastMessageId, updatedAt };
+      games[channelId] = {
+        expectedNumber,
+        lastAuthorId,
+        lastMessageId,
+        updatedAt,
+        highScore,
+        highScoreAt,
+        lastRound,
+        lastRoundAt,
+        lastRoundReason,
+      };
     }
   }
 
-  return { version: 1, games };
+  return {
+    version: 1,
+    games,
+    infoMessageId: readNullableString(value.infoMessageId),
+  };
 }
 
-function createInitialGameState(now: Date): CountingChainGameState {
+function createInitialGameState(
+  now: Date,
+  overrides: Partial<CountingChainGameState> = {},
+): CountingChainGameState {
   return {
     expectedNumber: 1,
     lastAuthorId: null,
     lastMessageId: null,
     updatedAt: now.toISOString(),
+    highScore: 0,
+    highScoreAt: null,
+    lastRound: 0,
+    lastRoundAt: null,
+    lastRoundReason: null,
+    ...overrides,
   };
+}
+
+function readNonNegativeInteger(value: unknown, fallback: number | undefined): number {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+
+  return fallback !== undefined && Number.isSafeInteger(fallback) && fallback >= 0 ? fallback : 0;
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === 'string' || value === null ? value : null;
 }
 
 function selectImageAttachment(

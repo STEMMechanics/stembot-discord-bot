@@ -6,7 +6,13 @@ import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
-import type { CountingChainMessage, CountingChainService } from '../services/counting-chain.js';
+import type {
+  CountingChainGameStatus,
+  CountingChainHistoryMessage,
+  CountingChainInfoPublisher,
+  CountingChainMessage,
+  CountingChainService,
+} from '../services/counting-chain.js';
 import { handleInteraction } from './interaction-handler.js';
 
 export interface DiscordGateway {
@@ -55,6 +61,27 @@ export function createDiscordGateway(
       },
       'Discord client ready',
     );
+
+    if (
+      dependencies.countingChain &&
+      config.countingChain.enabled &&
+      config.countingChain.channelId
+    ) {
+      const infoPublisher = config.countingChain.infoChannelId
+        ? createCountingChainInfoPublisher(
+            client,
+            readyClient.user.id,
+            config.countingChain.infoChannelId,
+            config.countingChain.infoMessageId,
+            config.workshops.timeZone,
+          )
+        : undefined;
+
+      void dependencies.countingChain.initialize(
+        () => fetchCountingChainHistory(client, config.countingChain.channelId!),
+        infoPublisher,
+      );
+    }
   });
 
   client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
@@ -88,7 +115,7 @@ export function createDiscordGateway(
     });
   });
 
-  if (dependencies.countingChain) {
+  if (dependencies.countingChain && config.countingChain.enabled) {
     client.on(Events.MessageCreate, (message) => {
       void dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
     });
@@ -182,6 +209,158 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
       });
     },
   };
+}
+
+function toCountingChainHistoryMessage(message: Message): CountingChainHistoryMessage {
+  const baseMessage = toCountingChainMessage(message);
+  return {
+    ...baseMessage,
+    content: message.content,
+    botReactionEmojis: [...message.reactions.cache.values()]
+      .filter((reaction) => reaction.me)
+      .map((reaction) => reaction.emoji.name ?? reaction.emoji.toString()),
+  };
+}
+
+async function fetchCountingChainHistory(
+  client: Client,
+  channelId: string,
+): Promise<readonly CountingChainHistoryMessage[]> {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel || !channel.isTextBased() || !('messages' in channel)) {
+    throw new Error(`Counting chain channel is not a readable text channel: ${channelId}`);
+  }
+
+  const messages = await channel.messages.fetch({ limit: 50 });
+  return [...messages.values()].map(toCountingChainHistoryMessage);
+}
+
+function createCountingChainInfoPublisher(
+  client: Client,
+  botUserId: string,
+  channelId: string,
+  configuredMessageId: string | undefined,
+  timeZone: string,
+): CountingChainInfoPublisher {
+  let messageId = configuredMessageId;
+
+  return {
+    async update(
+      status: CountingChainGameStatus,
+      persistedMessageId?: string,
+    ): Promise<string | undefined> {
+      const channel = await client.channels.fetch(channelId);
+      if (!channel || !channel.isTextBased() || !('messages' in channel) || !('send' in channel)) {
+        throw new Error(`Counting chain info channel is not writable: ${channelId}`);
+      }
+
+      let infoMessage: Message | undefined;
+      const requestedMessageId = persistedMessageId ?? messageId;
+      if (requestedMessageId) {
+        try {
+          const candidate = await channel.messages.fetch(requestedMessageId);
+          if (candidate.author.id === botUserId) {
+            infoMessage = candidate;
+          }
+        } catch {
+          messageId = undefined;
+        }
+      }
+
+      if (!infoMessage) {
+        const recentMessages = await channel.messages.fetch({ limit: 100 });
+        infoMessage = recentMessages.find(
+          (candidate) =>
+            candidate.author.id === botUserId &&
+            candidate.embeds.some((embed) => embed.title === 'Counting Chain Game'),
+        );
+      }
+
+      const embed = buildCountingChainInfoEmbed(status, timeZone);
+      if (infoMessage) {
+        await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
+        messageId = infoMessage.id;
+        return infoMessage.id;
+      }
+
+      const createdMessage = await channel.send({
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+      });
+      messageId = createdMessage.id;
+      return createdMessage.id;
+    },
+  };
+}
+
+function buildCountingChainInfoEmbed(status: CountingChainGameStatus, timeZone: string): APIEmbed {
+  return {
+    title: 'Counting Chain Game',
+    color: 0x58d5d8,
+    description: [
+      'The goal is to get to the highest number we can!',
+      '',
+      '**Rule #1**',
+      'Post a GIF or picture containing a number.',
+      '',
+      '**Rule #2**',
+      'The next number must be 1 higher than the previous number.',
+      '',
+      '**Rule #3**',
+      'You cannot post twice in a row.',
+      '',
+      '**When does the chain break?**',
+      'An incorrect number or a consecutive post resets the chain to 1.',
+      '',
+      'Have fun!',
+    ].join('\n'),
+    fields: [
+      { name: 'Current number', value: String(status.expectedNumber), inline: true },
+      {
+        name: 'Current Highscore',
+        value: formatCountingChainStat(status.highScore, status.highScoreAt, timeZone),
+        inline: true,
+      },
+      {
+        name: 'Last round',
+        value: formatCountingChainStat(
+          status.lastRound,
+          status.lastRoundAt,
+          timeZone,
+          status.lastRoundReason,
+        ),
+        inline: false,
+      },
+    ],
+    footer: { text: 'STEMBot counting chain' },
+  };
+}
+
+function formatCountingChainStat(
+  score: number,
+  timestamp: string | null,
+  timeZone: string,
+  reason?: string | null,
+): string {
+  const date = timestamp
+    ? `As of ${new Intl.DateTimeFormat('en-AU', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+        timeZone,
+      }).format(new Date(timestamp))}`
+    : 'No completed round yet';
+  const formattedReason = reason ? ` · ${formatCountingChainReason(reason)}` : '';
+  return `${score} (${date}${formattedReason})`;
+}
+
+function formatCountingChainReason(reason: string): string {
+  return (
+    {
+      'same-user': 'reset after a consecutive post',
+      'wrong-number': 'reset after an incorrect number',
+      'history-failure': 'reset after a failed history check',
+    }[reason] ?? reason
+  );
 }
 
 const MAX_HERO_IMAGE_BYTES = 8 * 1024 * 1024;

@@ -129,6 +129,8 @@ describe('loadConfig', () => {
       DISCORD_TOKEN: 'test-token',
       COUNTING_CHAIN_ENABLED: 'true',
       COUNTING_CHAIN_CHANNEL_ID: '3234567890',
+      COUNTING_CHAIN_INFO_CHANNEL_ID: '4234567890',
+      COUNTING_CHAIN_INFO_MESSAGE_ID: '5234567890',
       OPENAI_API_KEY: 'openai-test-key',
       OPENAI_MODEL: 'test-model',
       OPENAI_REASONING_EFFORT: 'low',
@@ -144,6 +146,8 @@ describe('loadConfig', () => {
     expect(config.countingChain).toEqual({
       enabled: true,
       channelId: '3234567890',
+      infoChannelId: '4234567890',
+      infoMessageId: '5234567890',
       maxAttachmentBytes: 8388608,
     });
   });

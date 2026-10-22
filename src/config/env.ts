@@ -89,6 +89,8 @@ const environmentSchema = z.object({
   DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID: optionalDiscordId,
   COUNTING_CHAIN_ENABLED: booleanFromEnvironment(false),
   COUNTING_CHAIN_CHANNEL_ID: optionalDiscordId,
+  COUNTING_CHAIN_INFO_CHANNEL_ID: optionalDiscordId,
+  COUNTING_CHAIN_INFO_MESSAGE_ID: optionalDiscordId,
   COUNTING_CHAIN_MAX_ATTACHMENT_BYTES: positiveInteger(8 * 1024 * 1024, 20 * 1024 * 1024),
 });
 
@@ -121,6 +123,8 @@ export interface AppConfig {
   countingChain: {
     enabled: boolean;
     channelId?: string;
+    infoChannelId?: string;
+    infoMessageId?: string;
     maxAttachmentBytes: number;
   };
   workshops: {
@@ -163,6 +167,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('OPENAI_API_KEY is required when COUNTING_CHAIN_ENABLED is true');
   }
 
+  if (values.COUNTING_CHAIN_INFO_MESSAGE_ID && !values.COUNTING_CHAIN_INFO_CHANNEL_ID) {
+    throw new Error(
+      'COUNTING_CHAIN_INFO_CHANNEL_ID is required when COUNTING_CHAIN_INFO_MESSAGE_ID is set',
+    );
+  }
+
   try {
     new Intl.DateTimeFormat('en-AU', { timeZone: values.WORKSHOP_TIME_ZONE }).format();
   } catch (error: unknown) {
@@ -197,6 +207,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     countingChain: {
       enabled: values.COUNTING_CHAIN_ENABLED,
       ...(values.COUNTING_CHAIN_CHANNEL_ID ? { channelId: values.COUNTING_CHAIN_CHANNEL_ID } : {}),
+      ...(values.COUNTING_CHAIN_INFO_CHANNEL_ID
+        ? { infoChannelId: values.COUNTING_CHAIN_INFO_CHANNEL_ID }
+        : {}),
+      ...(values.COUNTING_CHAIN_INFO_MESSAGE_ID
+        ? { infoMessageId: values.COUNTING_CHAIN_INFO_MESSAGE_ID }
+        : {}),
       maxAttachmentBytes: values.COUNTING_CHAIN_MAX_ATTACHMENT_BYTES,
     },
     workshops: {

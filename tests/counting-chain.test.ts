@@ -5,6 +5,7 @@ import type { NumberRecognizer } from '../src/integrations/openai.js';
 import {
   PersistentCountingChainService,
   type CountingChainConfig,
+  type CountingChainHistoryMessage,
   type CountingChainMessage,
 } from '../src/services/counting-chain.js';
 import type { JsonState, StateStore } from '../src/state/state-store.js';
@@ -69,6 +70,19 @@ function createService(
     ),
     clock: () => new Date('2026-10-23T00:00:00.000Z'),
   });
+}
+
+function createHistoryMessage(
+  authorId: string,
+  id: string,
+  overrides: Partial<CountingChainHistoryMessage> = {},
+): CountingChainHistoryMessage {
+  return {
+    ...createMessage(authorId, id),
+    content: '',
+    botReactionEmojis: [],
+    ...overrides,
+  };
 }
 
 describe('counting-chain service', () => {
@@ -237,6 +251,103 @@ describe('counting-chain service', () => {
       countingChain: {
         games: {
           'counting-channel': { expectedNumber: 3 },
+        },
+      },
+    });
+  });
+
+  it('recovers a missing state from the latest accepted image in channel history', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(8),
+    };
+    const service = createService(state, recognizer);
+    const historyMessage = createHistoryMessage('user-1', 'history-message');
+    const infoPublisher = { update: vi.fn().mockResolvedValue('info-message') };
+
+    await service.initialize(() => Promise.resolve([historyMessage]), infoPublisher);
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(historyMessage.react).not.toHaveBeenCalled();
+    expect(historyMessage.reply).not.toHaveBeenCalled();
+    expect(infoPublisher.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedNumber: 8,
+        highScore: 7,
+        lastAuthorId: 'user-1',
+        lastMessageId: 'history-message',
+      }),
+      undefined,
+    );
+
+    const next = createMessage('user-2', 'message-2');
+    await service.handleMessage(next);
+
+    expect(next.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: { infoMessageId: 'info-message' },
+    });
+
+    expect(state.state).toMatchObject({
+      countingChain: {
+        games: {
+          'counting-channel': { expectedNumber: 9 },
+        },
+      },
+    });
+  });
+
+  it.each([
+    {
+      description: 'a failed reaction',
+      overrides: { botReactionEmojis: ['❌'] },
+    },
+    {
+      description: 'a bot failure reply',
+      overrides: {
+        authorIsBot: true,
+        content: 'Counting chain over — the next number was not accepted.',
+      },
+    },
+  ])('silently resets when history is marked by $description', async ({ overrides }) => {
+    const state = new MemoryStateStore();
+    const recognizer = { recognizeNumber: vi.fn().mockResolvedValue(7) };
+    const service = createService(state, recognizer);
+    const failedMessage = createHistoryMessage('user-1', 'failed-message', overrides);
+
+    await service.initialize(() => Promise.resolve([failedMessage]));
+
+    expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(failedMessage.react).not.toHaveBeenCalled();
+    expect(failedMessage.reply).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        games: {
+          'counting-channel': {
+            expectedNumber: 1,
+            highScore: 0,
+            lastRound: 0,
+          },
+        },
+      },
+    });
+  });
+
+  it('silently starts at one when no relevant history exists', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = { recognizeNumber: vi.fn().mockResolvedValue(7) };
+    const service = createService(state, recognizer);
+
+    await service.initialize(() => Promise.resolve([]));
+
+    expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        games: {
+          'counting-channel': { expectedNumber: 1 },
         },
       },
     });
