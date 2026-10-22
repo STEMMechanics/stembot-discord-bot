@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits, type APIEmbed } from 'discord.js';
 import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
@@ -12,7 +12,12 @@ export interface DiscordGateway {
   start(): Promise<void>;
   stop(): Promise<void>;
   getGatewayPing(): number;
-  sendChannelMessage(channelId: string, content: string): Promise<string>;
+  sendChannelMessage(channelId: string, message: DiscordChannelMessage | string): Promise<string>;
+}
+
+export interface DiscordChannelMessage {
+  content?: string;
+  embeds?: APIEmbed[];
 }
 
 export interface DiscordCommandDependencies {
@@ -98,14 +103,21 @@ export function createDiscordGateway(
       return client.ws.ping;
     },
 
-    async sendChannelMessage(channelId: string, content: string): Promise<string> {
+    async sendChannelMessage(
+      channelId: string,
+      message: DiscordChannelMessage | string,
+    ): Promise<string> {
       const channel = await client.channels.fetch(channelId);
       if (!channel || !channel.isTextBased() || !('send' in channel)) {
         throw new Error(`Discord channel is not a writable text channel: ${channelId}`);
       }
 
-      const message = await channel.send({ content, allowedMentions: { parse: [] } });
-      return message.id;
+      const payload =
+        typeof message === 'string'
+          ? { content: message, allowedMentions: { parse: [] } }
+          : { ...message, allowedMentions: { parse: [] } };
+      const sentMessage = await channel.send(payload);
+      return sentMessage.id;
     },
   };
 }

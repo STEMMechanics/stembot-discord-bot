@@ -6,12 +6,16 @@ import {
   PersistentWorkshopNotificationService,
   type WorkshopNotificationConfig,
 } from '../src/services/workshop-notifications.js';
+import type { DiscordChannelMessage } from '../src/discord/client.js';
 import type { JsonState, StateStore } from '../src/state/state-store.js';
 import type { WebsiteIntegration, WorkshopRecord } from '../src/integrations/website.js';
 
 const logger = pino({ level: 'silent' });
 const now = new Date('2026-10-22T00:00:00.000Z');
-type SendChannelMessage = (channelId: string, content: string) => Promise<string>;
+type SendChannelPayload = (
+  channelId: string,
+  message: string | DiscordChannelMessage,
+) => Promise<string>;
 
 const config: WorkshopNotificationConfig = {
   timeZone: 'Australia/Brisbane',
@@ -43,6 +47,7 @@ function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
     startsAt: new Date('2026-10-24T06:00:00.000Z'),
     endsAt: new Date('2026-10-24T07:00:00.000Z'),
     url: 'https://example.test/workshops/redstone',
+    imageUrl: 'https://example.test/workshops/redstone.png',
     location: 'STEMCraft',
     status: 'open',
     statusCode: 'open',
@@ -53,7 +58,7 @@ function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
 function createService(
   website: WebsiteIntegration,
   state: MemoryStateStore,
-  sendChannelMessage: SendChannelMessage,
+  sendChannelMessage: SendChannelPayload,
   serviceConfig: WorkshopNotificationConfig = config,
 ): PersistentWorkshopNotificationService {
   return new PersistentWorkshopNotificationService({
@@ -73,17 +78,28 @@ describe('persistent workshop notifications', () => {
       getWorkshops: vi.fn().mockImplementation(() => Promise.resolve([currentWorkshop])),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(1);
-    expect(sendChannelMessage.mock.calls[0]?.[1]).toContain('New STEMMechanics workshop');
+    expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
+      content: expect.stringContaining('New STEMMechanics workshop'),
+      embeds: [
+        expect.objectContaining({
+          title: 'Redstone Music Challenge',
+          url: 'https://example.test/workshops/redstone',
+          image: { url: 'https://example.test/workshops/redstone.png' },
+        }),
+      ],
+    });
 
     currentWorkshop = workshop({ title: 'Updated Redstone Music Challenge' });
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
-    expect(sendChannelMessage.mock.calls[1]?.[1]).toContain('workshop updated');
+    expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
+      content: expect.stringContaining('workshop updated'),
+    });
 
     currentWorkshop = workshop({
       status: 'open',
@@ -92,7 +108,9 @@ describe('persistent workshop notifications', () => {
     });
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(3);
-    expect(sendChannelMessage.mock.calls[2]?.[1]).toContain('workshop cancelled');
+    expect(sendChannelMessage.mock.calls[2]?.[1]).toMatchObject({
+      content: expect.stringContaining('workshop cancelled'),
+    });
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(3);
@@ -108,7 +126,17 @@ describe('persistent workshop notifications', () => {
       'Australia/Brisbane',
     );
 
-    expect(message).toContain('[Register interest](https://example.test/interest)');
+    expect(message.content).toContain('New STEMMechanics workshop');
+    expect(message.embeds?.[0]).toMatchObject({
+      title: 'Redstone Music Challenge',
+      fields: expect.arrayContaining([
+        {
+          name: 'Registration',
+          value: '[Register interest](https://example.test/interest)',
+          inline: false,
+        },
+      ]),
+    });
   });
 
   it('sends each due reminder once and persists the marker', async () => {
@@ -120,7 +148,7 @@ describe('persistent workshop notifications', () => {
       getWorkshops: vi.fn().mockResolvedValue([reminderWorkshop]),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
     const serviceConfig = { ...config, announceInitialSync: false };
 
     await createService(website, state, sendChannelMessage, serviceConfig).synchronizeWorkshops();
@@ -141,7 +169,7 @@ describe('persistent workshop notifications', () => {
       getWorkshops: vi.fn().mockResolvedValue([workshop()]),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
 
     await createService(website, state, sendChannelMessage, {
       ...config,
@@ -161,7 +189,7 @@ describe('persistent workshop notifications', () => {
       ]),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
 
@@ -174,7 +202,7 @@ describe('persistent workshop notifications', () => {
       getWorkshops: vi.fn().mockImplementation(() => Promise.resolve(feed)),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     feed = [];
@@ -194,7 +222,7 @@ describe('persistent workshop notifications', () => {
       getWorkshops: vi.fn().mockImplementation(() => Promise.resolve([currentWorkshop])),
     };
     const state = new MemoryStateStore();
-    const sendChannelMessage = vi.fn<SendChannelMessage>().mockResolvedValue('message-1');
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     currentWorkshop = workshop({
@@ -207,6 +235,8 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
 
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
-    expect(sendChannelMessage.mock.calls[1]?.[1]).toContain('workshop cancelled');
+    expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
+      content: expect.stringContaining('workshop cancelled'),
+    });
   });
 });

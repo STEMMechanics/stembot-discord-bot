@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import type { APIEmbed } from 'discord.js';
 
-import type { DiscordGateway } from '../discord/client.js';
+import type { DiscordChannelMessage, DiscordGateway } from '../discord/client.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
 import {
@@ -346,36 +347,99 @@ export function formatWorkshopAnnouncement(
   workshop: WorkshopRecord,
   kind: WorkshopAnnouncementKind,
   timeZone: string,
-): string {
+): DiscordChannelMessage {
   const heading = {
     new: '📣 New STEMMechanics workshop',
     updated: '✏️ STEMMechanics workshop updated',
     cancelled: '❌ STEMMechanics workshop cancelled',
   }[kind];
-  const details = formatWorkshopDetails(workshop, timeZone);
-  return `${heading}: **${workshop.title}**\n${details}`;
+
+  return formatWorkshopCard(workshop, heading, timeZone, announcementColor(kind));
 }
 
 export function formatWorkshopReminder(
   workshop: WorkshopRecord,
   reminder: WorkshopReminder,
   timeZone: string,
-): string {
+): DiscordChannelMessage {
   const lead = reminder === '24-hours' ? '24 hours' : '1 hour';
-  return `⏰ Workshop reminder: **${workshop.title}** starts in ${lead}.\n${formatWorkshopDetails(workshop, timeZone)}`;
+  return formatWorkshopCard(
+    workshop,
+    `⏰ Workshop starts in ${lead}`,
+    timeZone,
+    reminder === '24-hours' ? 0x5865f2 : 0xf1c40f,
+  );
 }
 
-function formatWorkshopDetails(workshop: WorkshopRecord, timeZone: string): string {
-  const date = new Intl.DateTimeFormat('en-AU', {
+function formatWorkshopCard(
+  workshop: WorkshopRecord,
+  heading: string,
+  timeZone: string,
+  color: number,
+): DiscordChannelMessage {
+  const statusCode = getWorkshopStatusCode(workshop);
+  const registration = formatWorkshopRegistration(workshop);
+  const fields: APIEmbed['fields'] = [
+    { name: 'When', value: formatWorkshopDateRange(workshop, timeZone), inline: true },
+    ...(workshop.location
+      ? [{ name: 'Where', value: truncateEmbedText(workshop.location), inline: true }]
+      : []),
+    ...(statusCode !== 'unknown' ? [{ name: 'Status', value: statusCode, inline: true }] : []),
+    ...(workshop.price
+      ? [{ name: 'Price', value: truncateEmbedText(workshop.price), inline: true }]
+      : []),
+    ...(workshop.ages
+      ? [{ name: 'Ages', value: truncateEmbedText(workshop.ages), inline: true }]
+      : []),
+    ...(registration && registration !== 'No registration required'
+      ? [{ name: 'Registration', value: truncateEmbedText(registration), inline: false }]
+      : []),
+  ];
+
+  const description = workshop.description?.trim();
+  const embed: APIEmbed = {
+    title: workshop.title,
+    url: workshop.url,
+    color,
+    fields,
+    footer: { text: 'STEMMechanics Workshops' },
+    ...(description ? { description: truncateEmbedText(description, 1800) } : {}),
+    ...(workshop.imageUrl?.startsWith('https://') ? { image: { url: workshop.imageUrl } } : {}),
+  };
+
+  return {
+    content: `${heading}: **${workshop.title}**`,
+    embeds: [embed],
+  };
+}
+
+function formatWorkshopDateRange(workshop: WorkshopRecord, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-AU', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone,
-  }).format(workshop.startsAt);
-  const location = workshop.location ? ` · ${workshop.location}` : '';
-  const statusCode = getWorkshopStatusCode(workshop);
-  const status = statusCode === 'unknown' ? '' : ` · ${statusCode}`;
-  const registration = formatWorkshopRegistration(workshop);
-  return `${date}${location}${status}\nDetails: ${workshop.url}${registration ? `\n${registration}` : ''}`;
+  });
+  const start = formatter.format(workshop.startsAt);
+  if (!workshop.endsAt) {
+    return start;
+  }
+
+  return `${start}–${new Intl.DateTimeFormat('en-AU', {
+    timeStyle: 'short',
+    timeZone,
+  }).format(workshop.endsAt)}`;
+}
+
+function truncateEmbedText(value: string, maximumLength = 1024): string {
+  return value.length <= maximumLength ? value : `${value.slice(0, maximumLength - 1).trimEnd()}…`;
+}
+
+function announcementColor(kind: WorkshopAnnouncementKind): number {
+  return {
+    new: 0x2ecc71,
+    updated: 0xf1c40f,
+    cancelled: 0xe74c3c,
+  }[kind];
 }
 
 function toStoredWorkshop(
