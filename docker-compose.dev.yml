@@ -1,0 +1,6 @@
+services:
+  stembot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stembot-discord-bot:local

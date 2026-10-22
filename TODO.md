@@ -29,6 +29,7 @@ Priority levels:
 - Tests for configuration validation, RSS parsing and date conversion, legacy XML compatibility, STEMCraft response compatibility, command formatting and permissions, workshop lifecycle announcements, reminder idempotency, and the existing state store.
 - README and `.env.example` updated for the implemented commands, contracts, deployment, security, and remaining blockers.
 - Deployment, contributing and security documentation, plus the GPLv3 license used by the other STEMMechanics code repositories.
+- GitHub Actions container publishing to GHCR, a pull-based production Compose file, and a local Docker build override.
 
 ### Verified external contracts
 
@@ -96,10 +97,10 @@ The direct endpoint is HTTP only, and the embedded STEMCraft web server defaults
 - **Why:** Logs are structured, but the container has no health signal for TrueNAS monitoring.
 - **Owner:** STEMBot repository and deployment configuration.
 
-#### P2-3 — Verify Docker deployment in CI or on TrueNAS
+#### P2-3 — Verify published Docker deployment on TrueNAS
 
-- **What:** Run `docker compose config` and `docker compose build`, verify dataset ownership for atomic state-file replacement, and document backup/restore and secret injection.
-- **Why:** The repository has hardened Docker/Compose configuration, but this workspace has no usable Docker daemon/Compose plugin, so the image was not built here.
+- **What:** Run `docker compose config`, `docker compose pull`, and `docker compose up -d --no-build` against the published GHCR image. Verify dataset ownership for atomic state-file replacement, image rollback by tag, backup/restore, and secret injection.
+- **Why:** The repository now publishes a pullable image and has hardened Docker/Compose configuration, but the TrueNAS pull, permissions, rollback, and runtime smoke test remain outstanding.
 - **Owner:** STEMBot repository and deployment operator.
 
 ## Missing features
@@ -125,4 +126,4 @@ The direct endpoint is HTTP only, and the embedded STEMCraft web server defaults
 3. **P1:** Configure staging Discord channels and run the implemented commands, announcements, reminders, restart, and failure scenarios.
 4. **P1:** Complete the streaming notification workflow and authorized administrative commands.
 5. **P1:** Run end-to-end validation against deployed Website, STEMCraft, and Discord systems before production.
-6. **P2:** Add health/metrics, Docker CI/deployment verification, and the outbox/reconciliation decision.
+6. **P2:** Add health/metrics, verify the published image rollout on TrueNAS, and resolve the outbox/reconciliation decision.

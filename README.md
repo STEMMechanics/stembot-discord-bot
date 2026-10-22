@@ -129,10 +129,17 @@ Create `.env` on the deployment host and select a dataset for persistent state:
 
 ```sh
 export STEMBOT_DATA_DIR=/mnt/tank/appdata/stembot
-docker compose build
-docker compose up -d
+docker compose config --quiet
+docker compose pull
+docker compose up -d --no-build
 docker compose logs -f stembot
 ```
+
+The production Compose file pulls
+`ghcr.io/stemmechanics/stembot-discord-bot:latest`, which is published by the
+GitHub Actions workflow on `main` and version tags. Set `STEMBOT_IMAGE_TAG` to
+an immutable SHA or release tag for controlled rollouts, and run `docker login
+ghcr.io` first if the package is private.
 
 The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 
@@ -142,7 +149,17 @@ Run command registration from the checked-out repository with the same `.env` be
 npm run register:commands
 ```
 
-This workspace has not run a Docker build because a Docker daemon/Compose plugin was unavailable. Run `docker compose config` and `docker compose build` on the deployment host or in CI before release.
+For local image builds, use `docker-compose.dev.yml` with the production file:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+The GitHub Actions container workflow builds and publishes the Dockerfile to
+GHCR. This workspace could not run Docker Compose because the local Docker
+Compose plugin is unavailable; run the pull and startup checks on TrueNAS or
+in CI.
 
 ## Security and privacy
 

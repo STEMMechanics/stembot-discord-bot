@@ -14,6 +14,8 @@ and persistent state directory on the TrueNAS host.
 - A protected, reachable STEMCraft status endpoint. The default HTTP endpoint
   is suitable for compatibility testing only; production traffic needs the
   P0 transport, network and authentication work described in TODO.md.
+- Access to the published GitHub Container Registry image, or a local image
+  mirror configured through STEMBOT_IMAGE.
 
 The bot needs only the Discord Guilds gateway intent. Give it View Channel and
 Send Messages in each configured notification channel, plus the permissions
@@ -35,6 +37,13 @@ STEMCRAFT_STATUS_URL and STEMCRAFT_STATUS_TOKEN to the protected STEMCraft
 path agreed with the plugin and infrastructure owners. Do not expose port
 8950 directly to the Internet.
 
+The production Compose file pulls
+ghcr.io/stemmechanics/stembot-discord-bot:latest by default. Set
+STEMBOT_IMAGE_TAG to an immutable sha tag or release tag for a controlled
+deployment. If the GHCR package is private, authenticate before pulling:
+
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
 The default WORKSHOP_ANNOUNCE_INITIAL_SYNC=false records the current feed
 without sending a startup burst of lifecycle announcements. Set it to true
 only when an initial announcement is intentional. The first synchronization
@@ -53,12 +62,12 @@ Set DISCORD_GUILD_ID while developing or staging so command changes appear
 immediately. Omit it when registering global production commands.
 
 Select the persistent dataset through the Compose variable, validate the
-Compose file, build the image and start the service:
+Compose file, pull the published image and start the service:
 
     export STEMBOT_DATA_DIR=/mnt/tank/appdata/stembot
     docker compose config --quiet
-    docker compose build --pull
-    docker compose up -d
+    docker compose pull
+    docker compose up -d --no-build
     docker compose ps
     docker compose logs --tail=100 stembot
 
@@ -81,8 +90,8 @@ Inspect the running service and recent structured logs with:
 
 Apply an approved update with:
 
-    docker compose build --pull
-    docker compose up -d
+    docker compose pull
+    docker compose up -d --no-build
 
 The process handles SIGTERM and stops its scheduler and Discord client within
 the configured SHUTDOWN_TIMEOUT_MS. To stop it for maintenance:
@@ -99,6 +108,12 @@ The current Compose file has no HTTP health endpoint. Treat docker compose ps,
 startup logs, successful Discord connection and a successful manual command
 check as the deployment health signal. A machine-readable health check and
 metrics remain a P2 item in TODO.md.
+
+For a local Docker build, use the development override rather than changing
+the production image selection:
+
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## Troubleshooting
 

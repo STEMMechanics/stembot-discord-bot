@@ -1,7 +1,7 @@
 services:
   stembot:
-    build:
-      context: .
+    image: ${STEMBOT_IMAGE:-ghcr.io/stemmechanics/stembot-discord-bot}:${STEMBOT_IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: stembot
     env_file:
       - .env
