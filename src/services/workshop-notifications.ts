@@ -66,6 +66,33 @@ interface WorkshopNotificationState {
 
 const STATE_KEY = 'workshopNotifications';
 
+const INTEREST_REGISTRATION_PROMPTS = [
+  'Want to be part of it?',
+  'Keen to join us?',
+  'Interested in taking part?',
+  'Want to join in?',
+  'Fancy taking part?',
+] as const;
+
+const BOOKING_REGISTRATION_PROMPTS = [
+  "Don't miss out on this one!",
+  'Ready to book your spot?',
+  'Save your spot!',
+  'Join us for this one!',
+] as const;
+
+const EMAIL_REGISTRATION_PROMPTS = [
+  'Want to join us?',
+  'Ready to take part?',
+  'Interested in joining?',
+] as const;
+
+const MESSAGE_REGISTRATION_PROMPTS = [
+  'Want to join in?',
+  'Ready to take part?',
+  'Send us a message!',
+] as const;
+
 export class PersistentWorkshopNotificationService implements WorkshopNotificationService {
   private running = false;
 
@@ -413,17 +440,37 @@ function formatWorkshopContent(title: string, description: string, details: stri
 }
 
 function formatWorkshopDetails(workshop: WorkshopRecord, timeZone: string): string {
-  const registration = formatWorkshopRegistration(workshop);
+  const registrationCallToAction = formatWorkshopRegistrationCallToAction(workshop);
   return [
     `**When:** ${formatWorkshopDateRange(workshop, timeZone)}`,
     ...(workshop.location ? [`**Where:** ${formatInlineValue(workshop.location)}`] : []),
     ...(workshop.price ? [`**Price:** ${formatInlineValue(workshop.price)}`] : []),
     ...(workshop.ages ? [`**Ages:** ${formatInlineValue(workshop.ages)}`] : []),
     `**Details:** [Details](${workshop.url})`,
-    ...(registration && registration !== 'No registration required'
-      ? [`**Registration:** ${registration}`]
-      : []),
+    ...(registrationCallToAction ? [registrationCallToAction] : []),
   ].join('\n');
+}
+
+function formatWorkshopRegistrationCallToAction(workshop: WorkshopRecord): string | undefined {
+  const registration = formatWorkshopRegistration(workshop);
+  if (!registration || registration === 'No registration required') {
+    return undefined;
+  }
+
+  const prompts =
+    workshop.registrationType === 'interest'
+      ? INTEREST_REGISTRATION_PROMPTS
+      : workshop.registrationType === 'email'
+        ? EMAIL_REGISTRATION_PROMPTS
+        : workshop.registrationType === 'message'
+          ? MESSAGE_REGISTRATION_PROMPTS
+          : BOOKING_REGISTRATION_PROMPTS;
+
+  return `${randomChoice(prompts)} - ${registration}`;
+}
+
+function randomChoice(values: readonly string[]): string {
+  return values[Math.floor(Math.random() * values.length)] ?? values[0]!;
 }
 
 function formatWorkshopDescription(description: string | undefined): string {

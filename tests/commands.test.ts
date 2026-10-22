@@ -124,7 +124,7 @@ describe('Discord commands', () => {
       formatWorkshopRegistration(
         workshop({ registrationType: 'tickets', registrationUrl: 'https://example.test/tickets' }),
       ),
-    ).toBe('[Tickets](https://example.test/tickets)');
+    ).toBe('[Book now](https://example.test/tickets)');
     expect(
       formatWorkshopRegistration(
         workshop({

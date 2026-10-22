@@ -345,7 +345,7 @@ export function formatWorkshopRegistration(workshop: WorkshopRecord): string | u
     case 'none':
       return 'No registration required';
     case 'tickets':
-      return registrationUrl ? `[Tickets](${registrationUrl})` : `Tickets via ${details}`;
+      return registrationUrl ? `[Book now](${registrationUrl})` : `Book now via ${details}`;
     case 'external':
     case 'external-link':
     case 'link':

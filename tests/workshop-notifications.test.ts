@@ -187,13 +187,28 @@ describe('persistent workshop notifications', () => {
     );
     expect(message.content).toContain('**Try different designs.**');
     expect(message.content).toContain('**When:** 24 Oct 2026, 4:00 pm–5:00 pm');
-    expect(message.content).toContain(
-      '**Registration:** [Register interest](https://example.test/interest)',
+    expect(message.content).toMatch(
+      /(?:Want to be part of it\?|Keen to join us\?|Interested in taking part\?|Want to join in\?|Fancy taking part\?) - \[Register interest\]\(https:\/\/example\.test\/interest\)/,
     );
     expect(message.content).not.toContain('Learning Outcomes');
     expect(message).not.toHaveProperty('embeds');
     expect(message.heroImageUrl).toBe(
       'https://www.stemmechanics.com.au/media/download/redstone.png',
+    );
+  });
+
+  it('uses a separate booking prompt for ticket registration', () => {
+    const message = formatWorkshopAnnouncement(
+      workshop({
+        registrationType: 'tickets',
+        registrationUrl: 'https://example.test/tickets',
+      }),
+      'new',
+      'Australia/Brisbane',
+    );
+
+    expect(message.content).toMatch(
+      /(?:Don't miss out on this one!|Ready to book your spot\?|Save your spot!|Join us for this one!) - \[Book now\]\(https:\/\/example\.test\/tickets\)/,
     );
   });
 
