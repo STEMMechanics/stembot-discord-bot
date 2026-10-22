@@ -397,6 +397,8 @@ function formatWorkshopCard(
   const description = formatWorkshopDescription(workshop.description);
   const imageUrl = formatWorkshopImageUrl(workshop.imageUrl);
   const embed: APIEmbed = {
+    title: `${heading}: ${workshop.title}`,
+    url: workshop.url,
     color,
     fields,
     ...(description ? { description: truncateEmbedText(description, 1800) } : {}),
@@ -404,8 +406,8 @@ function formatWorkshopCard(
   };
 
   return {
-    content: `${heading}: [${workshop.title}](${workshop.url})`,
     embeds: [embed],
+    ...(imageUrl ? { heroImageUrl: imageUrl } : {}),
   };
 }
 

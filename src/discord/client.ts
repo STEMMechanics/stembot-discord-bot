@@ -18,6 +18,8 @@ export interface DiscordGateway {
 export interface DiscordChannelMessage {
   content?: string;
   embeds?: APIEmbed[];
+  /** Internal image URL that is uploaded and referenced from the embed. */
+  heroImageUrl?: string;
 }
 
 export interface DiscordCommandDependencies {
@@ -112,12 +114,84 @@ export function createDiscordGateway(
         throw new Error(`Discord channel is not a writable text channel: ${channelId}`);
       }
 
-      const payload =
-        typeof message === 'string'
-          ? { content: message, allowedMentions: { parse: [] } }
-          : { ...message, allowedMentions: { parse: [] } };
+      if (typeof message === 'string') {
+        const sentMessage = await channel.send({
+          content: message,
+          allowedMentions: { parse: [] },
+        });
+        return sentMessage.id;
+      }
+
+      const { heroImageUrl, ...messagePayload } = message;
+      const heroImage = heroImageUrl ? await downloadHeroImage(heroImageUrl, logger) : undefined;
+      const embeds = heroImage
+        ? messagePayload.embeds?.map((embed) =>
+            embed.image?.url === heroImageUrl
+              ? { ...embed, image: { url: `attachment://${heroImage.filename}` } }
+              : embed,
+          )
+        : messagePayload.embeds;
+      const payload = {
+        ...messagePayload,
+        ...(embeds ? { embeds } : {}),
+        ...(heroImage
+          ? {
+              files: [{ attachment: heroImage.data, name: heroImage.filename }],
+            }
+          : {}),
+        allowedMentions: { parse: [] },
+      };
       const sentMessage = await channel.send(payload);
       return sentMessage.id;
     },
   };
+}
+
+const MAX_HERO_IMAGE_BYTES = 8 * 1024 * 1024;
+
+interface HeroImage {
+  data: Buffer;
+  filename: string;
+}
+
+async function downloadHeroImage(url: string, logger: AppLogger): Promise<HeroImage | undefined> {
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: 'image/*' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Hero image request returned HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.toLowerCase();
+    if (!contentType?.startsWith('image/')) {
+      throw new Error(`Hero image response was not an image: ${contentType ?? 'unknown type'}`);
+    }
+
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.byteLength > MAX_HERO_IMAGE_BYTES) {
+      throw new Error(`Hero image exceeds ${MAX_HERO_IMAGE_BYTES} bytes`);
+    }
+
+    return {
+      data,
+      filename: `workshop-hero.${imageExtension(contentType)}`,
+    };
+  } catch (error) {
+    logger.warn({ err: error, imageUrl: url }, 'Workshop hero image could not be attached');
+    return undefined;
+  }
+}
+
+function imageExtension(contentType: string): string {
+  return (
+    {
+      'image/avif': 'avif',
+      'image/gif': 'gif',
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+    }[contentType] ?? 'bin'
+  );
 }

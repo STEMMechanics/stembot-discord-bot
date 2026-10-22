@@ -84,24 +84,28 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(1);
     expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
-      content: expect.stringContaining(
-        'New STEMMechanics workshop: [Redstone Music Challenge](https://example.test/workshops/redstone)',
-      ),
       embeds: [
         expect.objectContaining({
+          title: '📣 New STEMMechanics workshop: Redstone Music Challenge',
+          url: 'https://example.test/workshops/redstone',
           fields: expect.any(Array),
           image: {
             url: 'https://www.stemmechanics.com.au/media/download/redstone.png',
           },
         }),
       ],
+      heroImageUrl: 'https://www.stemmechanics.com.au/media/download/redstone.png',
     });
 
     currentWorkshop = workshop({ title: 'Updated Redstone Music Challenge' });
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
     expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
-      content: expect.stringContaining('workshop updated'),
+      embeds: [
+        expect.objectContaining({
+          title: expect.stringContaining('workshop updated'),
+        }),
+      ],
     });
 
     currentWorkshop = workshop({
@@ -112,7 +116,11 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(3);
     expect(sendChannelMessage.mock.calls[2]?.[1]).toMatchObject({
-      content: expect.stringContaining('workshop cancelled'),
+      embeds: [
+        expect.objectContaining({
+          title: expect.stringContaining('workshop cancelled'),
+        }),
+      ],
     });
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
@@ -131,10 +139,9 @@ describe('persistent workshop notifications', () => {
       'Australia/Brisbane',
     );
 
-    expect(message.content).toContain(
-      'New STEMMechanics workshop: [Redstone Music Challenge](https://example.test/workshops/redstone)',
-    );
     expect(message.embeds?.[0]).toMatchObject({
+      title: '📣 New STEMMechanics workshop: Redstone Music Challenge',
+      url: 'https://example.test/workshops/redstone',
       fields: expect.arrayContaining([
         {
           name: 'Registration',
@@ -143,7 +150,7 @@ describe('persistent workshop notifications', () => {
         },
       ]),
     });
-    expect(message.embeds?.[0]).not.toHaveProperty('title');
+    expect(message).not.toHaveProperty('content');
     expect(message.embeds?.[0]).toMatchObject({
       image: {
         url: 'https://www.stemmechanics.com.au/media/download/redstone.png',
@@ -255,7 +262,11 @@ describe('persistent workshop notifications', () => {
 
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
     expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
-      content: expect.stringContaining('workshop cancelled'),
+      embeds: [
+        expect.objectContaining({
+          title: expect.stringContaining('workshop cancelled'),
+        }),
+      ],
     });
   });
 });
