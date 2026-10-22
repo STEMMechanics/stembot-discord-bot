@@ -107,12 +107,10 @@ describe('counting-chain service', () => {
     expect(second.reply).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': {
-            expectedNumber: 3,
-            lastAuthorId: 'user-2',
-            lastMessageId: 'message-2',
-          },
+        game: {
+          expectedNumber: 3,
+          lastAuthorId: 'user-2',
+          lastMessageId: 'message-2',
         },
       },
     });
@@ -139,12 +137,10 @@ describe('counting-chain service', () => {
     );
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': {
-            expectedNumber: 1,
-            lastAuthorId: null,
-            lastMessageId: null,
-          },
+        game: {
+          expectedNumber: 1,
+          lastAuthorId: null,
+          lastMessageId: null,
         },
       },
     });
@@ -169,9 +165,7 @@ describe('counting-chain service', () => {
     expect(second.reply).toHaveBeenCalledOnce();
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': { expectedNumber: 1 },
-        },
+        game: { expectedNumber: 1 },
       },
     });
   });
@@ -226,9 +220,7 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('👍');
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': { expectedNumber: 3 },
-        },
+        game: { expectedNumber: 3 },
       },
     });
   });
@@ -249,9 +241,7 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('👍');
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': { expectedNumber: 3 },
-        },
+        game: { expectedNumber: 3 },
       },
     });
   });
@@ -293,11 +283,40 @@ describe('counting-chain service', () => {
 
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': { expectedNumber: 9 },
+        game: { expectedNumber: 9 },
+      },
+    });
+  });
+
+  it('treats an empty legacy game record as missing and writes the single-game shape', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      countingChain: {
+        version: 1,
+        games: { 'counting-channel': {} },
+        infoMessageId: 'info-message',
+      },
+    };
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(12),
+    };
+    const service = createService(state, recognizer);
+    const historyMessage = createHistoryMessage('user-1', 'history-message');
+    const historyProvider = vi.fn().mockResolvedValue([historyMessage]);
+
+    await service.initialize(historyProvider);
+
+    expect(historyProvider).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        infoMessageId: 'info-message',
+        game: {
+          expectedNumber: 13,
+          lastMessageId: 'history-message',
         },
       },
     });
+    expect(state.state.countingChain).not.toHaveProperty('games');
   });
 
   it.each([
@@ -325,12 +344,10 @@ describe('counting-chain service', () => {
     expect(failedMessage.reply).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': {
-            expectedNumber: 1,
-            highScore: 0,
-            lastRound: 0,
-          },
+        game: {
+          expectedNumber: 1,
+          highScore: 0,
+          lastRound: 0,
         },
       },
     });
@@ -346,9 +363,7 @@ describe('counting-chain service', () => {
     expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        games: {
-          'counting-channel': { expectedNumber: 1 },
-        },
+        game: { expectedNumber: 1 },
       },
     });
   });

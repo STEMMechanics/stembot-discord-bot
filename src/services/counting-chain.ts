@@ -69,7 +69,7 @@ type CountingChainGameState = CountingChainGameStatus;
 
 interface CountingChainState {
   version: 1;
-  games: Record<string, CountingChainGameState>;
+  game: CountingChainGameState | null;
   infoMessageId: string | null;
 }
 
@@ -154,12 +154,32 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     const rootState = await this.dependencies.state.load();
-    const state = readCountingChainState(rootState[STATE_KEY]);
-    if (state.games[channelId]) {
+    const rawCountingChainState = rootState[STATE_KEY];
+    const state = readCountingChainState(rawCountingChainState, channelId);
+    if (state.game) {
+      if (!hasCurrentGameState(rawCountingChainState)) {
+        rootState[STATE_KEY] = state;
+        await this.dependencies.state.save(rootState);
+      }
+      this.dependencies.logger.info(
+        {
+          channelId,
+          stateSource: hasCurrentGameState(rawCountingChainState) ? 'current' : 'legacy',
+        },
+        'Counting chain state already exists; skipping history recovery',
+      );
       return;
     }
 
+    this.dependencies.logger.info(
+      { channelId },
+      'Counting chain startup recovery checking recent Discord history',
+    );
     const history = await historyProvider();
+    this.dependencies.logger.info(
+      { channelId, historyCount: history.length },
+      'Counting chain Discord history fetched for startup recovery',
+    );
     const latestMessage = findLatestRelevantHistoryMessage(history);
     if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
       await saveInitialState(
@@ -191,7 +211,7 @@ export class PersistentCountingChainService implements CountingChainService {
         throw new Error('Counting chain history image could not be read');
       }
 
-      state.games[channelId] = {
+      state.game = {
         expectedNumber: recognizedNumber + 1,
         lastAuthorId: latestMessage.authorId,
         lastMessageId: latestMessage.id,
@@ -262,15 +282,15 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     const rootState = await this.dependencies.state.load();
-    const state = readCountingChainState(rootState[STATE_KEY]);
-    const game = state.games[message.channelId] ?? createInitialGameState(this.currentTime());
+    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    const game = state.game ?? createInitialGameState(this.currentTime());
     const passes =
       recognizedNumber === game.expectedNumber && message.authorId !== game.lastAuthorId;
 
     if (passes) {
       const now = this.currentTime();
       const highScore = Math.max(game.highScore, recognizedNumber);
-      state.games[message.channelId] = {
+      state.game = {
         expectedNumber: recognizedNumber + 1,
         lastAuthorId: message.authorId,
         lastMessageId: message.id,
@@ -291,7 +311,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const now = this.currentTime();
     const roundScore = Math.max(0, game.expectedNumber - 1);
     const highScore = Math.max(game.highScore, roundScore);
-    state.games[message.channelId] = createInitialGameState(now, {
+    state.game = createInitialGameState(now, {
       highScore,
       highScoreAt: roundScore > game.highScore ? now.toISOString() : game.highScoreAt,
       lastRound: roundScore,
@@ -363,8 +383,8 @@ export class PersistentCountingChainService implements CountingChainService {
 
     try {
       const rootState = await this.dependencies.state.load();
-      const state = readCountingChainState(rootState[STATE_KEY]);
-      const game = state.games[channelId] ?? createInitialGameState(this.currentTime());
+      const state = readCountingChainState(rootState[STATE_KEY], channelId);
+      const game = state.game ?? createInitialGameState(this.currentTime());
       const infoMessageId = await this.infoPublisher.update(game, state.infoMessageId ?? undefined);
       if (infoMessageId && infoMessageId !== state.infoMessageId) {
         state.infoMessageId = infoMessageId;
@@ -417,7 +437,7 @@ async function saveInitialState(
   now: Date,
   stateStore: StateStore<JsonState>,
 ): Promise<void> {
-  state.games[channelId] = createInitialGameState(now);
+  state.game = createInitialGameState(now);
   rootState[STATE_KEY] = state;
   await stateStore.save(rootState);
 }
@@ -454,56 +474,71 @@ function isCountingChainFailureMessage(message: CountingChainHistoryMessage): bo
   );
 }
 
-function readCountingChainState(value: unknown): CountingChainState {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.games)) {
-    return { version: 1, games: {}, infoMessageId: null };
+function readCountingChainState(value: unknown, channelId?: string): CountingChainState {
+  if (!isRecord(value) || value.version !== 1) {
+    return { version: 1, game: null, infoMessageId: null };
   }
 
-  const games: Record<string, CountingChainGameState> = {};
-  for (const [channelId, candidate] of Object.entries(value.games)) {
-    if (!isRecord(candidate)) {
-      continue;
-    }
-
-    const expectedNumber = candidate.expectedNumber;
-    const lastAuthorId = candidate.lastAuthorId;
-    const lastMessageId = candidate.lastMessageId;
-    const updatedAt = candidate.updatedAt;
-    const legacyScore =
-      typeof expectedNumber === 'number' && Number.isSafeInteger(expectedNumber)
-        ? Math.max(0, expectedNumber - 1)
-        : undefined;
-    const highScore = readNonNegativeInteger(candidate.highScore, legacyScore);
-    const lastRound = readNonNegativeInteger(candidate.lastRound, highScore);
-    const highScoreAt = readNullableString(candidate.highScoreAt);
-    const lastRoundAt = readNullableString(candidate.lastRoundAt);
-    const lastRoundReason = readNullableString(candidate.lastRoundReason);
-    if (
-      typeof expectedNumber === 'number' &&
-      Number.isSafeInteger(expectedNumber) &&
-      expectedNumber > 0 &&
-      (typeof lastAuthorId === 'string' || lastAuthorId === null) &&
-      (typeof lastMessageId === 'string' || lastMessageId === null) &&
-      typeof updatedAt === 'string'
-    ) {
-      games[channelId] = {
-        expectedNumber,
-        lastAuthorId,
-        lastMessageId,
-        updatedAt,
-        highScore,
-        highScoreAt,
-        lastRound,
-        lastRoundAt,
-        lastRoundReason,
-      };
-    }
-  }
+  const currentGame = readGameState(value.game);
+  const legacyGame =
+    !currentGame && isRecord(value.games)
+      ? readGameState(
+          channelId
+            ? value.games[channelId]
+            : Object.values(value.games).find((candidate) => isRecord(candidate)),
+        )
+      : undefined;
 
   return {
     version: 1,
-    games,
+    game: currentGame ?? legacyGame ?? null,
     infoMessageId: readNullableString(value.infoMessageId),
+  };
+}
+
+function hasCurrentGameState(value: unknown): boolean {
+  return isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'game');
+}
+
+function readGameState(value: unknown): CountingChainGameState | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const expectedNumber = value.expectedNumber;
+  const lastAuthorId = value.lastAuthorId;
+  const lastMessageId = value.lastMessageId;
+  const updatedAt = value.updatedAt;
+  const legacyScore =
+    typeof expectedNumber === 'number' && Number.isSafeInteger(expectedNumber)
+      ? Math.max(0, expectedNumber - 1)
+      : undefined;
+  const highScore = readNonNegativeInteger(value.highScore, legacyScore);
+  const lastRound = readNonNegativeInteger(value.lastRound, highScore);
+  const highScoreAt = readNullableString(value.highScoreAt);
+  const lastRoundAt = readNullableString(value.lastRoundAt);
+  const lastRoundReason = readNullableString(value.lastRoundReason);
+  if (
+    typeof expectedNumber !== 'number' ||
+    !Number.isSafeInteger(expectedNumber) ||
+    expectedNumber <= 0 ||
+    (typeof lastAuthorId !== 'string' && lastAuthorId !== null) ||
+    (typeof lastMessageId !== 'string' && lastMessageId !== null) ||
+    typeof updatedAt !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    expectedNumber,
+    lastAuthorId,
+    lastMessageId,
+    updatedAt,
+    highScore,
+    highScoreAt,
+    lastRound,
+    lastRoundAt,
+    lastRoundReason,
   };
 }
 

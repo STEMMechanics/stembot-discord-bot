@@ -199,7 +199,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has a short linked heading (`New:`, `Updated:`, `Cancelled:`, `Starts in 24h:`, or `Starts in 1h:`), the available workshop description, a longer labelled details section, and the HTTPS hero image as a normal Discord attachment. Registration appears on its own line with a short varied prompt; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, and the counting-chain state for each configured channel. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MS` before delivery; a later feed poll can update the pending content during that window. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, and the counting-chain state for the configured channel. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MS` before delivery; a later feed poll can update the pending content during that window. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:
@@ -209,18 +209,16 @@ when editing it offline:
   "countingChain": {
     "version": 1,
     "infoMessageId": "DISCORD_INFO_MESSAGE_ID",
-    "games": {
-      "COUNTING_CHAIN_CHANNEL_ID": {
-        "expectedNumber": 67,
-        "lastAuthorId": "DISCORD_USER_ID",
-        "lastMessageId": "DISCORD_MESSAGE_ID",
-        "updatedAt": "2026-10-23T00:00:00.000Z",
-        "highScore": 66,
-        "highScoreAt": "2026-10-22T23:55:00.000Z",
-        "lastRound": 66,
-        "lastRoundAt": "2026-10-22T23:56:00.000Z",
-        "lastRoundReason": "same-user"
-      }
+    "game": {
+      "expectedNumber": 67,
+      "lastAuthorId": "DISCORD_USER_ID",
+      "lastMessageId": "DISCORD_MESSAGE_ID",
+      "updatedAt": "2026-10-23T00:00:00.000Z",
+      "highScore": 66,
+      "highScoreAt": "2026-10-22T23:55:00.000Z",
+      "lastRound": 66,
+      "lastRoundAt": "2026-10-22T23:56:00.000Z",
+      "lastRoundReason": "same-user"
     }
   }
 }
@@ -230,7 +228,8 @@ when editing it offline:
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
 display note. The bot accepts older records without the score fields and fills
-them in on the next state write.
+them in on the next state write. It also accepts the previous channel-keyed
+`games` shape and rewrites it to the single `game` shape at startup.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 
