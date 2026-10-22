@@ -395,11 +395,12 @@ function formatWorkshopCard(
   ];
 
   const description = formatWorkshopDescription(workshop.description);
+  const imageUrl = formatWorkshopImageUrl(workshop.imageUrl);
   const embed: APIEmbed = {
     color,
     fields,
-    footer: { text: 'STEMMechanics Workshops' },
     ...(description ? { description: truncateEmbedText(description, 1800) } : {}),
+    ...(imageUrl ? { image: { url: imageUrl } } : {}),
   };
 
   return {
@@ -422,6 +423,22 @@ function formatWorkshopDescription(description: string | undefined): string {
     .replace(/([.!?,;:])(?=[A-Z])/g, '$1 ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function formatWorkshopImageUrl(imageUrl: string | undefined): string | undefined {
+  if (!imageUrl?.startsWith('https://')) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(imageUrl);
+    if (parsed.search === '?md') {
+      parsed.search = '';
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function formatWorkshopDateRange(workshop: WorkshopRecord, timeZone: string): string {

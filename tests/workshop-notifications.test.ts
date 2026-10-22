@@ -47,7 +47,7 @@ function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
     startsAt: new Date('2026-10-24T06:00:00.000Z'),
     endsAt: new Date('2026-10-24T07:00:00.000Z'),
     url: 'https://example.test/workshops/redstone',
-    imageUrl: 'https://example.test/workshops/redstone.png',
+    imageUrl: 'https://www.stemmechanics.com.au/media/download/redstone.png?md',
     location: 'STEMCraft',
     status: 'open',
     statusCode: 'open',
@@ -90,11 +90,11 @@ describe('persistent workshop notifications', () => {
       embeds: [
         expect.objectContaining({
           fields: expect.any(Array),
+          image: {
+            url: 'https://www.stemmechanics.com.au/media/download/redstone.png',
+          },
         }),
       ],
-    });
-    expect(sendChannelMessage.mock.calls[0]?.[1]).not.toMatchObject({
-      embeds: [expect.objectContaining({ image: expect.anything() })],
     });
 
     currentWorkshop = workshop({ title: 'Updated Redstone Music Challenge' });
@@ -144,7 +144,12 @@ describe('persistent workshop notifications', () => {
       ]),
     });
     expect(message.embeds?.[0]).not.toHaveProperty('title');
-    expect(message.embeds?.[0]).not.toHaveProperty('image');
+    expect(message.embeds?.[0]).toMatchObject({
+      image: {
+        url: 'https://www.stemmechanics.com.au/media/download/redstone.png',
+      },
+    });
+    expect(message.embeds?.[0]).not.toHaveProperty('footer');
     expect(message.embeds?.[0]?.fields).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'Status' })]),
     );
