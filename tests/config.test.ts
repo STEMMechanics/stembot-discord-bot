@@ -92,6 +92,29 @@ describe('loadConfig', () => {
     expect(config.stemcraft.token).toBe('status-token');
   });
 
+  it('uses announcement delay minutes, including zero for immediate testing', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES: '0',
+      WORKSHOP_ANNOUNCEMENT_DELAY_MS: '1800000',
+    });
+
+    expect(config.workshops.announcementDelayMs).toBe(0);
+  });
+
+  it('keeps accepting the legacy announcement delay milliseconds setting', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      WORKSHOP_ANNOUNCEMENT_DELAY_MS: '60000',
+    });
+
+    expect(config.workshops.announcementDelayMs).toBe(60000);
+  });
+
   it('rejects an invalid workshop timezone', () => {
     expect(() =>
       loadConfig({

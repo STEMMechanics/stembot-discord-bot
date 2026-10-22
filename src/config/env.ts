@@ -47,6 +47,20 @@ function positiveMilliseconds(defaultValue: number, maximum: number) {
   );
 }
 
+function optionalPositiveMilliseconds(maximum: number) {
+  return z.preprocess(
+    (value) => (value === undefined || value === '' ? undefined : value),
+    z.coerce.number().int().positive().max(maximum).optional(),
+  );
+}
+
+function optionalNonNegativeInteger(maximum: number) {
+  return z.preprocess(
+    (value) => (value === undefined || value === '' ? undefined : value),
+    z.coerce.number().int().min(0).max(maximum).optional(),
+  );
+}
+
 function positiveInteger(defaultValue: number, maximum: number) {
   return z.preprocess(
     (value) => (value === undefined || value === '' ? defaultValue : value),
@@ -78,7 +92,8 @@ const environmentSchema = z.object({
   OPENAI_TIMEOUT: positiveInteger(180, 600),
   WORKSHOP_TIME_ZONE: z.string().trim().min(1).default('Australia/Brisbane'),
   WORKSHOP_ANNOUNCEMENTS_ENABLED: booleanFromEnvironment(true),
-  WORKSHOP_ANNOUNCEMENT_DELAY_MS: positiveMilliseconds(1800000, 86400000),
+  WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES: optionalNonNegativeInteger(1440),
+  WORKSHOP_ANNOUNCEMENT_DELAY_MS: optionalPositiveMilliseconds(86400000),
   WORKSHOP_REMINDERS_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_24H_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_1H_ENABLED: booleanFromEnvironment(true),
@@ -158,6 +173,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const values = result.data;
+  const announcementDelayMs =
+    values.WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES !== undefined
+      ? values.WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES * 60_000
+      : (values.WORKSHOP_ANNOUNCEMENT_DELAY_MS ?? 1_800_000);
 
   if (values.COUNTING_CHAIN_ENABLED && !values.COUNTING_CHAIN_CHANNEL_ID) {
     throw new Error('COUNTING_CHAIN_CHANNEL_ID is required when COUNTING_CHAIN_ENABLED is true');
@@ -219,7 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       timeZone: values.WORKSHOP_TIME_ZONE,
       pollIntervalMs: values.WORKSHOP_POLL_INTERVAL_MS,
       announcementsEnabled: values.WORKSHOP_ANNOUNCEMENTS_ENABLED,
-      announcementDelayMs: values.WORKSHOP_ANNOUNCEMENT_DELAY_MS,
+      announcementDelayMs,
       remindersEnabled: values.WORKSHOP_REMINDERS_ENABLED,
       reminder24HoursEnabled: values.WORKSHOP_REMINDER_24H_ENABLED,
       reminder1HourEnabled: values.WORKSHOP_REMINDER_1H_ENABLED,
