@@ -210,14 +210,12 @@ describe('Discord commands', () => {
     expect(calls).toEqual(['defer', 'fetch', 'edit']);
   });
 
-  it('defers /ping before editing its response', async () => {
-    const deferReply = vi.fn().mockResolvedValue(undefined);
-    const editReply = vi.fn().mockResolvedValue(undefined);
-    const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
+  it('replies immediately to /ping', async () => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { reply } as unknown as ChatInputCommandInteraction;
 
     await pingCommand.execute(interaction, { getGatewayPing: () => 263 });
 
-    expect(deferReply).toHaveBeenCalledOnce();
-    expect(editReply).toHaveBeenCalledWith({ content: 'Pong! Gateway latency: 263ms' });
+    expect(reply).toHaveBeenCalledWith({ content: 'Pong! Gateway latency: 263ms' });
   });
 });

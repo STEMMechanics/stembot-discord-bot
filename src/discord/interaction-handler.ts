@@ -5,6 +5,9 @@ import type { AppLogger } from '../logging/logger.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import { commands, type CommandContext } from './commands.js';
 
+const INTERACTION_DEDUPLICATION_WINDOW_MS = 10 * 60 * 1000;
+const seenInteractionIds = new Map<string, number>();
+
 export interface InteractionHandlerContext extends CommandContext {
   logger: AppLogger;
   website?: WebsiteIntegration;
@@ -17,6 +20,19 @@ export async function handleInteraction(
   context: InteractionHandlerContext,
 ): Promise<void> {
   if (!interaction.isChatInputCommand()) {
+    return;
+  }
+
+  const interactionAgeMs = Math.max(0, Date.now() - interaction.createdTimestamp);
+  if (!claimInteraction(interaction.id)) {
+    context.logger.warn(
+      {
+        commandName: interaction.commandName,
+        interactionId: interaction.id,
+        interactionAgeMs,
+      },
+      'Ignoring duplicate Discord interaction delivery',
+    );
     return;
   }
 
@@ -41,6 +57,19 @@ export async function handleInteraction(
   try {
     await command.execute(interaction, commandContext);
   } catch (error: unknown) {
+    if (isUnknownInteractionError(error)) {
+      context.logger.warn(
+        {
+          commandName: interaction.commandName,
+          interactionId: interaction.id,
+          interactionAgeMs: Math.max(0, Date.now() - interaction.createdTimestamp),
+          err: error,
+        },
+        'Discord interaction expired or was acknowledged by another bot process',
+      );
+      return;
+    }
+
     context.logger.error(
       { commandName: interaction.commandName, err: error },
       'Discord command failed',
@@ -66,4 +95,28 @@ export async function handleInteraction(
       );
     }
   }
+}
+
+function claimInteraction(interactionId: string): boolean {
+  const now = Date.now();
+  for (const [seenId, seenAt] of seenInteractionIds) {
+    if (now - seenAt > INTERACTION_DEDUPLICATION_WINDOW_MS) {
+      seenInteractionIds.delete(seenId);
+    }
+  }
+
+  if (seenInteractionIds.has(interactionId)) {
+    return false;
+  }
+
+  seenInteractionIds.set(interactionId, now);
+  return true;
+}
+
+function isUnknownInteractionError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+
+  return error.code === 10062;
 }

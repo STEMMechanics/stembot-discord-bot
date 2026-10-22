@@ -49,11 +49,13 @@ Synchronize these application commands with `npm run sync:commands`:
 
 ### Discord command synchronization
 
-`npm run sync:commands` performs a complete Discord `PUT` replacement with the
-five supported commands in the configured guild scope. It clears the global
-command set and replaces the target guild's command set, so this single-server
-deployment has one authoritative copy of each command. Obsolete commands,
-including old `/joke`, `/embed` and `/countingchain` commands, are removed.
+`npm run sync:commands` performs a complete Discord replacement with the five
+supported commands in the configured guild scope. It first removes existing
+global command registrations for this application, then bulk-replaces the
+global set with an empty list and the target guild set with the supported
+commands. This single-server deployment therefore has one authoritative copy
+of each command. Obsolete commands, including old `/joke`, `/embed` and
+`/countingchain` commands, are removed.
 
 The script first verifies that the token belongs to `DISCORD_CLIENT_ID`. It
 only uses that application ID and the explicitly configured guild ID, so it
@@ -63,6 +65,11 @@ startup. If the synchronization fails, the bot does not start with a stale
 command set.
 The explicit command remains available for a one-off reconciliation without a
 container restart.
+
+If Discord still shows two copies after a synchronization, verify that only
+one STEMBot container is running with the token. Two gateway processes using
+the same application can race to acknowledge one interaction; the losing
+process receives Discord error 10062 (`Unknown interaction`).
 
 For a local or administration workstation, set the same credentials used by
 the deployment and run:

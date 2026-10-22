@@ -41,8 +41,7 @@ export const pingCommand: DiscordCommand = {
     .setDescription('Check whether STEMBot is connected to Discord.'),
 
   async execute(interaction, context): Promise<void> {
-    await interaction.deferReply();
-    await interaction.editReply({ content: getPingResponse(context.getGatewayPing()) });
+    await interaction.reply({ content: getPingResponse(context.getGatewayPing()) });
   },
 };
 

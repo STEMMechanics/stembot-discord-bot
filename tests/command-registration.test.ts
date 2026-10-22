@@ -28,8 +28,13 @@ describe('Discord command synchronization', () => {
     const clientId = '123456789012345678';
     const guildId = '987654321098765432';
     const definitions = getCommandDefinitions();
+    const get = vi.fn().mockResolvedValue([
+      { id: 'global-ping', name: 'ping' },
+      { id: 'global-joke', name: 'joke' },
+    ]);
+    const remove = vi.fn().mockResolvedValue({});
     const put = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce(definitions);
-    const rest = { put } as unknown as Pick<REST, 'put'>;
+    const rest = { get, put, delete: remove } as unknown as Pick<REST, 'get' | 'put' | 'delete'>;
 
     const results = await replaceCommandScopes(rest, clientId, guildId, [], definitions);
 
@@ -38,6 +43,10 @@ describe('Discord command synchronization', () => {
       { scope: 'guild', commandCount: 5 },
     ]);
     expect(put).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledWith(Routes.applicationCommands(clientId));
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenNthCalledWith(1, Routes.applicationCommand(clientId, 'global-ping'));
+    expect(remove).toHaveBeenNthCalledWith(2, Routes.applicationCommand(clientId, 'global-joke'));
     expect(put).toHaveBeenNthCalledWith(1, Routes.applicationCommands(clientId), {
       body: [],
     });

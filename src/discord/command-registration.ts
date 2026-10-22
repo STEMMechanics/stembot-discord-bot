@@ -16,6 +16,10 @@ export interface CommandRegistrationResult {
   commandCount: number;
 }
 
+interface ApplicationCommandIdentity {
+  id: string;
+}
+
 /**
  * Returns the application command scopes that this deployment is allowed to replace.
  *
@@ -48,7 +52,7 @@ export function getCommandRegistrationTargets(
  * single target guild.
  */
 export async function replaceCommandScopes(
-  rest: Pick<REST, 'put'>,
+  rest: Pick<REST, 'get' | 'put' | 'delete'>,
   clientId: string,
   guildId: string,
   globalCommandDefinitions: RESTPostAPIChatInputApplicationCommandsJSONBody[],
@@ -57,6 +61,10 @@ export async function replaceCommandScopes(
   const results: CommandRegistrationResult[] = [];
 
   for (const target of getCommandRegistrationTargets(clientId, guildId)) {
+    if (target.scope === 'global') {
+      await deleteExistingGlobalCommands(rest, clientId);
+    }
+
     const definitions =
       target.scope === 'guild' ? guildCommandDefinitions : globalCommandDefinitions;
     const response = await rest.put(target.route, {
@@ -67,4 +75,37 @@ export async function replaceCommandScopes(
   }
 
   return results;
+}
+
+/**
+ * Removes global commands individually before the bulk replacement. The bulk
+ * PUT is authoritative, but the explicit deletes also clear older global
+ * registrations promptly when a deployment changes from global-plus-guild to
+ * guild-only commands.
+ */
+async function deleteExistingGlobalCommands(
+  rest: Pick<REST, 'get' | 'delete'>,
+  clientId: string,
+): Promise<void> {
+  const route = Routes.applicationCommands(clientId);
+  const response = await rest.get(route);
+
+  if (!Array.isArray(response)) {
+    return;
+  }
+
+  for (const candidate of response) {
+    const command = asApplicationCommandIdentity(candidate);
+    if (command) {
+      await rest.delete(Routes.applicationCommand(clientId, command.id));
+    }
+  }
+}
+
+function asApplicationCommandIdentity(value: unknown): ApplicationCommandIdentity | undefined {
+  if (typeof value !== 'object' || value === null || !('id' in value)) {
+    return undefined;
+  }
+
+  return typeof value.id === 'string' ? { id: value.id } : undefined;
 }

@@ -83,8 +83,9 @@ production notification channels.
 ## Discord command synchronization
 
 The service synchronizes commands on every process startup, before the Discord
-gateway connection is opened. It clears the global command set and replaces the
-single configured guild command set with `/ping`, `/workshops`, `/schedule`,
+gateway connection is opened. It removes existing global command registrations
+for this application, clears the global command set, and replaces the single
+configured guild command set with `/ping`, `/workshops`, `/schedule`,
 `/minecraft` and `/players`.
 
 If synchronization fails, the process exits before the bot connects. The
@@ -110,8 +111,20 @@ directory containing the deployment `docker-compose.yml` and `.env`:
 This executes the compiled command synchronizer inside the running container
 using its existing environment.
 
-Guild commands should update quickly; removal of old global registrations can
-take time to propagate through Discord.
+Guild commands should update quickly. Restart the Discord client or refresh the
+server command picker after synchronization if it still displays an old cached
+copy.
+
+If commands continue to fail with `Unknown interaction` (error 10062), check
+for more than one active STEMBot process before changing code or credentials:
+
+    sudo docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+
+There must be one running container using the STEMBot token. Two gateway
+processes can receive the same interaction; one acknowledges it and the other
+gets 10062. The application now logs the interaction ID and age for this case,
+and ignores duplicate deliveries within one process, but it cannot stop a
+second container that is running outside the deployment.
 
 If TrueNAS manages the application without a Compose file in the current
 directory, use the running container directly:
