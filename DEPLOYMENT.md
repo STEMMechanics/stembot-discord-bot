@@ -75,6 +75,13 @@ mounted directory must permit temporary-file creation and rename by the
 container user. The state file contains workshop IDs, fingerprints, Discord
 message IDs and reminder markers; it does not contain Discord credentials.
 
+The production Compose file supplies explicit DNS resolvers by default:
+`1.1.1.1` and `9.9.9.9`. Override them with `STEMBOT_DNS_PRIMARY` and
+`STEMBOT_DNS_SECONDARY` when the TrueNAS network provides its own reachable
+resolvers. If the application is managed by a TrueNAS app YAML instead of this
+Compose file, add the equivalent `dns` list to the app configuration. A
+working container resolver is required before Node.js can connect to Discord.
+
 After startup, confirm the logs show successful command synchronization, a
 Discord connection and workshop synchronization. Test /ping, /workshops,
 /schedule, /minecraft and /players in a staging guild before enabling

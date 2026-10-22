@@ -32,7 +32,9 @@ export interface DiscordCommand {
 }
 
 export function getPingResponse(gatewayPing: number): string {
-  return `Pong! Gateway latency: ${gatewayPing}ms`;
+  const latency =
+    Number.isFinite(gatewayPing) && gatewayPing >= 0 ? `${gatewayPing}ms` : 'not available yet';
+  return `Pong! Gateway latency: ${latency}`;
 }
 
 export const pingCommand: DiscordCommand = {

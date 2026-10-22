@@ -8,6 +8,10 @@ describe('/ping', () => {
     expect(getPingResponse(42)).toBe('Pong! Gateway latency: 42ms');
   });
 
+  it('does not expose Discord.js sentinel values as latency', () => {
+    expect(getPingResponse(-1)).toBe('Pong! Gateway latency: not available yet');
+  });
+
   it('replies immediately to the Discord interaction', async () => {
     const reply = vi.fn().mockResolvedValue(undefined);
     const interaction = { reply } as unknown as ChatInputCommandInteraction;

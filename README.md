@@ -177,7 +177,7 @@ an immutable SHA or release tag for controlled rollouts, and run `docker login
 ghcr.io` first if the package is private.
 Use a GitHub token with `read:packages` permission for a private package.
 
-The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. Give the dataset to the container user with permissions that allow the atomic state-file rename.
+The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. It uses explicit configurable DNS resolvers by default (`1.1.1.1` and `9.9.9.9`); set `STEMBOT_DNS_PRIMARY` and `STEMBOT_DNS_SECONDARY` when the deployment network requires different resolvers. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 
 The bot synchronizes commands automatically before connecting to Discord. A
 manual synchronization from the checked-out repository is still available:
@@ -202,6 +202,10 @@ The Node.js runtime prefers IPv4 for outbound connections. This avoids a
 dual-stack TrueNAS network waiting for an unavailable IPv6 route before
 falling back to IPv4; that delay can exceed Discord's interaction response
 deadline and produce error 10062 (`Unknown interaction`).
+
+The Docker resolver configuration is also required when the TrueNAS host's
+default container DNS is slow or unreachable. The Node.js setting cannot repair
+DNS resolution by itself.
 
 If TrueNAS manages the application without a Compose file in the current
 directory, find the running container and invoke the compiled entrypoint

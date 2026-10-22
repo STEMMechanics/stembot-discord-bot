@@ -8,6 +8,9 @@ services:
     environment:
       NODE_ENV: production
       STATE_PATH: /app/data/state.json
+    dns:
+      - ${STEMBOT_DNS_PRIMARY:-1.1.1.1}
+      - ${STEMBOT_DNS_SECONDARY:-9.9.9.9}
     init: true
     read_only: true
     restart: unless-stopped
