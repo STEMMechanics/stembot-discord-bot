@@ -107,6 +107,23 @@ startup and container restart paths do not register commands automatically.
 4. Check the command's structured log output. Guild commands should update
    quickly; global command propagation can take time.
 
+If TrueNAS manages the application without a Compose file in the current
+directory, use the running container directly:
+
+    sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+    sudo docker exec <container-name> node /app/dist/register-commands.js
+
+Replace `<container-name>` with the name shown by `docker ps` (the repository
+Compose file uses `stembot`). Invoke the JavaScript file through `node`; do
+not execute `/app/dist/register-commands.js` as a standalone file. This direct
+command uses the running container's existing environment and does not need a
+Compose configuration file.
+
+The message `no configuration file provided: not found` means that
+`docker compose` was run outside the directory containing the Compose file.
+Either change to that directory, pass `-f /path/to/docker-compose.yml` and
+`--env-file /path/to/.env`, or use the direct `docker exec` form above.
+
 If more than one guild has legacy commands, run the same command once for
 each approved guild by changing `DISCORD_GUILD_ID` in `.env` and recreating the
 service environment if necessary. The synchronizer never enumerates or

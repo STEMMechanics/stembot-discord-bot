@@ -189,6 +189,19 @@ Set `DISCORD_GUILD_ID` in the deployment `.env` first if the target guild also
 needs to be cleaned up. This command does not restart the container and is not
 part of the container startup path.
 
+If TrueNAS manages the application without a Compose file in the current
+directory, find the running container and invoke the compiled entrypoint
+directly:
+
+```sh
+sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+sudo docker exec <container-name> node /app/dist/register-commands.js
+```
+
+The JavaScript file must be passed to `node`; executing it directly can result
+in `permission denied`. The error `no configuration file provided: not found`
+from `docker compose` means the command was run outside the Compose project.
+
 For local image builds, use `docker-compose.dev.yml` with the production file:
 
 ```sh
