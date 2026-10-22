@@ -57,8 +57,12 @@ that are absent from the supported set, including old `/joke`, `/embed` and
 
 The script first verifies that the token belongs to `DISCORD_CLIENT_ID`. It
 only uses that application ID and the explicitly configured guild ID, so it
-cannot remove commands belonging to another Discord application. It is an
-explicit deployment operation and is never run when the bot starts or restarts.
+cannot remove commands belonging to another Discord application. The same
+replacement also runs automatically before the bot connects on every process
+startup. If the synchronization fails, the bot does not start with a stale
+command set.
+The explicit command remains available for a one-off reconciliation without a
+container restart.
 
 For a local or administration workstation, set the same credentials used by
 the deployment and run:
@@ -90,12 +94,12 @@ The Docker image uses Node.js 24. Keep local development on the same major versi
 ```sh
 cp .env.example .env
 npm ci
-npm run sync:commands
 npm run dev
 ```
 
 Set `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` in `.env`. Set `DISCORD_GUILD_ID`
 when the target guild must be synchronized as well as the global command set.
+The normal `npm run dev` startup synchronizes commands automatically.
 
 Run the checks with:
 
@@ -111,31 +115,31 @@ npm run validate
 
 ## Configuration
 
-| Variable                                    | Required | Purpose                                                                               |
-| ------------------------------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                            |
-| `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                               |
-| `DISCORD_GUILD_ID`                          | No       | Target guild to synchronize alongside global commands during explicit command sync.   |
-| `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                         |
-| `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                          |
-| `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.         |
-| `STEMCRAFT_STATUS_TOKEN`                    | No       | Optional bearer token for a protected status endpoint.                                |
-| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No       | Status request timeout; defaults to 5 seconds.                                        |
-| `WORKSHOP_TIME_ZONE`                        | No       | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`. |
-| `WORKSHOP_POLL_INTERVAL_MS`                 | No       | Feed polling interval; defaults to 5 minutes.                                         |
-| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No       | Enable new/update/cancellation announcements; defaults to `true`.                     |
-| `WORKSHOP_REMINDERS_ENABLED`                | No       | Enable workshop reminders; defaults to `true`.                                        |
-| `WORKSHOP_REMINDER_24H_ENABLED`             | No       | Enable the 24-hour reminder; defaults to `true`.                                      |
-| `WORKSHOP_REMINDER_1H_ENABLED`              | No       | Enable the 1-hour reminder; defaults to `true`.                                       |
-| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No       | Announce all feed items on the first sync; defaults to `false` to avoid startup spam. |
-| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No       | Channel for workshop lifecycle announcements.                                         |
-| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No       | Channel for 24-hour and 1-hour reminders.                                             |
-| `STREAMING_NOTIFICATIONS_ENABLED`           | No       | Reserved setting for the streaming workflow; defaults to `false`.                     |
-| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No       | Reserved streaming notification channel.                                              |
-| `STATE_PATH`                                | No       | Persistent JSON state path; defaults to `./data/state.json`.                          |
-| `SHUTDOWN_TIMEOUT_MS`                       | No       | Graceful shutdown deadline; defaults to 30 seconds.                                   |
-| `NODE_ENV`                                  | No       | `development`, `test`, or `production`; defaults to `production`.                     |
-| `LOG_LEVEL`                                 | No       | Pino level; defaults to `info`.                                                       |
+| Variable                                    | Required | Purpose                                                                                    |
+| ------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                                 |
+| `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                                    |
+| `DISCORD_GUILD_ID`                          | No       | Target guild to synchronize alongside global commands at startup and during explicit sync. |
+| `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                              |
+| `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                               |
+| `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.              |
+| `STEMCRAFT_STATUS_TOKEN`                    | No       | Optional bearer token for a protected status endpoint.                                     |
+| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No       | Status request timeout; defaults to 5 seconds.                                             |
+| `WORKSHOP_TIME_ZONE`                        | No       | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.      |
+| `WORKSHOP_POLL_INTERVAL_MS`                 | No       | Feed polling interval; defaults to 5 minutes.                                              |
+| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No       | Enable new/update/cancellation announcements; defaults to `true`.                          |
+| `WORKSHOP_REMINDERS_ENABLED`                | No       | Enable workshop reminders; defaults to `true`.                                             |
+| `WORKSHOP_REMINDER_24H_ENABLED`             | No       | Enable the 24-hour reminder; defaults to `true`.                                           |
+| `WORKSHOP_REMINDER_1H_ENABLED`              | No       | Enable the 1-hour reminder; defaults to `true`.                                            |
+| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No       | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.      |
+| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No       | Channel for workshop lifecycle announcements.                                              |
+| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No       | Channel for 24-hour and 1-hour reminders.                                                  |
+| `STREAMING_NOTIFICATIONS_ENABLED`           | No       | Reserved setting for the streaming workflow; defaults to `false`.                          |
+| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No       | Reserved streaming notification channel.                                                   |
+| `STATE_PATH`                                | No       | Persistent JSON state path; defaults to `./data/state.json`.                               |
+| `SHUTDOWN_TIMEOUT_MS`                       | No       | Graceful shutdown deadline; defaults to 30 seconds.                                        |
+| `NODE_ENV`                                  | No       | `development`, `test`, or `production`; defaults to `production`.                          |
+| `LOG_LEVEL`                                 | No       | Pino level; defaults to `info`.                                                            |
 
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -170,8 +174,8 @@ Use a GitHub token with `read:packages` permission for a private package.
 
 The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 
-Run command synchronization from the checked-out repository with the same
-`.env` before using the production bot:
+The bot synchronizes commands automatically before connecting to Discord. A
+manual synchronization from the checked-out repository is still available:
 
 ```sh
 npm run sync:commands
@@ -186,8 +190,8 @@ docker compose exec -T stembot node dist/register-commands.js
 ```
 
 Set `DISCORD_GUILD_ID` in the deployment `.env` first if the target guild also
-needs to be cleaned up. This command does not restart the container and is not
-part of the container startup path.
+needs to be cleaned up. This command does not restart the container; the same
+operation also runs automatically on the next container startup.
 
 If TrueNAS manages the application without a Compose file in the current
 directory, find the running container and invoke the compiled entrypoint

@@ -4,6 +4,7 @@ import { createStemCraftIntegration, type StemCraftIntegration } from './integra
 import { createWebsiteIntegration, type WebsiteIntegration } from './integrations/website.js';
 import { IntervalJobScheduler, type JobScheduler } from './jobs/scheduler.js';
 import type { AppLogger } from './logging/logger.js';
+import { registerCommands } from './register-commands.js';
 import {
   createWorkshopNotificationService,
   type WorkshopNotificationService,
@@ -82,6 +83,7 @@ export function createApplication(
       await state.load();
 
       try {
+        await registerCommands(config, logger);
         await discord.start();
         scheduler.start();
         started = true;

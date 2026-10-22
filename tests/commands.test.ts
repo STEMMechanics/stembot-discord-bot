@@ -8,6 +8,7 @@ import {
   getCommandDefinitions,
   getUpcomingWorkshops,
   isMinecraftWorkshop,
+  minecraftCommand,
   playersCommand,
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
@@ -161,8 +162,9 @@ describe('Discord commands', () => {
   });
 
   it('makes /players available without a permission check', async () => {
-    const reply = vi.fn().mockResolvedValue(undefined);
-    const interaction = { reply } as unknown as ChatInputCommandInteraction;
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
     const getOnlinePlayers = vi.fn().mockResolvedValue([{ username: 'Alex' }]);
 
     await playersCommand.execute(interaction, {
@@ -173,9 +175,37 @@ describe('Discord commands', () => {
       },
     });
 
-    expect(reply).toHaveBeenCalledWith({
+    expect(deferReply).toHaveBeenCalledOnce();
+    expect(editReply).toHaveBeenCalledWith({
       content: 'Online Minecraft players:\n• Alex',
       allowedMentions: { parse: [] },
     });
+  });
+
+  it('defers external status work before editing the interaction response', async () => {
+    const calls: string[] = [];
+    const interaction = {
+      deferReply: vi.fn().mockImplementation(async () => {
+        calls.push('defer');
+      }),
+      editReply: vi.fn().mockImplementation(async () => {
+        calls.push('edit');
+      }),
+    } as unknown as ChatInputCommandInteraction;
+
+    const getServerStatus = vi.fn().mockImplementation(async () => {
+      calls.push('fetch');
+      return { online: true, playerCount: 0, maxPlayers: 50 };
+    });
+
+    await minecraftCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      stemcraft: {
+        getServerStatus,
+        getOnlinePlayers: vi.fn(),
+      },
+    });
+
+    expect(calls).toEqual(['defer', 'fetch', 'edit']);
   });
 });

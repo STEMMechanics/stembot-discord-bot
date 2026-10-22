@@ -51,6 +51,7 @@ export const workshopsCommand: DiscordCommand = {
     .setDescription('List upcoming STEMMechanics workshops.'),
 
   async execute(interaction, context): Promise<void> {
+    await interaction.deferReply();
     const website = requireWebsite(context);
     const workshops = await website.getWorkshops();
     const content = formatWorkshopList(
@@ -58,7 +59,7 @@ export const workshopsCommand: DiscordCommand = {
       context.timeZone ?? 'Australia/Brisbane',
       'Upcoming STEMMechanics workshops',
     );
-    await interaction.reply({ content, allowedMentions: { parse: [] } });
+    await interaction.editReply({ content, allowedMentions: { parse: [] } });
   },
 };
 
@@ -68,6 +69,7 @@ export const scheduleCommand: DiscordCommand = {
     .setDescription('List upcoming Minecraft workshops.'),
 
   async execute(interaction, context): Promise<void> {
+    await interaction.deferReply();
     const website = requireWebsite(context);
     const workshops = await website.getWorkshops();
     const minecraftWorkshops = getUpcomingWorkshops(workshops, currentTime(context)).filter(
@@ -78,7 +80,7 @@ export const scheduleCommand: DiscordCommand = {
       context.timeZone ?? 'Australia/Brisbane',
       'Upcoming Minecraft workshops',
     );
-    await interaction.reply({ content, allowedMentions: { parse: [] } });
+    await interaction.editReply({ content, allowedMentions: { parse: [] } });
   },
 };
 
@@ -88,9 +90,10 @@ export const minecraftCommand: DiscordCommand = {
     .setDescription('Show the STEMCraft server status and player count.'),
 
   async execute(interaction, context): Promise<void> {
+    await interaction.deferReply();
     const stemcraft = requireStemCraft(context);
     const status = await stemcraft.getServerStatus();
-    await interaction.reply({
+    await interaction.editReply({
       content: formatMinecraftStatus(status),
       allowedMentions: { parse: [] },
     });
@@ -104,14 +107,18 @@ export const playersCommand: DiscordCommand = {
     .setDescription('List online STEMCraft usernames.'),
 
   async execute(interaction, context): Promise<void> {
+    await interaction.deferReply();
     const stemcraft = requireStemCraft(context);
 
     try {
       const players = await stemcraft.getOnlinePlayers();
-      await interaction.reply({ content: formatPlayers(players), allowedMentions: { parse: [] } });
+      await interaction.editReply({
+        content: formatPlayers(players),
+        allowedMentions: { parse: [] },
+      });
     } catch (error: unknown) {
       if (error instanceof PlayerListUnavailableError) {
-        await interaction.reply({
+        await interaction.editReply({
           content: 'Online Minecraft usernames are not available from STEMCraft right now.',
           allowedMentions: { parse: [] },
         });

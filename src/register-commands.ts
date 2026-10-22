@@ -2,10 +2,10 @@ import { REST, Routes } from 'discord.js';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { loadConfig } from './config/env.js';
+import { loadConfig, type AppConfig } from './config/env.js';
 import { replaceCommandScopes } from './discord/command-registration.js';
 import { getCommandDefinitions } from './discord/commands.js';
-import { createLogger } from './logging/logger.js';
+import { createLogger, type AppLogger } from './logging/logger.js';
 
 interface CurrentApplicationResponse {
   id?: string;
@@ -15,12 +15,12 @@ interface CurrentApplicationResponse {
  * Replaces the supported command set in the configured Discord application.
  *
  * Global commands are always replaced. When DISCORD_GUILD_ID is configured,
- * that guild's command set is replaced as well. This is deliberately an
- * explicit operation and is not called by the normal bot startup path.
+ * that guild's command set is replaced as well.
  */
-export async function registerCommands(): Promise<void> {
-  const config = loadConfig();
-  const logger = createLogger(config);
+export async function registerCommands(
+  config: AppConfig = loadConfig(),
+  logger: AppLogger = createLogger(config),
+): Promise<void> {
   const rest = new REST({ version: '10' }).setToken(config.discord.token);
   const commandDefinitions = getCommandDefinitions();
 

@@ -1,4 +1,4 @@
-import type { Interaction } from 'discord.js';
+import { MessageFlags, type Interaction } from 'discord.js';
 
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { AppLogger } from '../logging/logger.js';
@@ -49,10 +49,12 @@ export async function handleInteraction(
     try {
       const response = {
         content: 'Something went wrong while handling that command.',
-        ephemeral: true,
-      };
+        flags: MessageFlags.Ephemeral,
+      } as const;
 
-      if (interaction.replied || interaction.deferred) {
+      if (interaction.deferred) {
+        await interaction.editReply({ content: response.content });
+      } else if (interaction.replied) {
         await interaction.followUp(response);
       } else {
         await interaction.reply(response);
