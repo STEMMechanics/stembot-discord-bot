@@ -1,6 +1,7 @@
 import { createApplication } from './app.js';
 import { loadConfig } from './config/env.js';
 import { createLogger } from './logging/logger.js';
+import { configureNetworkDefaults } from './network.js';
 
 function serializeError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -14,6 +15,7 @@ function serializeError(error: unknown): { message: string; stack?: string } {
 }
 
 async function main(): Promise<void> {
+  configureNetworkDefaults();
   const config = loadConfig();
   const logger = createLogger(config);
   const application = createApplication(config, logger);

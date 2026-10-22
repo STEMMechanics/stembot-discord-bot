@@ -15,6 +15,7 @@ Priority levels:
 - Strict TypeScript/NodeNext project with ESLint, Prettier, Vitest, build validation, and a locked dependency tree.
 - Environment-based configuration for Discord credentials, external URLs, request timeouts, polling, timezone, channel IDs, reminder switches, announcement switches, optional STEMCraft bearer token, state path, and shutdown deadline.
 - Discord client using only the `Guilds` gateway intent, structured Pino logging, interaction routing, graceful shutdown, and generic command error handling.
+- Node.js outbound networking prefers IPv4 to avoid dual-stack REST callback delays on TrueNAS deployments where IPv6 is advertised but unavailable.
 - Slash commands `/ping`, `/workshops`, `/schedule`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It explicitly removes existing global registrations, clears the global set, and replaces the configured single guild set; the same operation remains available as an explicit manual command.
 - `/ping` uses one immediate Discord response. Interaction handling records IDs for a short deduplication window and identifies expired acknowledgements without attempting a second invalid response.
 - `/workshops` lists future non-cancelled feed items, sorts by start time, formats offset-aware dates in the configured timezone, and uses a registration link when the feed supplies one or the details link otherwise.
@@ -58,10 +59,10 @@ The direct endpoint is HTTP only, and the embedded STEMCraft web server defaults
 - **Why:** The current direct endpoint is unauthenticated HTTP and the plugin’s default bind address is loopback. A TrueNAS-hosted bot cannot safely depend on it without deployment/network work. The live Website HTTPS proxy omits player names.
 - **Owner:** STEMCraft repository plus infrastructure/deployment configuration; Website only if it becomes the secure proxy for the username list.
 
-#### P0-2 — Run exactly one STEMBot gateway process
+#### P0-2 — Run exactly one STEMBot gateway process and verify the deployed image
 
-- **What:** Remove any stopped or running duplicate STEMBot containers/services that use the same Discord token. Confirm the deployed container is using the current image and that only the configured TrueNAS service is connected to Discord.
-- **Why:** Two gateway processes can receive the same interaction. One acknowledgement invalidates the interaction token for the other process, producing Discord error 10062 and the user-facing “application did not respond” message.
+- **What:** Remove any stopped or running duplicate STEMBot containers/services that use the same Discord token. Confirm the deployed container is using the current image and that only the configured TrueNAS service is connected to Discord. If error 10062 recurs, compare `receivedInteractionAgeMs` with `commandDurationMs` in the logs.
+- **Why:** Two gateway processes can receive the same interaction. One acknowledgement invalidates the interaction token for the other process, producing Discord error 10062 and the user-facing “application did not respond” message. A long command duration with a low received age instead indicates a delayed outbound REST callback and requires the IPv4-first runtime fix from the current STEMBot image.
 - **Owner:** TrueNAS/deployment configuration; the STEMBot repository now reports interaction age and duplicate-delivery details to support verification.
 
 ### P1

@@ -6,6 +6,7 @@ import { loadConfig, type AppConfig } from './config/env.js';
 import { replaceCommandScopes } from './discord/command-registration.js';
 import { getCommandDefinitions } from './discord/commands.js';
 import { createLogger, type AppLogger } from './logging/logger.js';
+import { configureNetworkDefaults } from './network.js';
 
 interface CurrentApplicationResponse {
   id?: string;
@@ -21,6 +22,7 @@ export async function registerCommands(
   config: AppConfig = loadConfig(),
   logger: AppLogger = createLogger(config),
 ): Promise<void> {
+  configureNetworkDefaults();
   const rest = new REST({ version: '10' }).setToken(config.discord.token);
   const commandDefinitions = getCommandDefinitions();
 

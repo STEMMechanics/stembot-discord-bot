@@ -5,6 +5,7 @@ import type { AppConfig } from '../config/env.js';
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
+import { configureNetworkDefaults } from '../network.js';
 import { handleInteraction } from './interaction-handler.js';
 
 export interface DiscordGateway {
@@ -25,6 +26,8 @@ export function createDiscordGateway(
   logger: AppLogger,
   dependencies: DiscordCommandDependencies,
 ): DiscordGateway {
+  configureNetworkDefaults();
+
   const client = new Client({
     intents: [GatewayIntentBits.Guilds],
   });

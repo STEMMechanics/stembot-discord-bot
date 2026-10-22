@@ -198,6 +198,11 @@ The command uses the target `DISCORD_GUILD_ID` from the deployment `.env`. It
 does not restart the container; the same operation also runs automatically on
 the next container startup.
 
+The Node.js runtime prefers IPv4 for outbound connections. This avoids a
+dual-stack TrueNAS network waiting for an unavailable IPv6 route before
+falling back to IPv4; that delay can exceed Discord's interaction response
+deadline and produce error 10062 (`Unknown interaction`).
+
 If TrueNAS manages the application without a Compose file in the current
 directory, find the running container and invoke the compiled entrypoint
 directly:

@@ -126,6 +126,13 @@ gets 10062. The application now logs the interaction ID and age for this case,
 and ignores duplicate deliveries within one process, but it cannot stop a
 second container that is running outside the deployment.
 
+The current image also configures Node.js to prefer IPv4 for outbound Discord
+REST requests. This matters on TrueNAS hosts where DNS returns IPv6 records but
+the container cannot complete an IPv6 route. If the interaction log shows a
+small `receivedInteractionAgeMs` but a multi-second `commandDurationMs`, update
+to the current image before investigating command registration; the REST
+callback is timing out after the interaction has already reached STEMBot.
+
 If TrueNAS manages the application without a Compose file in the current
 directory, use the running container directly:
 
