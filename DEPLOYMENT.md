@@ -54,15 +54,15 @@ can still deliver reminders that are already due for future workshops.
 
 ## Validate and start
 
-Use the same checkout and .env for command registration and the container.
-Register commands from a workstation or CI environment with Node.js 24 and
+Use the same checkout and .env for command synchronization and the container.
+Synchronize commands from a workstation or CI environment with Node.js 24 and
 dependencies installed:
 
     npm ci
-    npm run register:commands
+    npm run sync:commands
 
-Set DISCORD_GUILD_ID while developing or staging so command changes appear
-immediately. Omit it when registering global production commands.
+Set DISCORD_GUILD_ID to synchronize the target guild as well as global
+commands. Omit it only when a global-only synchronization is intentional.
 
 Select the persistent dataset through the Compose variable, validate the
 Compose file, pull the published image and start the service:
@@ -83,6 +83,36 @@ message IDs and reminder markers; it does not contain Discord credentials.
 After startup, confirm the logs show a successful Discord connection and
 workshop synchronization. Test /ping, /workshops, /schedule, /minecraft and
 /players in a staging guild before enabling production notification channels.
+
+## Synchronize Discord commands after a deployment
+
+Command synchronization is a deliberate deployment step. The normal bot
+startup and container restart paths do not register commands automatically.
+
+1. Put `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` and the target
+   `DISCORD_GUILD_ID` in the deployment `.env`. The token and application ID
+   must belong to the same Discord application.
+2. Pull and start the approved image as shown above.
+3. From the directory containing the deployment `docker-compose.yml` and
+   `.env`, run:
+
+       docker compose exec -T stembot node dist/register-commands.js
+
+   This executes the compiled command synchronizer inside the running
+   container using its existing environment. It replaces the complete global
+   command set and the configured guild command set with `/ping`, `/workshops`,
+   `/schedule`, `/minecraft` and `/players`, removing obsolete commands from
+   those scopes.
+
+4. Check the command's structured log output. Guild commands should update
+   quickly; global command propagation can take time.
+
+If more than one guild has legacy commands, run the same command once for
+each approved guild by changing `DISCORD_GUILD_ID` in `.env` and recreating the
+service environment if necessary. The synchronizer never enumerates or
+modifies other Discord applications, and it cannot change an unconfigured
+guild. For a global-only update, remove `DISCORD_GUILD_ID` from `.env` before
+running the command.
 
 ## Operations
 
@@ -120,9 +150,13 @@ the production image selection:
 
 ## Troubleshooting
 
-- **Slash commands are missing:** run npm run register:commands with the
-  intended application and guild IDs, check the bot installation scope, and
-  allow Discord time to propagate global commands.
+- **Slash commands are missing:** from the deployment directory, run:
+
+      docker compose exec -T stembot node dist/register-commands.js
+
+  Then check the intended application and guild IDs, the bot installation
+  scope, and allow Discord time to propagate global commands.
+
 - **No workshop announcements:** verify the announcement channel ID,
   WORKSHOP_ANNOUNCEMENTS_ENABLED, channel permissions and the state file.
   Existing feed entries are intentionally quiet on the first sync by default.

@@ -10,6 +10,7 @@ The current implementation connects Discord to the public STEMMechanics workshop
 src/
   app.ts                         Application composition and lifecycle
   index.ts                       Process entry point and shutdown handlers
+  register-commands.ts           Explicit Discord slash-command sync entry point
   config/env.ts                  Validated environment configuration
   logging/logger.ts              Structured JSON logging with Pino
   discord/                       Client, commands, interactions, channel delivery
@@ -18,7 +19,7 @@ src/
   jobs/                          Background interval scheduler
   state/                         Atomic JSON-file persistent state
 scripts/
-  register-commands.ts           Explicit Discord slash-command registration
+  register-commands.ts           npm sync:commands wrapper
 tests/                            Unit, parser, command, and notification tests
 ```
 
@@ -36,7 +37,7 @@ The command layer depends on `WebsiteIntegration` and `StemCraftIntegration` int
 
 ## Commands
 
-Register these application commands with `npm run register:commands`:
+Synchronize these application commands with `npm run sync:commands`:
 
 - `/ping` — Discord gateway latency.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and registration/details links.
@@ -45,6 +46,30 @@ Register these application commands with `npm run register:commands`:
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 
 `/workshops` and `/schedule` use `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
+
+### Discord command synchronization
+
+`npm run sync:commands` performs a complete Discord `PUT` replacement with the
+five supported commands. It always replaces the global command set and also
+replaces the guild command set when `DISCORD_GUILD_ID` is configured. Commands
+that are absent from the supported set, including old `/joke`, `/embed` and
+`/countingchain` commands, are removed from those scopes.
+
+The script first verifies that the token belongs to `DISCORD_CLIENT_ID`. It
+only uses that application ID and the explicitly configured guild ID, so it
+cannot remove commands belonging to another Discord application. It is an
+explicit deployment operation and is never run when the bot starts or restarts.
+
+For a local or administration workstation, set the same credentials used by
+the deployment and run:
+
+```sh
+DISCORD_GUILD_ID=123456789012345678 npm run sync:commands
+```
+
+The guild ID can instead be stored in `.env`. Omit it only when synchronizing
+the global command set. Guild changes are available quickly; global command
+changes can take time to propagate through Discord.
 
 ## External contracts
 
@@ -65,11 +90,12 @@ The Docker image uses Node.js 24. Keep local development on the same major versi
 ```sh
 cp .env.example .env
 npm ci
-npm run register:commands
+npm run sync:commands
 npm run dev
 ```
 
-Set `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` in `.env`. Set `DISCORD_GUILD_ID` during development so command changes register immediately; omit it for global commands.
+Set `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` in `.env`. Set `DISCORD_GUILD_ID`
+when the target guild must be synchronized as well as the global command set.
 
 Run the checks with:
 
@@ -89,7 +115,7 @@ npm run validate
 | ------------------------------------------- | -------- | ------------------------------------------------------------------------------------- |
 | `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                            |
 | `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                               |
-| `DISCORD_GUILD_ID`                          | No       | Development guild for immediate command registration.                                 |
+| `DISCORD_GUILD_ID`                          | No       | Target guild to synchronize alongside global commands during explicit command sync.   |
 | `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                         |
 | `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                          |
 | `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.         |
@@ -144,11 +170,24 @@ Use a GitHub token with `read:packages` permission for a private package.
 
 The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 
-Run command registration from the checked-out repository with the same `.env` before using the production bot:
+Run command synchronization from the checked-out repository with the same
+`.env` before using the production bot:
 
 ```sh
-npm run register:commands
+npm run sync:commands
 ```
+
+When the published image is already running on TrueNAS, run the compiled
+entrypoint inside the service so it uses the container's exact credentials and
+configuration:
+
+```sh
+docker compose exec -T stembot node dist/register-commands.js
+```
+
+Set `DISCORD_GUILD_ID` in the deployment `.env` first if the target guild also
+needs to be cleaned up. This command does not restart the container and is not
+part of the container startup path.
 
 For local image builds, use `docker-compose.dev.yml` with the production file:
 
