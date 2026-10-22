@@ -140,6 +140,7 @@ The production Compose file pulls
 GitHub Actions workflow on `main` and version tags. Set `STEMBOT_IMAGE_TAG` to
 an immutable SHA or release tag for controlled rollouts, and run `docker login
 ghcr.io` first if the package is private.
+Use a GitHub token with `read:packages` permission for a private package.
 
 The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 

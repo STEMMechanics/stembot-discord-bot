@@ -44,6 +44,9 @@ deployment. If the GHCR package is private, authenticate before pulling:
 
     echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
+GHCR_TOKEN must be a GitHub token with `read:packages` permission. Store it
+in the TrueNAS secret store and do not put it in the repository `.env` file.
+
 The default WORKSHOP_ANNOUNCE_INITIAL_SYNC=false records the current feed
 without sending a startup burst of lifecycle announcements. Set it to true
 only when an initial announcement is intentional. The first synchronization
