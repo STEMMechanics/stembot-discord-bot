@@ -12,7 +12,6 @@ import {
 } from '../integrations/stemcraft.js';
 import {
   getWorkshopStatusCode,
-  isStemCraftWorkshop,
   type WebsiteIntegration,
   type WorkshopRecord,
 } from '../integrations/website.js';
@@ -28,6 +27,154 @@ export interface CommandContext {
 export interface DiscordCommand {
   data: SlashCommandBuilder;
   execute(interaction: ChatInputCommandInteraction, context: CommandContext): Promise<void>;
+}
+
+export const robotJokes = [
+  'Why did the robot get a job? It wanted to make more cents.',
+  'Why did the robot bring a ladder? It wanted to reach the cloud.',
+  'Why was the robot tired? It was running on low battery.',
+  'Why did the robot go on a date? It was looking for a connection.',
+  'Why did the robot take a break? It needed a reboot.',
+  'What is a robot’s favourite snack? Microchips.',
+  'Why did the robot choose engineering? It had a lot of drive.',
+  'Why did the robot call the elevator? It needed an uplink.',
+  'Why does a robot avoid the beach? Too much sand in the gears.',
+  'Why was the robot good at dancing? It had the best moves in the firmware.',
+  'What music does a robot love? Heavy metal.',
+  'Why did the robot become a singer? It was already good at Auto-Tune.',
+  'Why did the robot go to school? It wanted to improve its algorithms.',
+  'Why did the robot fail the test? It had too many bugs.',
+  'How did the robot finish its homework? It compiled it.',
+  'Why did the robot cross the road? There was an update on the other side.',
+  'Why did the robot get promoted? It had outstanding performance.',
+  'What does a robot fear most? A virus.',
+  'Where does a robot hide? Behind a firewall.',
+  'How does a robot keep a secret? It encrypts it.',
+  'Why did the robot apologise? It had an error in judgment.',
+  'Why did the robot not answer? Its data was still pending.',
+  'How do robots make friends? They start with a handshake.',
+  'Why did the robot get lost? It needed a better GPS.',
+  'Why does a robot like gardening? It enjoys growing data.',
+  'What is a robot’s favourite programming language? Java, because it likes a good brew.',
+  'How does a robot meditate? It clears its cache.',
+  'Why did the robot go to the gym? It wanted to work out its core.',
+  'Why was the robot’s joke bad? It needed better processing.',
+  'Why did the robot overeat? It had too many bytes.',
+  'Why did the robot go camping? It wanted to unplug.',
+  'Why did the robot visit the doctor? It needed a byte of advice.',
+  'Why did the robot avoid the stairs? It could not find a compatible driver.',
+  'Why was the robot popular at the party? It connected to the LAN.',
+  'Why did the robot bring an umbrella? The cloud forecast looked stormy.',
+  'Why does a robot dislike a broken pencil? The point was null.',
+  'Why does a robot like chess? It is good at processing moves.',
+  'Why did the robot win the race? It optimised its run loop.',
+  'Why did the robot become a chef? It mastered byte-sized meals.',
+  'Why did the robot pay the bill? It had a debit in its database.',
+  'Why did the robot visit the museum? It admired the old hardware.',
+  'Why did the robot wear glasses? It needed a better interface.',
+  'Why did the robot use shampoo? It wanted to clear its cache.',
+  'Why did the robot visit the beach? It wanted to surf the web.',
+  'Why did the robot lose its job? Automation automated it.',
+  'Why was the robot locked out? It forgot its passcode.',
+  'Why did the robot send flowers? It wanted to improve its byte of affection.',
+  'Why does a robot like spring? It is clean boot season.',
+  'Why was the robot bad at hide-and-seek? It always left a trace.',
+  'Why did the robot read a book? It wanted more bytes of wisdom.',
+  'Why did the robot become a musician? It had perfect timing.',
+  'Why did the robot join a band? It had good circuitry.',
+  'How does a robot tell time? It uses clock cycles.',
+  'Why did the robot go to space? It needed more bandwidth.',
+  'Why did the robot buy shoes? It wanted a better boot sequence.',
+  'Why did the robot sleep through its alarm? The alarm was in another process.',
+  'Why does a robot like pizza? It loves circular logic.',
+  'Why does a robot use a phone? It likes to stay in touch.',
+  'Why did the robot get cold? It turned up its heat sink.',
+  'Why did the robot become a gardener? It had green LEDs.',
+  'How did the robot do its homework? It used a neural network.',
+  'Why does a robot avoid arguments? It refuses to waste cycles.',
+  'What is a robot’s favourite game? Cache me if you can.',
+  'Why did the robot get excited? Its fans went wild.',
+  'Why did the robot miss the bus? Its scheduler had a queue.',
+  'Why did the robot play soccer? It was excellent at goal-oriented programming.',
+  'Why did the robot go to the library? It needed quiet processing.',
+  'Why did the robot visit the dentist? One of its gears had a cavity.',
+  'Why did the robot buy a jacket? It wanted better byte protection.',
+  'How did the robot cook dinner? It followed an algorithm.',
+  'Why did the robot get a ticket? It exceeded the speed limit in a loop.',
+  'Why does a robot like winter? It enjoys cool running.',
+  'Why did the robot break up? The connection timed out.',
+  'How does a robot stay calm? It has good exception handling.',
+  'Why did the robot make toast? It had a breadboard.',
+  'Why did the robot go to a concert? It wanted to feel the current.',
+  'Why did the robot get detention? It ran in the hallway.',
+  'Why did the robot use a pencil? It wanted to sketch its API.',
+  'Why did the robot fail at karaoke? Nobody understood its machine code.',
+  'Why did the robot carry a toolbox? It packed its dependencies.',
+  'Why does a robot love maths? The numbers always make sense.',
+  'Why did the robot join the orchestra? It had a solid byte section.',
+  'Why did the robot get a haircut? It needed to trim its fringe buffer.',
+  'Why does a robot use stairs? It takes one step at a time in its loop.',
+  'Why did the robot become a detective? It followed the logs.',
+  'Why did the robot get invited? It sent a packet.',
+  'Why was the robot scared? It saw a null pointer.',
+  'Why did the robot get a pet? It wanted a byte-sized bug.',
+  'Why did the robot take a vacation? It needed to clear its cache.',
+  'Why did the robot win the argument? It had the final byte.',
+  'Why did the robot become a farmer? It cultivated its data.',
+  'Why did the robot go to the bank? It needed to check its balance.',
+  'Why did the robot wait at the airport? It was waiting for a gate connection.',
+  'Why did the robot use a doorbell? It preferred push notifications.',
+  'Why does a robot love astronomy? The data is out of this world.',
+  'Why did the robot become an artist? It drew with vector graphics.',
+  'Why does a robot not share its password? Security comes first.',
+  'Why did the robot order food? It requested a byte.',
+  'Why did the robot run a marathon? It optimised its battery usage.',
+  'What is a robot’s favourite exercise? Circuit training.',
+  'Why did the robot stay cool? It had a fan club.',
+  'Why did the robot buy a computer? It wanted a new motherboard.',
+  'Why did the robot open a bakery? It specialised in byte-sized pies.',
+  'Why did the robot cross the river? It used a data bridge.',
+  'Why did the robot wear a tie? It was using a formal protocol.',
+  'Why did the robot tell jokes? It was running a comedy algorithm.',
+  'Why did the robot become a teacher? It was excellent at explaining loops.',
+  'Why do robots love programmers? Programmers understand their syntax.',
+  'Why did the robot bring a map to class? It wanted to study its route table.',
+  'Why did the robot get a medal? It had first-class hardware.',
+  'Why did the robot join the choir? It knew how to harmonise with the network.',
+  'Why did the robot go to the optician? Its vision API needed an update.',
+  'Why did the robot enjoy puzzles? Every problem had a solution path.',
+  'Why did the robot bring a ruler? It wanted to measure its response time.',
+  'Why did the robot become a photographer? It had a great point of view.',
+  'Why did the robot bring a notebook? It never forgot to log an idea.',
+  'Why did the robot like the library computer? It had plenty of memory.',
+  'Why did the robot join the debate team? It had a strong argument parser.',
+  'Why did the robot take a train? It liked operating on a fixed schedule.',
+  'Why did the robot become a plumber? It was good at fixing pipelines.',
+  'Why did the robot like the ocean? It was full of useful currents.',
+  'Why did the robot open an umbrella indoors? It was protecting its cloud data.',
+  'Why did the robot enter the maze? It wanted to test its pathfinding.',
+  'Why did the robot bring a spare battery? It planned for a power outage.',
+  'Why did the robot enjoy fireworks? It appreciated a well-timed burst.',
+  'Why did the robot sit near the window? It was waiting for a wireless signal.',
+  'Why did the robot become a mechanic? It liked working on machine problems.',
+  'Why did the robot bring a calculator? It wanted to count its blessings in binary.',
+  'Why did the robot like sandwiches? They came with a good stack.',
+  'Why did the robot become a librarian? It knew how to index everything.',
+  'Why did the robot go to the playground? It wanted to test its swing algorithm.',
+  'Why did the robot become a pilot? It was good at taking control.',
+  'Why did the robot wear sunscreen? Its sensors were sensitive to bright ideas.',
+  'Why did the robot visit the farm? It wanted to see the latest crop of data.',
+  'Why did the robot bring a towel? It expected a data spill.',
+  'Why did the robot enjoy puzzles? It was always ready to debug a mystery.',
+  'Why did the robot carry a compass? It needed reliable direction from its API.',
+  'Why did the robot join a relay race? It was great at passing messages.',
+  'Why did the robot go to the theatre? It liked a good runtime performance.',
+] as const;
+
+export function getRandomRobotJoke(random: () => number = Math.random): string {
+  const randomIndex = Math.floor(random() * robotJokes.length);
+  const index = Math.max(0, Math.min(robotJokes.length - 1, randomIndex));
+  return robotJokes[index] ?? robotJokes[0];
 }
 
 export function getPingResponse(gatewayPing: number): string {
@@ -64,24 +211,11 @@ export const workshopsCommand: DiscordCommand = {
   },
 };
 
-export const scheduleCommand: DiscordCommand = {
-  data: new SlashCommandBuilder()
-    .setName('schedule')
-    .setDescription('List upcoming Minecraft workshops.'),
+export const jokeCommand: DiscordCommand = {
+  data: new SlashCommandBuilder().setName('joke').setDescription('Tell a robot-themed joke.'),
 
-  async execute(interaction, context): Promise<void> {
-    await interaction.deferReply();
-    const website = requireWebsite(context);
-    const workshops = await website.getWorkshops();
-    const minecraftWorkshops = getUpcomingWorkshops(workshops, currentTime(context)).filter(
-      isMinecraftWorkshop,
-    );
-    const content = formatWorkshopList(
-      minecraftWorkshops,
-      context.timeZone ?? 'Australia/Brisbane',
-      'Upcoming Minecraft workshops',
-    );
-    await interaction.editReply({ content, allowedMentions: { parse: [] } });
+  async execute(interaction): Promise<void> {
+    await interaction.reply({ content: getRandomRobotJoke() });
   },
 };
 
@@ -134,7 +268,7 @@ export const playersCommand: DiscordCommand = {
 export const commands: readonly DiscordCommand[] = [
   pingCommand,
   workshopsCommand,
-  scheduleCommand,
+  jokeCommand,
   minecraftCommand,
   playersCommand,
 ];
@@ -154,10 +288,6 @@ export function getUpcomingWorkshops(
         !['cancelled', 'private', 'hidden'].includes(getWorkshopStatusCode(workshop)),
     )
     .sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime());
-}
-
-export function isMinecraftWorkshop(workshop: WorkshopRecord): boolean {
-  return isStemCraftWorkshop(workshop);
 }
 
 export function formatWorkshopList(

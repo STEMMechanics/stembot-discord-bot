@@ -84,7 +84,7 @@ working container resolver is required before Node.js can connect to Discord.
 
 After startup, confirm the logs show successful command synchronization, a
 Discord connection and workshop synchronization. Test /ping, /workshops,
-/schedule, /minecraft and /players in a staging guild before enabling
+/joke, /minecraft and /players in a staging guild before enabling
 production notification channels.
 
 ## Discord command synchronization
@@ -92,8 +92,8 @@ production notification channels.
 The service synchronizes commands on every process startup, before the Discord
 gateway connection is opened. It removes existing global command registrations
 for this application, clears the global command set, and replaces the single
-configured guild command set with `/ping`, `/workshops`, `/schedule`,
-`/minecraft` and `/players`.
+configured guild command set with `/ping`, `/workshops`, `/joke`, `/minecraft`
+and `/players`.
 
 If synchronization fails, the process exits before the bot connects. The
 Compose restart policy can then retry startup, preventing the bot from running

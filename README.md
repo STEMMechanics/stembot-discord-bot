@@ -41,11 +41,11 @@ Synchronize these application commands with `npm run sync:commands`:
 
 - `/ping` — Discord gateway latency.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
-- `/schedule` — upcoming workshops whose feed `sm:type` is `stemcraft`.
+- `/joke` — a randomly selected robot-themed joke from the local joke set.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 
-`/workshops` and `/schedule` use `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
+`/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
 ### Discord command synchronization
 
@@ -54,7 +54,7 @@ supported commands in the configured guild scope. It first removes existing
 global command registrations for this application, then bulk-replaces the
 global set with an empty list and the target guild set with the supported
 commands. This single-server deployment therefore has one authoritative copy
-of each command. Obsolete commands, including old `/joke`, `/embed` and
+of each command. Obsolete commands, including old `/schedule`, `/embed` and
 `/countingchain` commands, are removed.
 
 The script first verifies that the token belongs to `DISCORD_CLIENT_ID`. It

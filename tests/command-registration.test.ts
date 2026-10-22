@@ -56,7 +56,7 @@ describe('Discord command synchronization', () => {
     expect(definitions.map((definition) => definition.name)).toEqual([
       'ping',
       'workshops',
-      'schedule',
+      'joke',
       'minecraft',
       'players',
     ]);

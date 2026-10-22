@@ -5,12 +5,14 @@ import {
   formatMinecraftStatus,
   formatPlayers,
   formatWorkshopList,
+  getRandomRobotJoke,
   getCommandDefinitions,
   getUpcomingWorkshops,
-  isMinecraftWorkshop,
   minecraftCommand,
+  jokeCommand,
   pingCommand,
   playersCommand,
+  robotJokes,
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
@@ -35,7 +37,7 @@ describe('Discord commands', () => {
     expect(definitions.map((definition) => definition.name)).toEqual([
       'ping',
       'workshops',
-      'schedule',
+      'joke',
       'minecraft',
       'players',
     ]);
@@ -62,18 +64,11 @@ describe('Discord commands', () => {
     expect(workshops.map((candidate) => candidate.externalId)).toEqual(['soon', 'later']);
   });
 
-  it('classifies schedule entries from the explicit STEMCraft type only', () => {
-    expect(
-      isMinecraftWorkshop(
-        workshop({ type: 'stemcraft', title: 'Creative workshop', location: 'Online' }),
-      ),
-    ).toBe(true);
-    expect(isMinecraftWorkshop(workshop({ title: 'Minecraft workshop', location: 'Online' }))).toBe(
-      false,
-    );
-    expect(
-      isMinecraftWorkshop(workshop({ title: 'Creative workshop', location: 'STEMCraft' })),
-    ).toBe(false);
+  it('provides at least 100 unique robot jokes', () => {
+    expect(robotJokes.length).toBeGreaterThanOrEqual(100);
+    expect(new Set(robotJokes).size).toBe(robotJokes.length);
+    expect(getRandomRobotJoke(() => 0)).toBe(robotJokes[0]);
+    expect(getRandomRobotJoke(() => 0.999999)).toBe(robotJokes[robotJokes.length - 1]);
   });
 
   it('uses statusCode instead of display status for lifecycle filtering', () => {
@@ -222,5 +217,15 @@ describe('Discord commands', () => {
     await pingCommand.execute(interaction, { getGatewayPing: () => 263 });
 
     expect(reply).toHaveBeenCalledWith({ content: 'Pong! Gateway latency: 263ms' });
+  });
+
+  it('replies immediately to /joke', async () => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { reply } as unknown as ChatInputCommandInteraction;
+
+    await jokeCommand.execute(interaction, { getGatewayPing: () => 0 });
+
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(robotJokes).toContain(reply.mock.calls[0]?.[0]?.content);
   });
 });

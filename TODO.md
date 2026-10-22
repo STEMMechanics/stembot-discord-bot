@@ -17,10 +17,10 @@ Priority levels:
 - Discord client using only the `Guilds` gateway intent, structured Pino logging, interaction routing, graceful shutdown, and generic command error handling.
 - Node.js outbound networking prefers IPv4 to avoid dual-stack REST callback delays on TrueNAS deployments where IPv6 is advertised but unavailable.
 - Production Compose configuration provides configurable explicit DNS resolvers for deployments whose default container resolver cannot reach Discord reliably.
-- Slash commands `/ping`, `/workshops`, `/schedule`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It explicitly removes existing global registrations, clears the global set, and replaces the configured single guild set; the same operation remains available as an explicit manual command.
+- Slash commands `/ping`, `/workshops`, `/joke`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It explicitly removes existing global registrations, clears the global set, and replaces the configured single guild set; the same operation remains available as an explicit manual command.
 - `/ping` uses one immediate Discord response. Interaction handling records IDs for a short deduplication window and identifies expired acknowledgements without attempting a second invalid response.
 - `/workshops` lists future non-cancelled feed items, sorts by start time, formats offset-aware dates in the configured timezone, and uses a single `Details` link for each workshop.
-- `/schedule` lists future items whose final feed `sm:type` is `stemcraft`.
+- `/joke` serves a randomly selected robot-themed joke from a local set of more than 100 unique jokes.
 - `/minecraft` reports online state, maintenance, player count, capacity, version, and an optional status message.
 - `/players` is available without a role gate and outputs usernames only. The adapter rejects the operation with a specific capability result when the upstream response has no player array.
 - Website RSS adapter using `fast-xml-parser`, including primary `sm:id` identity with GUID fallback, `sm:startDate`, `sm:endDate`, `sm:location`, `sm:price`, `sm:ages`, `sm:registrationType`, `sm:registrationUrl`, `sm:status`, `sm:statusCode`, `sm:type`, descriptions, enclosures, malformed-item skipping, timeout handling, and registration compatibility aliases.
