@@ -29,6 +29,7 @@ describe('loadConfig', () => {
       },
       workshops: {
         announcementsEnabled: true,
+        announcementDelayMs: 1800000,
         announceInitialSync: false,
         pollIntervalMs: 300000,
         reminder1HourEnabled: true,

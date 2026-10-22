@@ -18,7 +18,7 @@ export interface DiscordGateway {
 export interface DiscordChannelMessage {
   content?: string;
   embeds?: APIEmbed[];
-  /** Internal image URL that is uploaded and referenced from the embed. */
+  /** Internal image URL that is downloaded and attached to the message. */
   heroImageUrl?: string;
 }
 

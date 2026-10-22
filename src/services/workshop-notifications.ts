@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import type { APIEmbed } from 'discord.js';
 
 import type { DiscordChannelMessage, DiscordGateway } from '../discord/client.js';
 import type { AppLogger } from '../logging/logger.js';
@@ -19,6 +18,7 @@ export type WorkshopAnnouncementKind = 'new' | 'updated' | 'cancelled';
 export interface WorkshopNotificationConfig {
   timeZone: string;
   announcementsEnabled: boolean;
+  announcementDelayMs: number;
   remindersEnabled: boolean;
   reminder24HoursEnabled: boolean;
   reminder1HourEnabled: boolean;
@@ -53,6 +53,7 @@ interface StoredWorkshop {
   fingerprint: string;
   lastAnnouncedFingerprint: string | null;
   pendingAnnouncement: WorkshopAnnouncementKind | null;
+  pendingAnnouncementAt: string | null;
   lastAnnouncementMessageId: string | null;
 }
 
@@ -139,6 +140,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
     }
 
     const statusCode = getWorkshopStatusCode(workshop);
+    const now = this.currentTime();
 
     if (existing && existing.fingerprint === legacyWorkshopFingerprint(workshop)) {
       const wasAnnounced = existing.lastAnnouncedFingerprint === existing.fingerprint;
@@ -149,7 +151,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       await this.saveState(rootState, state);
     }
 
-    const publicWorkshop = isAnnouncementEligible(workshop, existing, this.currentTime().getTime());
+    const publicWorkshop = isAnnouncementEligible(workshop, existing, now.getTime());
 
     if (!existing) {
       const pendingAnnouncement =
@@ -158,7 +160,12 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
         (!initialSync || this.dependencies.config.announceInitialSync)
           ? 'new'
           : null;
-      const stored = toStoredWorkshop(workshop, fingerprint, pendingAnnouncement);
+      const stored = toStoredWorkshop(
+        workshop,
+        fingerprint,
+        pendingAnnouncement,
+        pendingAnnouncement ? now.toISOString() : null,
+      );
       if (!publicWorkshop || pendingAnnouncement === null) {
         stored.lastAnnouncedFingerprint = fingerprint;
       }
@@ -169,6 +176,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
         updateStoredWorkshop(existing, workshop, fingerprint);
         existing.lastAnnouncedFingerprint = fingerprint;
         existing.pendingAnnouncement = null;
+        existing.pendingAnnouncementAt = null;
         await this.saveState(rootState, state);
         return;
       }
@@ -179,7 +187,12 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
           : existing.pendingAnnouncement === 'new'
             ? 'new'
             : 'updated';
-      const updated = toStoredWorkshop(workshop, fingerprint, kind);
+      const updated = toStoredWorkshop(
+        workshop,
+        fingerprint,
+        kind,
+        existing.pendingAnnouncementAt ?? now.toISOString(),
+      );
       updated.lastAnnouncedFingerprint = existing.lastAnnouncedFingerprint;
       updated.lastAnnouncementMessageId = existing.lastAnnouncementMessageId;
       state.workshops[workshop.externalId] = updated;
@@ -196,7 +209,8 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       stored.pendingAnnouncement &&
       stored.lastAnnouncedFingerprint !== stored.fingerprint &&
       this.dependencies.config.announcementsEnabled &&
-      this.dependencies.config.announcementChannelId
+      this.dependencies.config.announcementChannelId &&
+      isAnnouncementDue(stored, now.getTime(), this.dependencies.config.announcementDelayMs)
     ) {
       try {
         const messageId = await this.dependencies.discord.sendChannelMessage(
@@ -209,6 +223,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
         );
         stored.lastAnnouncedFingerprint = stored.fingerprint;
         stored.pendingAnnouncement = null;
+        stored.pendingAnnouncementAt = null;
         stored.lastAnnouncementMessageId = messageId;
         await this.saveState(rootState, state);
       } catch (error: unknown) {
@@ -349,12 +364,12 @@ export function formatWorkshopAnnouncement(
   timeZone: string,
 ): DiscordChannelMessage {
   const heading = {
-    new: '📣 New STEMMechanics workshop',
-    updated: '✏️ STEMMechanics workshop updated',
-    cancelled: '❌ STEMMechanics workshop cancelled',
+    new: 'New:',
+    updated: 'Updated:',
+    cancelled: 'Cancelled:',
   }[kind];
 
-  return formatWorkshopCard(workshop, heading, timeZone, announcementColor(kind));
+  return formatWorkshopMessage(workshop, heading, timeZone);
 }
 
 export function formatWorkshopReminder(
@@ -363,52 +378,52 @@ export function formatWorkshopReminder(
   timeZone: string,
 ): DiscordChannelMessage {
   const lead = reminder === '24-hours' ? '24 hours' : '1 hour';
-  return formatWorkshopCard(
-    workshop,
-    `⏰ Workshop starts in ${lead}`,
-    timeZone,
-    reminder === '24-hours' ? 0x5865f2 : 0xf1c40f,
-  );
+  return formatWorkshopMessage(workshop, `Starts in ${lead}:`, timeZone);
 }
 
-function formatWorkshopCard(
+function formatWorkshopMessage(
   workshop: WorkshopRecord,
   heading: string,
   timeZone: string,
-  color: number,
 ): DiscordChannelMessage {
-  const registration = formatWorkshopRegistration(workshop);
-  const fields: APIEmbed['fields'] = [
-    { name: 'When', value: formatWorkshopDateRange(workshop, timeZone), inline: true },
-    ...(workshop.location
-      ? [{ name: 'Where', value: truncateEmbedText(workshop.location), inline: true }]
-      : []),
-    ...(workshop.price
-      ? [{ name: 'Price', value: truncateEmbedText(workshop.price), inline: true }]
-      : []),
-    ...(workshop.ages
-      ? [{ name: 'Ages', value: truncateEmbedText(workshop.ages), inline: true }]
-      : []),
-    ...(registration && registration !== 'No registration required'
-      ? [{ name: 'Registration', value: truncateEmbedText(registration), inline: false }]
-      : []),
-  ];
-
   const description = formatWorkshopDescription(workshop.description);
+  const details = formatWorkshopDetails(workshop, timeZone);
+  const title = `${heading} [${escapeDiscordLinkText(workshop.title)}](${workshop.url})`;
+  const content = formatWorkshopContent(title, description, details);
   const imageUrl = formatWorkshopImageUrl(workshop.imageUrl);
-  const embed: APIEmbed = {
-    title: `${heading}: ${workshop.title}`,
-    url: workshop.url,
-    color,
-    fields,
-    ...(description ? { description: truncateEmbedText(description, 1800) } : {}),
-    ...(imageUrl ? { image: { url: imageUrl } } : {}),
-  };
 
   return {
-    embeds: [embed],
+    content,
     ...(imageUrl ? { heroImageUrl: imageUrl } : {}),
   };
+}
+
+function formatWorkshopContent(title: string, description: string, details: string): string {
+  const fixedContent = `${title}\n\n${details}`;
+  if (!description) {
+    return fixedContent;
+  }
+
+  const availableDescriptionLength = MAX_DISCORD_MESSAGE_LENGTH - fixedContent.length - 2;
+  if (availableDescriptionLength <= 0) {
+    return truncateText(fixedContent, MAX_DISCORD_MESSAGE_LENGTH);
+  }
+
+  return `${title}\n\n${truncateText(description, availableDescriptionLength)}\n\n${details}`;
+}
+
+function formatWorkshopDetails(workshop: WorkshopRecord, timeZone: string): string {
+  const registration = formatWorkshopRegistration(workshop);
+  return [
+    `**When:** ${formatWorkshopDateRange(workshop, timeZone)}`,
+    ...(workshop.location ? [`**Where:** ${formatInlineValue(workshop.location)}`] : []),
+    ...(workshop.price ? [`**Price:** ${formatInlineValue(workshop.price)}`] : []),
+    ...(workshop.ages ? [`**Ages:** ${formatInlineValue(workshop.ages)}`] : []),
+    `**Details:** [Details](${workshop.url})`,
+    ...(registration && registration !== 'No registration required'
+      ? [`**Registration:** ${registration}`]
+      : []),
+  ].join('\n');
 }
 
 function formatWorkshopDescription(description: string | undefined): string {
@@ -416,15 +431,70 @@ function formatWorkshopDescription(description: string | undefined): string {
     return '';
   }
 
-  return description
+  const formatted = convertDescriptionMarkup(description)
     .trim()
     .replace(
       /\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm)\s+·\s+[^\r\n]+$/i,
       '',
     )
+    .replace(/\bLearning\s+Outcomes\b[\s\S]*$/i, '')
     .replace(/([.!?,;:])(?=[A-Z])/g, '$1 ')
-    .replace(/\s+/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  return formatted;
+}
+
+function convertDescriptionMarkup(description: string): string {
+  return decodeHtmlEntities(
+    description
+      .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<li\b[^>]*>/gi, '\n- ')
+      .replace(/<\/(?:li|p|div|section|h[1-6]|ul|ol|blockquote|tr)>/gi, '\n\n')
+      .replace(/<(?:p|div|section|h[1-6]|ul|ol|blockquote|tr)\b[^>]*>/gi, '')
+      .replace(/<(?:strong|b)\b[^>]*>/gi, '**')
+      .replace(/<\/(?:strong|b)>/gi, '**')
+      .replace(/<(?:em|i)\b[^>]*>/gi, '*')
+      .replace(/<\/(?:em|i)>/gi, '*')
+      .replace(/<[^>]+>/g, ''),
+  );
+}
+
+function decodeHtmlEntities(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    lt: '<',
+    nbsp: ' ',
+    quot: '"',
+  };
+
+  return value.replace(/&(#x?[0-9a-f]+|amp|apos|gt|lt|nbsp|quot);/gi, (entity, key: string) => {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey in namedEntities) {
+      return namedEntities[normalizedKey] ?? entity;
+    }
+
+    const codePoint = normalizedKey.startsWith('#x')
+      ? Number.parseInt(normalizedKey.slice(2), 16)
+      : Number.parseInt(normalizedKey.slice(1), 10);
+    return Number.isNaN(codePoint) || codePoint < 0 || codePoint > 0x10ffff
+      ? entity
+      : String.fromCodePoint(codePoint);
+  });
+}
+
+function formatInlineValue(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function escapeDiscordLinkText(value: string): string {
+  return value.replace(/[\\[\]]/g, '\\$&');
 }
 
 function formatWorkshopImageUrl(imageUrl: string | undefined): string | undefined {
@@ -460,22 +530,17 @@ function formatWorkshopDateRange(workshop: WorkshopRecord, timeZone: string): st
   }).format(workshop.endsAt)}`;
 }
 
-function truncateEmbedText(value: string, maximumLength = 1024): string {
-  return value.length <= maximumLength ? value : `${value.slice(0, maximumLength - 1).trimEnd()}…`;
-}
+const MAX_DISCORD_MESSAGE_LENGTH = 2000;
 
-function announcementColor(kind: WorkshopAnnouncementKind): number {
-  return {
-    new: 0x2ecc71,
-    updated: 0xf1c40f,
-    cancelled: 0xe74c3c,
-  }[kind];
+function truncateText(value: string, maximumLength: number): string {
+  return value.length <= maximumLength ? value : `${value.slice(0, maximumLength - 1).trimEnd()}…`;
 }
 
 function toStoredWorkshop(
   workshop: WorkshopRecord,
   fingerprint: string,
   pendingAnnouncement: WorkshopAnnouncementKind | null,
+  pendingAnnouncementAt: string | null = null,
 ): StoredWorkshop {
   return {
     externalId: workshop.externalId,
@@ -489,6 +554,7 @@ function toStoredWorkshop(
     fingerprint,
     lastAnnouncedFingerprint: null,
     pendingAnnouncement,
+    pendingAnnouncementAt,
     lastAnnouncementMessageId: null,
   };
 }
@@ -507,6 +573,15 @@ function isAnnouncementEligible(
   const cancellationTransition =
     statusCode === 'cancelled' && existing !== undefined && existing.statusCode !== 'cancelled';
   return futureWorkshop || cancellationTransition;
+}
+
+function isAnnouncementDue(stored: StoredWorkshop, now: number, delayMs: number): boolean {
+  if (!stored.pendingAnnouncementAt) {
+    return true;
+  }
+
+  const pendingAt = Date.parse(stored.pendingAnnouncementAt);
+  return Number.isNaN(pendingAt) || now - pendingAt >= delayMs;
 }
 
 function updateStoredWorkshop(
@@ -614,6 +689,8 @@ function readStoredWorkshop(value: Record<string, unknown>): StoredWorkshop | un
     lastAnnouncedFingerprint:
       typeof value.lastAnnouncedFingerprint === 'string' ? value.lastAnnouncedFingerprint : null,
     pendingAnnouncement,
+    pendingAnnouncementAt:
+      typeof value.pendingAnnouncementAt === 'string' ? value.pendingAnnouncementAt : null,
     lastAnnouncementMessageId:
       typeof value.lastAnnouncementMessageId === 'string' ? value.lastAnnouncementMessageId : null,
   };

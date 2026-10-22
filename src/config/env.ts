@@ -67,6 +67,7 @@ const environmentSchema = z.object({
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
   WORKSHOP_TIME_ZONE: z.string().trim().min(1).default('Australia/Brisbane'),
   WORKSHOP_ANNOUNCEMENTS_ENABLED: booleanFromEnvironment(true),
+  WORKSHOP_ANNOUNCEMENT_DELAY_MS: positiveMilliseconds(1800000, 86400000),
   WORKSHOP_REMINDERS_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_24H_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_1H_ENABLED: booleanFromEnvironment(true),
@@ -101,6 +102,7 @@ export interface AppConfig {
     timeZone: string;
     pollIntervalMs: number;
     announcementsEnabled: boolean;
+    announcementDelayMs: number;
     remindersEnabled: boolean;
     reminder24HoursEnabled: boolean;
     reminder1HourEnabled: boolean;
@@ -157,6 +159,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       timeZone: values.WORKSHOP_TIME_ZONE,
       pollIntervalMs: values.WORKSHOP_POLL_INTERVAL_MS,
       announcementsEnabled: values.WORKSHOP_ANNOUNCEMENTS_ENABLED,
+      announcementDelayMs: values.WORKSHOP_ANNOUNCEMENT_DELAY_MS,
       remindersEnabled: values.WORKSHOP_REMINDERS_ENABLED,
       reminder24HoursEnabled: values.WORKSHOP_REMINDER_24H_ENABLED,
       reminder1HourEnabled: values.WORKSHOP_REMINDER_1H_ENABLED,

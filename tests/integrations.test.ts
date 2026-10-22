@@ -26,6 +26,7 @@ describe('Website RSS integration', () => {
               <guid>legacy-redstone-guid</guid>
               <pubDate>Wed, 30 Sep 2026 11:58:46 +1000</pubDate>
               <description>Build a redstone instrument.</description>
+              <content:encoded><![CDATA[<p>Full redstone description.</p>]]></content:encoded>
               <sm:startDate>2026-10-24T16:00:00+10:00</sm:startDate>
               <sm:endDate>2026-10-24T17:00:00+10:00</sm:endDate>
               <sm:location>STEMCraft</sm:location>
@@ -67,6 +68,7 @@ describe('Website RSS integration', () => {
     });
     expect(workshop?.startsAt.toISOString()).toBe('2026-10-24T06:00:00.000Z');
     expect(workshop?.endsAt?.toISOString()).toBe('2026-10-24T07:00:00.000Z');
+    expect(workshop?.description).toBe('<p>Full redstone description.</p>');
     expect(fetchImplementation).toHaveBeenCalledWith(
       'https://example.test/workshops/feed',
       expect.objectContaining({

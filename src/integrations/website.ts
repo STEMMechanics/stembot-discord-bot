@@ -244,7 +244,7 @@ function parseWorkshopItem(value: unknown): WorkshopRecord | undefined {
     safeRegistrationUrl(registrationValue) ??
     safeRegistrationDataUrl(registrationData, registrationType);
   const imageUrl = readEnclosureUrl(item);
-  const description = readText(item.description);
+  const description = readText(item['content:encoded']) ?? readText(item.description);
   const location = readFirstText(item, ['sm:location', 'location']);
   const price = readFirstText(item, ['sm:price', 'price']);
   const ages = readFirstText(item, ['sm:ages', 'ages']);

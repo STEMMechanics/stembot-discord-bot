@@ -120,31 +120,32 @@ npm run validate
 
 ## Configuration
 
-| Variable                                    | Required | Purpose                                                                               |
-| ------------------------------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                            |
-| `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                               |
-| `DISCORD_GUILD_ID`                          | Yes      | The single Discord guild where STEMBot commands are registered.                       |
-| `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                         |
-| `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                          |
-| `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.         |
-| `STEMCRAFT_STATUS_TOKEN`                    | No       | Optional bearer token for a protected status endpoint.                                |
-| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No       | Status request timeout; defaults to 5 seconds.                                        |
-| `WORKSHOP_TIME_ZONE`                        | No       | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`. |
-| `WORKSHOP_POLL_INTERVAL_MS`                 | No       | Feed polling interval; defaults to 5 minutes.                                         |
-| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No       | Enable new/update/cancellation announcements; defaults to `true`.                     |
-| `WORKSHOP_REMINDERS_ENABLED`                | No       | Enable workshop reminders; defaults to `true`.                                        |
-| `WORKSHOP_REMINDER_24H_ENABLED`             | No       | Enable the 24-hour reminder; defaults to `true`.                                      |
-| `WORKSHOP_REMINDER_1H_ENABLED`              | No       | Enable the 1-hour reminder; defaults to `true`.                                       |
-| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No       | Announce all feed items on the first sync; defaults to `false` to avoid startup spam. |
-| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No       | Channel for workshop lifecycle announcements.                                         |
-| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No       | Channel for 24-hour and 1-hour reminders.                                             |
-| `STREAMING_NOTIFICATIONS_ENABLED`           | No       | Reserved setting for the streaming workflow; defaults to `false`.                     |
-| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No       | Reserved streaming notification channel.                                              |
-| `STATE_PATH`                                | No       | Persistent JSON state path; defaults to `./data/state.json`.                          |
-| `SHUTDOWN_TIMEOUT_MS`                       | No       | Graceful shutdown deadline; defaults to 30 seconds.                                   |
-| `NODE_ENV`                                  | No       | `development`, `test`, or `production`; defaults to `production`.                     |
-| `LOG_LEVEL`                                 | No       | Pino level; defaults to `info`.                                                       |
+| Variable                                    | Required | Purpose                                                                                      |
+| ------------------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                                   |
+| `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                                      |
+| `DISCORD_GUILD_ID`                          | Yes      | The single Discord guild where STEMBot commands are registered.                              |
+| `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                                |
+| `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                                 |
+| `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.                |
+| `STEMCRAFT_STATUS_TOKEN`                    | No       | Optional bearer token for a protected status endpoint.                                       |
+| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No       | Status request timeout; defaults to 5 seconds.                                               |
+| `WORKSHOP_TIME_ZONE`                        | No       | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.        |
+| `WORKSHOP_POLL_INTERVAL_MS`                 | No       | Feed polling interval; defaults to 5 minutes.                                                |
+| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No       | Enable new/update/cancellation announcements; defaults to `true`.                            |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No       | Delay lifecycle announcements so early feed changes can be included; defaults to 30 minutes. |
+| `WORKSHOP_REMINDERS_ENABLED`                | No       | Enable workshop reminders; defaults to `true`.                                               |
+| `WORKSHOP_REMINDER_24H_ENABLED`             | No       | Enable the 24-hour reminder; defaults to `true`.                                             |
+| `WORKSHOP_REMINDER_1H_ENABLED`              | No       | Enable the 1-hour reminder; defaults to `true`.                                              |
+| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No       | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.        |
+| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No       | Channel for workshop lifecycle announcements.                                                |
+| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No       | Channel for 24-hour and 1-hour reminders.                                                    |
+| `STREAMING_NOTIFICATIONS_ENABLED`           | No       | Reserved setting for the streaming workflow; defaults to `false`.                            |
+| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No       | Reserved streaming notification channel.                                                     |
+| `STATE_PATH`                                | No       | Persistent JSON state path; defaults to `./data/state.json`.                                 |
+| `SHUTDOWN_TIMEOUT_MS`                       | No       | Graceful shutdown deadline; defaults to 30 seconds.                                          |
+| `NODE_ENV`                                  | No       | `development`, `test`, or `production`; defaults to `production`.                            |
+| `LOG_LEVEL`                                 | No       | Pino level; defaults to `info`.                                                              |
 
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -152,9 +153,9 @@ The loader validates Discord IDs, URLs, positive intervals, booleans, and the IA
 
 The scheduler performs an initial synchronization after Discord connects and repeats it at `WORKSHOP_POLL_INTERVAL_MS`. It compares a SHA-256 fingerprint of meaningful workshop fields. A stable `sm:id` prevents duplicate records even when titles repeat; GUIDs remain compatible with older state and feeds. New workshops, meaningful updates, and `sm:statusCode=cancelled` transitions produce separate messages when announcements and a channel are configured. Missing or removed items are not cancellation events, while retained cancellation records can be processed after their scheduled date.
 
-Workshop announcements and reminders are sent as Discord embeds. The embed title combines the announcement and workshop title, and links to the workshop details. The card contains the local date and time, any available location, price, ages, registration call to action, and the feed's HTTPS hero image. STEMBot downloads the image and attaches it to the Discord message so the embed can render it reliably. Feed descriptions are cleaned before display so the feed's repeated date/location summary is removed and missing spaces after punctuation are restored. The Website feed's `?md` image transform is removed before download.
+Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has a short linked heading (`New:`, `Updated:`, `Cancelled:`, `Starts in 24h:`, or `Starts in 1h:`), the available workshop description, a longer labelled details section, and the HTTPS hero image as a normal Discord attachment. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, last delivered Discord message ID, and reminder delivery markers. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, and reminder delivery markers. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MS` before delivery; a later feed poll can update the pending content during that window. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 
