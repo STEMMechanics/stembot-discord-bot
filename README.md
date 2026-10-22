@@ -68,6 +68,16 @@ Enable the Message Content intent in the Discord Developer Portal and grant the
 bot permission to view message history, add reactions and send messages in the
 counting channel.
 
+For troubleshooting, the log entry `Counting chain Discord message received`
+confirms that the gateway delivered a message from the configured channel. Its
+`attachmentCount` should be greater than zero for an uploaded image. If the
+entry is absent, check `COUNTING_CHAIN_CHANNEL_ID`, the bot's channel access,
+and the Message Content intent. If it is present but the image cannot be read,
+the following warning identifies whether the Discord CDN download, image
+conversion, or OpenAI response failed. OpenAI responses that are incomplete or
+refused are reported with a safe response summary rather than the image or
+full model payload.
+
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single information embed
 with the current number, high score and last round. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
@@ -186,6 +196,7 @@ npm run validate
 | `WORKSHOP_TIME_ZONE`                        | No           | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
 | `WORKSHOP_POLL_INTERVAL_MS`                 | No           | Feed polling interval; defaults to 5 minutes.                                               |
 | `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No           | Enable new/update/cancellation announcements; defaults to `true`.                           |
+| `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`         | No           | Only announce future workshops within this many days; defaults to 28.                       |
 | `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES`       | No           | Delay lifecycle announcements in minutes; defaults to 30. Set to `0` for immediate testing. |
 | `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No           | Legacy millisecond setting; used only when the minutes setting is unset.                    |
 | `WORKSHOP_REMINDERS_ENABLED`                | No           | Enable workshop reminders; defaults to `true`.                                              |
@@ -207,7 +218,7 @@ The loader validates Discord IDs, URLs, positive intervals, booleans, and the IA
 
 The scheduler performs an initial synchronization after Discord connects and repeats it at `WORKSHOP_POLL_INTERVAL_MS`. It compares a SHA-256 fingerprint of meaningful workshop fields. A stable `sm:id` prevents duplicate records even when titles repeat; GUIDs remain compatible with older state and feeds. New workshops, meaningful updates, and `sm:statusCode=cancelled` transitions produce separate messages when announcements and a channel are configured. Missing or removed items are not cancellation events, while retained cancellation records can be processed after their scheduled date.
 
-Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has a short linked heading (`New:`, `Updated:`, `Cancelled:`, `Starts in 24h:`, or `Starts in 1h:`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
+Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
 The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, and the counting-chain state for the configured channel. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 

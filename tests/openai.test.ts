@@ -47,6 +47,7 @@ describe('OpenAI number recognizer', () => {
     };
     expect(body.model).toBe('test-model');
     expect(body.reasoning.effort).toBe('low');
+    expect(JSON.parse(String(request?.body)).max_output_tokens).toBe(512);
     expect(body.input[0]?.content).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: 'input_text' }),
@@ -81,5 +82,31 @@ describe('OpenAI number recognizer', () => {
     });
 
     await expect(recognizer.recognizeNumber(image)).resolves.toBeNull();
+  });
+
+  it('reports an incomplete response when the model returns no structured output', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'response-incomplete',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: [{ type: 'reasoning', content: [] }],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const recognizer = new OpenAINumberRecognizer({
+      apiKey: 'test-key',
+      model: 'test-model',
+      reasoningEffort: 'max',
+      timeoutMs: 1000,
+      logger,
+      fetchImplementation,
+    });
+
+    await expect(recognizer.recognizeNumber(image)).rejects.toThrow(
+      'status=incomplete, reason=max_output_tokens',
+    );
   });
 });

@@ -256,8 +256,22 @@ export class PersistentCountingChainService implements CountingChainService {
   private async processMessage(message: CountingChainMessage): Promise<void> {
     const attachment = selectImageAttachment(message.attachments);
     if (!attachment) {
+      this.dependencies.logger.debug(
+        { channelId: message.channelId, messageId: message.id },
+        'Counting chain message had no supported image attachment',
+      );
       return;
     }
+
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        contentType: attachment.contentType,
+        size: attachment.size,
+      },
+      'Counting chain image received',
+    );
 
     let recognizedNumber: number | null;
     try {

@@ -92,6 +92,7 @@ const environmentSchema = z.object({
   OPENAI_TIMEOUT: positiveInteger(180, 600),
   WORKSHOP_TIME_ZONE: z.string().trim().min(1).default('Australia/Brisbane'),
   WORKSHOP_ANNOUNCEMENTS_ENABLED: booleanFromEnvironment(true),
+  WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS: positiveInteger(28, 3650),
   WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES: optionalNonNegativeInteger(1440),
   WORKSHOP_ANNOUNCEMENT_DELAY_MS: optionalPositiveMilliseconds(86400000),
   WORKSHOP_REMINDERS_ENABLED: booleanFromEnvironment(true),
@@ -146,6 +147,7 @@ export interface AppConfig {
     timeZone: string;
     pollIntervalMs: number;
     announcementsEnabled: boolean;
+    announcementWindowMs: number;
     announcementDelayMs: number;
     remindersEnabled: boolean;
     reminder24HoursEnabled: boolean;
@@ -173,6 +175,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const values = result.data;
+  const announcementWindowMs = values.WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const announcementDelayMs =
     values.WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES !== undefined
       ? values.WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES * 60_000
@@ -238,6 +241,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       timeZone: values.WORKSHOP_TIME_ZONE,
       pollIntervalMs: values.WORKSHOP_POLL_INTERVAL_MS,
       announcementsEnabled: values.WORKSHOP_ANNOUNCEMENTS_ENABLED,
+      announcementWindowMs,
       announcementDelayMs,
       remindersEnabled: values.WORKSHOP_REMINDERS_ENABLED,
       reminder24HoursEnabled: values.WORKSHOP_REMINDER_24H_ENABLED,

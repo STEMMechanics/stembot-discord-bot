@@ -18,6 +18,7 @@ export type WorkshopAnnouncementKind = 'new' | 'updated' | 'cancelled';
 export interface WorkshopNotificationConfig {
   timeZone: string;
   announcementsEnabled: boolean;
+  announcementWindowMs: number;
   announcementDelayMs: number;
   remindersEnabled: boolean;
   reminder24HoursEnabled: boolean;
@@ -178,7 +179,28 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       await this.saveState(rootState, state);
     }
 
-    const publicWorkshop = isAnnouncementEligible(workshop, existing, now.getTime());
+    const publicWorkshop = isAnnouncementEligible(
+      workshop,
+      existing,
+      now.getTime(),
+      this.dependencies.config.announcementWindowMs,
+    );
+    const waitingForAnnouncementWindow = shouldWaitForAnnouncementWindow(
+      workshop,
+      now.getTime(),
+      this.dependencies.config.announcementWindowMs,
+    );
+
+    if (
+      existing &&
+      waitingForAnnouncementWindow &&
+      existing.pendingAnnouncement === null &&
+      existing.lastAnnouncementMessageId === null &&
+      existing.lastAnnouncedFingerprint === existing.fingerprint
+    ) {
+      existing.lastAnnouncedFingerprint = null;
+      await this.saveState(rootState, state);
+    }
 
     if (!existing) {
       const pendingAnnouncement =
@@ -193,7 +215,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
         pendingAnnouncement,
         pendingAnnouncement ? now.toISOString() : null,
       );
-      if (!publicWorkshop || pendingAnnouncement === null) {
+      if ((!publicWorkshop || pendingAnnouncement === null) && !waitingForAnnouncementWindow) {
         stored.lastAnnouncedFingerprint = fingerprint;
       }
       state.workshops[workshop.externalId] = stored;
@@ -214,7 +236,9 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
     } else if (existing.fingerprint !== fingerprint) {
       if (!publicWorkshop) {
         updateStoredWorkshop(existing, workshop, fingerprint);
-        existing.lastAnnouncedFingerprint = fingerprint;
+        if (!waitingForAnnouncementWindow) {
+          existing.lastAnnouncedFingerprint = fingerprint;
+        }
         existing.pendingAnnouncement = null;
         existing.pendingAnnouncementAt = null;
         await this.saveState(rootState, state);
@@ -236,6 +260,17 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       updated.lastAnnouncedFingerprint = existing.lastAnnouncedFingerprint;
       updated.lastAnnouncementMessageId = existing.lastAnnouncementMessageId;
       state.workshops[workshop.externalId] = updated;
+      await this.saveState(rootState, state);
+    } else if (
+      publicWorkshop &&
+      existing.lastAnnouncedFingerprint !== existing.fingerprint &&
+      !existing.pendingAnnouncement &&
+      statusCode !== 'cancelled'
+    ) {
+      const kind: WorkshopAnnouncementKind =
+        existing.lastAnnouncementMessageId === null ? 'new' : 'updated';
+      existing.pendingAnnouncement = kind;
+      existing.pendingAnnouncementAt = now.toISOString();
       await this.saveState(rootState, state);
     }
 
@@ -404,9 +439,9 @@ export function formatWorkshopAnnouncement(
   timeZone: string,
 ): DiscordChannelMessage {
   const heading = {
-    new: 'New:',
-    updated: 'Updated:',
-    cancelled: 'Cancelled:',
+    new: '📣 New:',
+    updated: '✏️ Updated:',
+    cancelled: '❌ Cancelled:',
   }[kind];
 
   return formatWorkshopMessage(workshop, heading, timeZone);
@@ -418,7 +453,7 @@ export function formatWorkshopReminder(
   timeZone: string,
 ): DiscordChannelMessage {
   const lead = reminder === '24-hours' ? '24 hours' : '1 hour';
-  return formatWorkshopMessage(workshop, `Starts in ${lead}:`, timeZone);
+  return formatWorkshopMessage(workshop, `⏰ Starts in ${lead}:`, timeZone);
 }
 
 function formatWorkshopMessage(
@@ -428,7 +463,7 @@ function formatWorkshopMessage(
 ): DiscordChannelMessage {
   const description = formatWorkshopDescription(workshop.description);
   const details = formatWorkshopDetails(workshop, timeZone);
-  const title = `${heading} [${escapeDiscordLinkText(workshop.title)}](${workshop.url})`;
+  const title = `${heading} **[${escapeDiscordLinkText(workshop.title)}](${workshop.url})**`;
   const content = formatWorkshopContent(title, description, details);
   const imageUrl = formatWorkshopImageUrl(workshop.imageUrl);
 
@@ -623,6 +658,7 @@ function isAnnouncementEligible(
   workshop: WorkshopRecord,
   existing: StoredWorkshop | undefined,
   now: number,
+  announcementWindowMs: number,
 ): boolean {
   const statusCode = getWorkshopStatusCode(workshop);
   if (statusCode === 'private' || statusCode === 'hidden') {
@@ -632,7 +668,25 @@ function isAnnouncementEligible(
   const futureWorkshop = workshop.startsAt.getTime() > now;
   const cancellationTransition =
     statusCode === 'cancelled' && existing !== undefined && existing.statusCode !== 'cancelled';
-  return futureWorkshop || cancellationTransition;
+  return (
+    cancellationTransition ||
+    (futureWorkshop && workshop.startsAt.getTime() - now <= announcementWindowMs)
+  );
+}
+
+function shouldWaitForAnnouncementWindow(
+  workshop: WorkshopRecord,
+  now: number,
+  announcementWindowMs: number,
+): boolean {
+  const statusCode = getWorkshopStatusCode(workshop);
+  return (
+    statusCode !== 'cancelled' &&
+    statusCode !== 'private' &&
+    statusCode !== 'hidden' &&
+    workshop.startsAt.getTime() > now &&
+    workshop.startsAt.getTime() - now > announcementWindowMs
+  );
 }
 
 function isAnnouncementDue(stored: StoredWorkshop, now: number, delayMs: number): boolean {

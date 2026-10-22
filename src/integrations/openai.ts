@@ -26,6 +26,7 @@ const recognitionSchema = z.object({
 });
 
 const FRAME_LIMIT = 4;
+const MAX_OUTPUT_TOKENS = 512;
 
 /**
  * Uses the OpenAI Responses API only as an image reader. The counting rules
@@ -51,7 +52,7 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
         model: this.options.model,
         reasoning: { effort: this.options.reasoningEffort },
         store: false,
-        max_output_tokens: 64,
+        max_output_tokens: MAX_OUTPUT_TOKENS,
         input: [
           {
             role: 'user',
@@ -96,7 +97,14 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
     const body: unknown = await response.json();
     const outputText = readOutputText(body);
     if (!outputText) {
-      throw new Error('OpenAI number recognition returned no structured output');
+      const diagnostics = summarizeResponse(body, outputText);
+      this.options.logger.warn(
+        diagnostics,
+        'OpenAI number recognition returned no structured output',
+      );
+      throw new Error(
+        `OpenAI number recognition returned no structured output (${formatDiagnostics(diagnostics)})`,
+      );
     }
 
     let parsed: unknown;
@@ -115,6 +123,16 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
 
     return result.data.number;
   }
+}
+
+interface ResponseDiagnostics {
+  responseId: string | null;
+  status: string | null;
+  incompleteReason: string | null;
+  outputCount: number;
+  outputTypes: string[];
+  outputTextLength: number;
+  refusal: boolean;
 }
 
 export function createOpenAINumberRecognizer(
@@ -179,6 +197,77 @@ function readOutputText(value: unknown): string | undefined {
   }
 
   return textParts.join('').trim() || undefined;
+}
+
+function summarizeResponse(value: unknown, outputText: string | undefined): ResponseDiagnostics {
+  if (!isRecord(value)) {
+    return {
+      responseId: null,
+      status: null,
+      incompleteReason: null,
+      outputCount: 0,
+      outputTypes: [],
+      outputTextLength: outputText?.length ?? 0,
+      refusal: false,
+    };
+  }
+
+  const output = Array.isArray(value.output) ? value.output : [];
+  const outputTypes = new Set<string>();
+  let refusal = false;
+  for (const outputItem of output) {
+    if (!isRecord(outputItem)) {
+      continue;
+    }
+
+    if (typeof outputItem.type === 'string') {
+      outputTypes.add(outputItem.type);
+    }
+
+    if (!Array.isArray(outputItem.content)) {
+      continue;
+    }
+
+    for (const content of outputItem.content) {
+      if (!isRecord(content)) {
+        continue;
+      }
+
+      if (typeof content.type === 'string') {
+        outputTypes.add(content.type);
+      }
+      if (content.type === 'refusal' || typeof content.refusal === 'string') {
+        refusal = true;
+      }
+    }
+  }
+
+  const incompleteDetails = isRecord(value.incomplete_details)
+    ? value.incomplete_details
+    : undefined;
+
+  return {
+    responseId: typeof value.id === 'string' ? value.id : null,
+    status: typeof value.status === 'string' ? value.status : null,
+    incompleteReason:
+      incompleteDetails && typeof incompleteDetails.reason === 'string'
+        ? incompleteDetails.reason
+        : null,
+    outputCount: output.length,
+    outputTypes: [...outputTypes].sort(),
+    outputTextLength: outputText?.length ?? 0,
+    refusal,
+  };
+}
+
+function formatDiagnostics(diagnostics: ResponseDiagnostics): string {
+  return [
+    `status=${diagnostics.status ?? 'unknown'}`,
+    `reason=${diagnostics.incompleteReason ?? 'none'}`,
+    `outputCount=${diagnostics.outputCount}`,
+    `outputTypes=${diagnostics.outputTypes.join('|') || 'none'}`,
+    `refusal=${diagnostics.refusal}`,
+  ].join(', ');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

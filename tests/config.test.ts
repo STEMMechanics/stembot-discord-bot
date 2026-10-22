@@ -38,6 +38,7 @@ describe('loadConfig', () => {
       },
       workshops: {
         announcementsEnabled: true,
+        announcementWindowMs: 2419200000,
         announcementDelayMs: 1800000,
         announceInitialSync: false,
         pollIntervalMs: 300000,
@@ -76,6 +77,7 @@ describe('loadConfig', () => {
       DISCORD_WORKSHOP_REMINDER_CHANNEL_ID: '223456789012345678',
       STEMCRAFT_STATUS_TOKEN: 'status-token',
       WORKSHOP_ANNOUNCEMENTS_ENABLED: 'false',
+      WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS: '14',
       WORKSHOP_POLL_INTERVAL_MS: '60000',
       WORKSHOP_REMINDER_1H_ENABLED: '0',
       WORKSHOP_TIME_ZONE: 'UTC',
@@ -83,6 +85,7 @@ describe('loadConfig', () => {
 
     expect(config.workshops).toMatchObject({
       announcementsEnabled: false,
+      announcementWindowMs: 1209600000,
       pollIntervalMs: 60000,
       reminder1HourEnabled: false,
       timeZone: 'UTC',

@@ -20,6 +20,7 @@ type SendChannelPayload = (
 const config: WorkshopNotificationConfig = {
   timeZone: 'Australia/Brisbane',
   announcementsEnabled: true,
+  announcementWindowMs: 28 * 24 * 60 * 60 * 1000,
   announcementDelayMs: 0,
   remindersEnabled: true,
   reminder24HoursEnabled: true,
@@ -115,7 +116,7 @@ describe('persistent workshop notifications', () => {
 
     expect(sendChannelMessage).toHaveBeenCalledTimes(1);
     expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
-      content: expect.stringContaining('New: [Updated Before Announcement]'),
+      content: expect.stringContaining('📣 New: **[Updated Before Announcement]'),
     });
     expect(state.state).toMatchObject({
       workshopNotifications: {
@@ -126,6 +127,41 @@ describe('persistent workshop notifications', () => {
           },
         },
       },
+    });
+  });
+
+  it('waits to announce a workshop until it is within the configured future window', async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const startsAt = new Date(now.getTime() + 29 * day);
+    const workshopToAnnounce = workshop({ startsAt });
+    const website: WebsiteIntegration = {
+      getWorkshops: vi.fn().mockResolvedValue([workshopToAnnounce]),
+    };
+    const state = new MemoryStateStore();
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
+    let currentTime = new Date(now);
+    const clock = () => new Date(currentTime);
+
+    await createService(website, state, sendChannelMessage, config, clock).synchronizeWorkshops();
+
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      workshopNotifications: {
+        workshops: {
+          'redstone-1': {
+            pendingAnnouncement: null,
+            lastAnnouncedFingerprint: null,
+          },
+        },
+      },
+    });
+
+    currentTime = new Date(now.getTime() + 2 * day);
+    await createService(website, state, sendChannelMessage, config, clock).synchronizeWorkshops();
+
+    expect(sendChannelMessage).toHaveBeenCalledOnce();
+    expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
+      content: expect.stringContaining('📣 New: **[Redstone Music Challenge]'),
     });
   });
 
@@ -141,7 +177,7 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(1);
     expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
-      content: expect.stringContaining('New: [Redstone Music Challenge]'),
+      content: expect.stringContaining('📣 New: **[Redstone Music Challenge]'),
       heroImageUrl: 'https://www.stemmechanics.com.au/media/download/redstone.png',
     });
 
@@ -149,7 +185,7 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
     expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
-      content: expect.stringContaining('Updated: [Updated Redstone Music Challenge]'),
+      content: expect.stringContaining('✏️ Updated: **[Updated Redstone Music Challenge]'),
     });
 
     currentWorkshop = workshop({
@@ -160,7 +196,7 @@ describe('persistent workshop notifications', () => {
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
     expect(sendChannelMessage).toHaveBeenCalledTimes(3);
     expect(sendChannelMessage.mock.calls[2]?.[1]).toMatchObject({
-      content: expect.stringContaining('Cancelled: [Updated Redstone Music Challenge]'),
+      content: expect.stringContaining('❌ Cancelled: **[Updated Redstone Music Challenge]'),
     });
 
     await createService(website, state, sendChannelMessage).synchronizeWorkshops();
@@ -180,7 +216,7 @@ describe('persistent workshop notifications', () => {
     );
 
     expect(message.content).toContain(
-      'New: [Redstone Music Challenge](https://example.test/workshops/redstone)',
+      '📣 New: **[Redstone Music Challenge](https://example.test/workshops/redstone)**',
     );
     expect(message.content).toContain(
       'Can you use redstone to turn Minecraft into a musical instrument? Throughout October, jump into the challenge.',
@@ -308,7 +344,7 @@ describe('persistent workshop notifications', () => {
 
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
     expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
-      content: expect.stringContaining('New: [Redstone Music Challenge]'),
+      content: expect.stringContaining('📣 New: **[Redstone Music Challenge]'),
     });
   });
 
@@ -332,7 +368,32 @@ describe('persistent workshop notifications', () => {
 
     expect(sendChannelMessage).toHaveBeenCalledTimes(2);
     expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
-      content: expect.stringContaining('Cancelled:'),
+      content: expect.stringContaining('❌ Cancelled:'),
+    });
+  });
+
+  it('announces a cancellation even when the original workshop was outside the window', async () => {
+    let currentWorkshop = workshop({
+      startsAt: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000),
+    });
+    const website: WebsiteIntegration = {
+      getWorkshops: vi.fn().mockImplementation(() => Promise.resolve([currentWorkshop])),
+    };
+    const state = new MemoryStateStore();
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
+
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+
+    currentWorkshop = workshop({
+      startsAt: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000),
+      statusCode: 'cancelled',
+    });
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+
+    expect(sendChannelMessage).toHaveBeenCalledOnce();
+    expect(sendChannelMessage.mock.calls[0]?.[1]).toMatchObject({
+      content: expect.stringContaining('❌ Cancelled:'),
     });
   });
 });

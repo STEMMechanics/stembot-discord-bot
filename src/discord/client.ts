@@ -135,6 +135,17 @@ export function createDiscordGateway(
 
   if (dependencies.countingChain && config.countingChain.enabled) {
     client.on(Events.MessageCreate, (message) => {
+      if (message.channelId === config.countingChain.channelId) {
+        logger.info(
+          {
+            channelId: message.channelId,
+            messageId: message.id,
+            attachmentCount: message.attachments.size,
+            authorIsBot: message.author.bot,
+          },
+          'Counting chain Discord message received',
+        );
+      }
       void dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
     });
   }
