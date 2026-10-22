@@ -198,6 +198,19 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       }
       state.workshops[workshop.externalId] = stored;
       await this.saveState(rootState, state);
+      if (pendingAnnouncement) {
+        this.dependencies.logger.info(
+          {
+            workshopId: workshop.externalId,
+            kind: pendingAnnouncement,
+            pendingAnnouncementAt: stored.pendingAnnouncementAt,
+            announcementDueAt: new Date(
+              now.getTime() + this.dependencies.config.announcementDelayMs,
+            ).toISOString(),
+          },
+          'Workshop announcement queued',
+        );
+      }
     } else if (existing.fingerprint !== fingerprint) {
       if (!publicWorkshop) {
         updateStoredWorkshop(existing, workshop, fingerprint);

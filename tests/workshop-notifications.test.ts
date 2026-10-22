@@ -289,6 +289,27 @@ describe('persistent workshop notifications', () => {
     });
   });
 
+  it('re-announces a workshop whose local record was removed after initial sync', async () => {
+    const website: WebsiteIntegration = {
+      getWorkshops: vi.fn().mockResolvedValue([workshop()]),
+    };
+    const state = new MemoryStateStore();
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
+
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+    const notificationState = state.state.workshopNotifications as {
+      workshops: Record<string, unknown>;
+    };
+    delete notificationState.workshops['redstone-1'];
+
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+
+    expect(sendChannelMessage).toHaveBeenCalledTimes(2);
+    expect(sendChannelMessage.mock.calls[1]?.[1]).toMatchObject({
+      content: expect.stringContaining('New: [Redstone Music Challenge]'),
+    });
+  });
+
   it('processes a cancellation retained after the workshop date', async () => {
     let currentWorkshop = workshop();
     const website: WebsiteIntegration = {

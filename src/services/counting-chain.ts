@@ -71,6 +71,7 @@ interface CountingChainState {
   version: 1;
   game: CountingChainGameState | null;
   infoMessageId: string | null;
+  historyRecoveryPending: boolean;
 }
 
 const STATE_KEY = 'countingChain';
@@ -156,7 +157,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const rootState = await this.dependencies.state.load();
     const rawCountingChainState = rootState[STATE_KEY];
     const state = readCountingChainState(rawCountingChainState, channelId);
-    if (state.game) {
+    if (state.game && !state.historyRecoveryPending) {
       if (!hasFlatGameState(rawCountingChainState)) {
         writeCountingChainState(rootState, state);
         await this.dependencies.state.save(rootState);
@@ -175,7 +176,18 @@ export class PersistentCountingChainService implements CountingChainService {
       { channelId },
       'Counting chain startup recovery checking recent Discord history',
     );
-    const history = await historyProvider();
+    let history: readonly CountingChainHistoryMessage[];
+    try {
+      history = await historyProvider();
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId },
+        'Counting chain Discord history could not be read; silently resetting',
+      );
+      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state, true);
+      return;
+    }
+
     this.dependencies.logger.info(
       { channelId, historyCount: history.length },
       'Counting chain Discord history fetched for startup recovery',
@@ -210,6 +222,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRoundAt: this.currentTime().toISOString(),
         lastRoundReason: null,
       };
+      state.historyRecoveryPending = false;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       this.dependencies.logger.info(
@@ -417,8 +430,10 @@ async function saveInitialState(
   state: CountingChainState,
   now: Date,
   stateStore: StateStore<JsonState>,
+  historyRecoveryPending = false,
 ): Promise<void> {
   state.game = createInitialGameState(now);
+  state.historyRecoveryPending = historyRecoveryPending;
   writeCountingChainState(rootState, state);
   await stateStore.save(rootState);
 }
@@ -427,6 +442,7 @@ function writeCountingChainState(rootState: JsonState, state: CountingChainState
   rootState[STATE_KEY] = {
     version: state.version,
     infoMessageId: state.infoMessageId,
+    ...(state.historyRecoveryPending ? { historyRecoveryPending: true } : {}),
     ...(state.game ?? {}),
   };
 }
@@ -465,7 +481,7 @@ function isCountingChainFailureMessage(message: CountingChainHistoryMessage): bo
 
 function readCountingChainState(value: unknown, channelId?: string): CountingChainState {
   if (!isRecord(value) || value.version !== 1) {
-    return { version: 1, game: null, infoMessageId: null };
+    return { version: 1, game: null, infoMessageId: null, historyRecoveryPending: false };
   }
 
   const currentGame = readGameState(value);
@@ -483,6 +499,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     version: 1,
     game: currentGame ?? nestedGame ?? legacyGame ?? null,
     infoMessageId: readNullableString(value.infoMessageId),
+    historyRecoveryPending: value.historyRecoveryPending === true,
   };
 }
 

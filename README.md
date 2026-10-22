@@ -82,6 +82,15 @@ starts at `1` after a `❌`/`⚠️` reaction or game-over/read-failure reply, a
 does not send reactions or replies while recovering old messages. Missing or
 unreadable history also results in a silent reset.
 
+If the logs report `Unknown Channel` during startup recovery, the configured
+`COUNTING_CHAIN_CHANNEL_ID` is not a readable channel for this bot. Check that
+the ID is the channel ID rather than a message ID, that the channel still
+exists in the configured guild, and that the bot has `View Channel` and `Read
+Message History`. STEMBot records a reset at `1` and marks history recovery as
+pending when history cannot be read. It retries recovery on the next startup,
+so correcting the channel configuration and permissions does not require
+manually editing the game fields.
+
 ### Discord command synchronization
 
 `npm run sync:commands` performs a complete Discord replacement with the five
@@ -209,6 +218,7 @@ when editing it offline:
   "countingChain": {
     "version": 1,
     "infoMessageId": "DISCORD_INFO_MESSAGE_ID",
+    "historyRecoveryPending": false,
     "expectedNumber": 67,
     "lastAuthorId": "DISCORD_USER_ID",
     "lastMessageId": "DISCORD_MESSAGE_ID",
@@ -228,6 +238,9 @@ accepted number, and `lastRound` is the score reached before the latest reset.
 display note. The bot accepts older records without the score fields and fills
 them in on the next state write. It also accepts the previous nested `game` and
 channel-keyed `games` shapes and rewrites them to this flat shape at startup.
+`historyRecoveryPending` is written only when Discord history could not be
+read; it causes the next startup to retry recovery rather than accepting the
+temporary reset as the authoritative chain state.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 

@@ -360,6 +360,44 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('persists a reset and retries history recovery after Discord history cannot be read', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(7),
+    };
+    const historyMessage = createHistoryMessage('user-1', 'history-message');
+    const historyProvider = vi
+      .fn<() => Promise<readonly CountingChainHistoryMessage[]>>()
+      .mockRejectedValueOnce(new Error('Unknown Channel'))
+      .mockResolvedValueOnce([historyMessage]);
+
+    await createService(state, recognizer).initialize(historyProvider);
+
+    expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        version: 1,
+        historyRecoveryPending: true,
+        expectedNumber: 1,
+        lastAuthorId: null,
+        lastMessageId: null,
+        highScore: 0,
+      },
+    });
+
+    await createService(state, recognizer).initialize(historyProvider);
+
+    expect(historyProvider).toHaveBeenCalledTimes(2);
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 8,
+        lastMessageId: 'history-message',
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('historyRecoveryPending');
+  });
+
   it('ignores messages outside the configured channel and bot messages', async () => {
     const state = new MemoryStateStore();
     const recognizer = { recognizeNumber: vi.fn().mockResolvedValue(1) };
