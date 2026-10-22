@@ -157,14 +157,14 @@ export class PersistentCountingChainService implements CountingChainService {
     const rawCountingChainState = rootState[STATE_KEY];
     const state = readCountingChainState(rawCountingChainState, channelId);
     if (state.game) {
-      if (!hasCurrentGameState(rawCountingChainState)) {
-        rootState[STATE_KEY] = state;
+      if (!hasFlatGameState(rawCountingChainState)) {
+        writeCountingChainState(rootState, state);
         await this.dependencies.state.save(rootState);
       }
       this.dependencies.logger.info(
         {
           channelId,
-          stateSource: hasCurrentGameState(rawCountingChainState) ? 'current' : 'legacy',
+          stateSource: hasFlatGameState(rawCountingChainState) ? 'current' : 'legacy',
         },
         'Counting chain state already exists; skipping history recovery',
       );
@@ -182,25 +182,13 @@ export class PersistentCountingChainService implements CountingChainService {
     );
     const latestMessage = findLatestRelevantHistoryMessage(history);
     if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
-      await saveInitialState(
-        rootState,
-        state,
-        channelId,
-        this.currentTime(),
-        this.dependencies.state,
-      );
+      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
       return;
     }
 
     const attachment = selectImageAttachment(latestMessage.attachments);
     if (!attachment) {
-      await saveInitialState(
-        rootState,
-        state,
-        channelId,
-        this.currentTime(),
-        this.dependencies.state,
-      );
+      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
       return;
     }
 
@@ -222,7 +210,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRoundAt: this.currentTime().toISOString(),
         lastRoundReason: null,
       };
-      rootState[STATE_KEY] = state;
+      writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       this.dependencies.logger.info(
         {
@@ -239,13 +227,7 @@ export class PersistentCountingChainService implements CountingChainService {
         { err: error, channelId, messageId: latestMessage.id },
         'Counting chain history image could not be read; silently resetting',
       );
-      await saveInitialState(
-        rootState,
-        state,
-        channelId,
-        this.currentTime(),
-        this.dependencies.state,
-      );
+      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
     }
   }
 
@@ -301,7 +283,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRoundAt: game.lastRoundAt,
         lastRoundReason: game.lastRoundReason,
       };
-      rootState[STATE_KEY] = state;
+      writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
       await this.react(message, PASS_REACTION);
@@ -318,7 +300,7 @@ export class PersistentCountingChainService implements CountingChainService {
       lastRoundAt: now.toISOString(),
       lastRoundReason: message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number',
     });
-    rootState[STATE_KEY] = state;
+    writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
     await this.react(message, RULE_FAILURE_REACTION);
@@ -388,7 +370,7 @@ export class PersistentCountingChainService implements CountingChainService {
       const infoMessageId = await this.infoPublisher.update(game, state.infoMessageId ?? undefined);
       if (infoMessageId && infoMessageId !== state.infoMessageId) {
         state.infoMessageId = infoMessageId;
-        rootState[STATE_KEY] = state;
+        writeCountingChainState(rootState, state);
         await this.dependencies.state.save(rootState);
       }
     } catch (error: unknown) {
@@ -433,13 +415,20 @@ export function createCountingChainService(
 async function saveInitialState(
   rootState: JsonState,
   state: CountingChainState,
-  channelId: string,
   now: Date,
   stateStore: StateStore<JsonState>,
 ): Promise<void> {
   state.game = createInitialGameState(now);
-  rootState[STATE_KEY] = state;
+  writeCountingChainState(rootState, state);
   await stateStore.save(rootState);
+}
+
+function writeCountingChainState(rootState: JsonState, state: CountingChainState): void {
+  rootState[STATE_KEY] = {
+    version: state.version,
+    infoMessageId: state.infoMessageId,
+    ...(state.game ?? {}),
+  };
 }
 
 function findLatestRelevantHistoryMessage(
@@ -479,9 +468,10 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     return { version: 1, game: null, infoMessageId: null };
   }
 
-  const currentGame = readGameState(value.game);
+  const currentGame = readGameState(value);
+  const nestedGame = !currentGame ? readGameState(value.game) : undefined;
   const legacyGame =
-    !currentGame && isRecord(value.games)
+    !currentGame && !nestedGame && isRecord(value.games)
       ? readGameState(
           channelId
             ? value.games[channelId]
@@ -491,13 +481,18 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
 
   return {
     version: 1,
-    game: currentGame ?? legacyGame ?? null,
+    game: currentGame ?? nestedGame ?? legacyGame ?? null,
     infoMessageId: readNullableString(value.infoMessageId),
   };
 }
 
-function hasCurrentGameState(value: unknown): boolean {
-  return isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'game');
+function hasFlatGameState(value: unknown): boolean {
+  return (
+    readCountingChainState(value).game !== null &&
+    isRecord(value) &&
+    !Object.prototype.hasOwnProperty.call(value, 'game') &&
+    !Object.prototype.hasOwnProperty.call(value, 'games')
+  );
 }
 
 function readGameState(value: unknown): CountingChainGameState | undefined {

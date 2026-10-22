@@ -209,17 +209,15 @@ when editing it offline:
   "countingChain": {
     "version": 1,
     "infoMessageId": "DISCORD_INFO_MESSAGE_ID",
-    "game": {
-      "expectedNumber": 67,
-      "lastAuthorId": "DISCORD_USER_ID",
-      "lastMessageId": "DISCORD_MESSAGE_ID",
-      "updatedAt": "2026-10-23T00:00:00.000Z",
-      "highScore": 66,
-      "highScoreAt": "2026-10-22T23:55:00.000Z",
-      "lastRound": 66,
-      "lastRoundAt": "2026-10-22T23:56:00.000Z",
-      "lastRoundReason": "same-user"
-    }
+    "expectedNumber": 67,
+    "lastAuthorId": "DISCORD_USER_ID",
+    "lastMessageId": "DISCORD_MESSAGE_ID",
+    "updatedAt": "2026-10-23T00:00:00.000Z",
+    "highScore": 66,
+    "highScoreAt": "2026-10-22T23:55:00.000Z",
+    "lastRound": 66,
+    "lastRoundAt": "2026-10-22T23:56:00.000Z",
+    "lastRoundReason": "same-user"
   }
 }
 ```
@@ -228,8 +226,8 @@ when editing it offline:
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
 display note. The bot accepts older records without the score fields and fills
-them in on the next state write. It also accepts the previous channel-keyed
-`games` shape and rewrites it to the single `game` shape at startup.
+them in on the next state write. It also accepts the previous nested `game` and
+channel-keyed `games` shapes and rewrites them to this flat shape at startup.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 

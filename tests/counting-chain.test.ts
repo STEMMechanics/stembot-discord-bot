@@ -107,11 +107,9 @@ describe('counting-chain service', () => {
     expect(second.reply).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        game: {
-          expectedNumber: 3,
-          lastAuthorId: 'user-2',
-          lastMessageId: 'message-2',
-        },
+        expectedNumber: 3,
+        lastAuthorId: 'user-2',
+        lastMessageId: 'message-2',
       },
     });
   });
@@ -137,11 +135,9 @@ describe('counting-chain service', () => {
     );
     expect(state.state).toMatchObject({
       countingChain: {
-        game: {
-          expectedNumber: 1,
-          lastAuthorId: null,
-          lastMessageId: null,
-        },
+        expectedNumber: 1,
+        lastAuthorId: null,
+        lastMessageId: null,
       },
     });
   });
@@ -165,7 +161,7 @@ describe('counting-chain service', () => {
     expect(second.reply).toHaveBeenCalledOnce();
     expect(state.state).toMatchObject({
       countingChain: {
-        game: { expectedNumber: 1 },
+        expectedNumber: 1,
       },
     });
   });
@@ -220,7 +216,7 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('👍');
     expect(state.state).toMatchObject({
       countingChain: {
-        game: { expectedNumber: 3 },
+        expectedNumber: 3,
       },
     });
   });
@@ -241,7 +237,7 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('👍');
     expect(state.state).toMatchObject({
       countingChain: {
-        game: { expectedNumber: 3 },
+        expectedNumber: 3,
       },
     });
   });
@@ -283,7 +279,7 @@ describe('counting-chain service', () => {
 
     expect(state.state).toMatchObject({
       countingChain: {
-        game: { expectedNumber: 9 },
+        expectedNumber: 9,
       },
     });
   });
@@ -310,10 +306,8 @@ describe('counting-chain service', () => {
     expect(state.state).toMatchObject({
       countingChain: {
         infoMessageId: 'info-message',
-        game: {
-          expectedNumber: 13,
-          lastMessageId: 'history-message',
-        },
+        expectedNumber: 13,
+        lastMessageId: 'history-message',
       },
     });
     expect(state.state.countingChain).not.toHaveProperty('games');
@@ -344,11 +338,9 @@ describe('counting-chain service', () => {
     expect(failedMessage.reply).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        game: {
-          expectedNumber: 1,
-          highScore: 0,
-          lastRound: 0,
-        },
+        expectedNumber: 1,
+        highScore: 0,
+        lastRound: 0,
       },
     });
   });
@@ -363,7 +355,7 @@ describe('counting-chain service', () => {
     expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
     expect(state.state).toMatchObject({
       countingChain: {
-        game: { expectedNumber: 1 },
+        expectedNumber: 1,
       },
     });
   });
