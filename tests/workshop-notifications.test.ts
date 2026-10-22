@@ -89,9 +89,11 @@ describe('persistent workshop notifications', () => {
         expect.objectContaining({
           title: 'Redstone Music Challenge',
           url: 'https://example.test/workshops/redstone',
-          image: { url: 'https://example.test/workshops/redstone.png' },
         }),
       ],
+    });
+    expect(sendChannelMessage.mock.calls[0]?.[1]).not.toMatchObject({
+      embeds: [expect.objectContaining({ image: expect.anything() })],
     });
 
     currentWorkshop = workshop({ title: 'Updated Redstone Music Challenge' });
@@ -119,6 +121,8 @@ describe('persistent workshop notifications', () => {
   it('includes the registration call to action in announcement messages', () => {
     const message = formatWorkshopAnnouncement(
       workshop({
+        description:
+          'Can you use redstone to turn Minecraft into a musical instrument?Throughout October, jump into the challenge.\n\nSat 24 Oct 2026 4:00pm · STEMCraft',
         registrationType: 'interest',
         registrationUrl: 'https://example.test/interest',
       }),
@@ -137,6 +141,13 @@ describe('persistent workshop notifications', () => {
         },
       ]),
     });
+    expect(message.embeds?.[0]).not.toHaveProperty('image');
+    expect(message.embeds?.[0]?.fields).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Status' })]),
+    );
+    expect(message.embeds?.[0]?.description).toBe(
+      'Can you use redstone to turn Minecraft into a musical instrument? Throughout October, jump into the challenge.',
+    );
   });
 
   it('sends each due reminder once and persists the marker', async () => {

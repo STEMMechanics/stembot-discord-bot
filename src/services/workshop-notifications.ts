@@ -377,14 +377,12 @@ function formatWorkshopCard(
   timeZone: string,
   color: number,
 ): DiscordChannelMessage {
-  const statusCode = getWorkshopStatusCode(workshop);
   const registration = formatWorkshopRegistration(workshop);
   const fields: APIEmbed['fields'] = [
     { name: 'When', value: formatWorkshopDateRange(workshop, timeZone), inline: true },
     ...(workshop.location
       ? [{ name: 'Where', value: truncateEmbedText(workshop.location), inline: true }]
       : []),
-    ...(statusCode !== 'unknown' ? [{ name: 'Status', value: statusCode, inline: true }] : []),
     ...(workshop.price
       ? [{ name: 'Price', value: truncateEmbedText(workshop.price), inline: true }]
       : []),
@@ -396,7 +394,7 @@ function formatWorkshopCard(
       : []),
   ];
 
-  const description = workshop.description?.trim();
+  const description = formatWorkshopDescription(workshop.description);
   const embed: APIEmbed = {
     title: workshop.title,
     url: workshop.url,
@@ -404,13 +402,28 @@ function formatWorkshopCard(
     fields,
     footer: { text: 'STEMMechanics Workshops' },
     ...(description ? { description: truncateEmbedText(description, 1800) } : {}),
-    ...(workshop.imageUrl?.startsWith('https://') ? { image: { url: workshop.imageUrl } } : {}),
   };
 
   return {
     content: `${heading}: **${workshop.title}**`,
     embeds: [embed],
   };
+}
+
+function formatWorkshopDescription(description: string | undefined): string {
+  if (!description) {
+    return '';
+  }
+
+  return description
+    .trim()
+    .replace(
+      /\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm)\s+·\s+[^\r\n]+$/i,
+      '',
+    )
+    .replace(/([.!?,;:])(?=[A-Z])/g, '$1 ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function formatWorkshopDateRange(workshop: WorkshopRecord, timeZone: string): string {
