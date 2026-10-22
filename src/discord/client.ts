@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, type APIEmbed } from 'discord.js';
+import { Client, Events, GatewayIntentBits, type APIEmbed, type Message } from 'discord.js';
 import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
@@ -6,6 +6,7 @@ import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
+import type { CountingChainMessage, CountingChainService } from '../services/counting-chain.js';
 import { handleInteraction } from './interaction-handler.js';
 
 export interface DiscordGateway {
@@ -26,6 +27,7 @@ export interface DiscordCommandDependencies {
   website: WebsiteIntegration;
   stemcraft: StemCraftIntegration;
   timeZone: string;
+  countingChain?: CountingChainService;
 }
 
 export function createDiscordGateway(
@@ -35,8 +37,13 @@ export function createDiscordGateway(
 ): DiscordGateway {
   configureNetworkDefaults();
 
+  const intents = [GatewayIntentBits.Guilds];
+  if (config.countingChain.enabled && dependencies.countingChain) {
+    intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+  }
+
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents,
   });
 
   client.once(Events.ClientReady, (readyClient) => {
@@ -80,6 +87,12 @@ export function createDiscordGateway(
       timeZone: dependencies.timeZone,
     });
   });
+
+  if (dependencies.countingChain) {
+    client.on(Events.MessageCreate, (message) => {
+      void dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
+    });
+  }
 
   client.on(Events.Error, (error) => {
     logger.error({ err: error }, 'Discord client error');
@@ -143,6 +156,30 @@ export function createDiscordGateway(
       };
       const sentMessage = await channel.send(payload);
       return sentMessage.id;
+    },
+  };
+}
+
+function toCountingChainMessage(message: Message): CountingChainMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    attachments: [...message.attachments.values()].map((attachment) => ({
+      url: attachment.url,
+      ...(attachment.name ? { name: attachment.name } : {}),
+      ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
+      ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    })),
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
+    },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
     },
   };
 }

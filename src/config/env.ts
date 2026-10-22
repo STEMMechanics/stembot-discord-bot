@@ -47,6 +47,13 @@ function positiveMilliseconds(defaultValue: number, maximum: number) {
   );
 }
 
+function positiveInteger(defaultValue: number, maximum: number) {
+  return z.preprocess(
+    (value) => (value === undefined || value === '' ? defaultValue : value),
+    z.coerce.number().int().positive().max(maximum),
+  );
+}
+
 const environmentSchema = z.object({
   DISCORD_TOKEN: z.string().trim().min(1, 'is required'),
   DISCORD_CLIENT_ID: z.string().trim().regex(/^\d+$/, 'must be a Discord application ID'),
@@ -65,6 +72,10 @@ const environmentSchema = z.object({
   STEMCRAFT_STATUS_URL: z.string().trim().url().default('http://play.stemcraft.com.au:8950/status'),
   STEMCRAFT_STATUS_TOKEN: optionalSecret,
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
+  OPENAI_API_KEY: optionalSecret,
+  OPENAI_MODEL: z.string().trim().min(1).default('gpt-6-luna'),
+  OPENAI_REASONING_EFFORT: z.string().trim().min(1).default('max'),
+  OPENAI_TIMEOUT: positiveInteger(180, 600),
   WORKSHOP_TIME_ZONE: z.string().trim().min(1).default('Australia/Brisbane'),
   WORKSHOP_ANNOUNCEMENTS_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_ANNOUNCEMENT_DELAY_MS: positiveMilliseconds(1800000, 86400000),
@@ -76,6 +87,9 @@ const environmentSchema = z.object({
   DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID: optionalDiscordId,
   DISCORD_WORKSHOP_REMINDER_CHANNEL_ID: optionalDiscordId,
   DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID: optionalDiscordId,
+  COUNTING_CHAIN_ENABLED: booleanFromEnvironment(false),
+  COUNTING_CHAIN_CHANNEL_ID: optionalDiscordId,
+  COUNTING_CHAIN_MAX_ATTACHMENT_BYTES: positiveInteger(8 * 1024 * 1024, 20 * 1024 * 1024),
 });
 
 export type AppEnvironment = (typeof ENVIRONMENTS)[number];
@@ -97,6 +111,17 @@ export interface AppConfig {
     statusUrl: string;
     requestTimeoutMs: number;
     token?: string;
+  };
+  openai: {
+    apiKey?: string;
+    model: string;
+    reasoningEffort: string;
+    timeoutMs: number;
+  };
+  countingChain: {
+    enabled: boolean;
+    channelId?: string;
+    maxAttachmentBytes: number;
   };
   workshops: {
     timeZone: string;
@@ -130,6 +155,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const values = result.data;
 
+  if (values.COUNTING_CHAIN_ENABLED && !values.COUNTING_CHAIN_CHANNEL_ID) {
+    throw new Error('COUNTING_CHAIN_CHANNEL_ID is required when COUNTING_CHAIN_ENABLED is true');
+  }
+
+  if (values.COUNTING_CHAIN_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when COUNTING_CHAIN_ENABLED is true');
+  }
+
   try {
     new Intl.DateTimeFormat('en-AU', { timeZone: values.WORKSHOP_TIME_ZONE }).format();
   } catch (error: unknown) {
@@ -154,6 +187,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       statusUrl: values.STEMCRAFT_STATUS_URL,
       requestTimeoutMs: values.STEMCRAFT_REQUEST_TIMEOUT_MS,
       ...(values.STEMCRAFT_STATUS_TOKEN ? { token: values.STEMCRAFT_STATUS_TOKEN } : {}),
+    },
+    openai: {
+      ...(values.OPENAI_API_KEY ? { apiKey: values.OPENAI_API_KEY } : {}),
+      model: values.OPENAI_MODEL,
+      reasoningEffort: values.OPENAI_REASONING_EFFORT,
+      timeoutMs: values.OPENAI_TIMEOUT * 1000,
+    },
+    countingChain: {
+      enabled: values.COUNTING_CHAIN_ENABLED,
+      ...(values.COUNTING_CHAIN_CHANNEL_ID ? { channelId: values.COUNTING_CHAIN_CHANNEL_ID } : {}),
+      maxAttachmentBytes: values.COUNTING_CHAIN_MAX_ATTACHMENT_BYTES,
     },
     workshops: {
       timeZone: values.WORKSHOP_TIME_ZONE,

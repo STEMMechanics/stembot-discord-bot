@@ -1,10 +1,15 @@
 import type { AppConfig } from './config/env.js';
 import { createDiscordGateway, type DiscordGateway } from './discord/client.js';
+import { createOpenAINumberRecognizer } from './integrations/openai.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
 import { createWebsiteIntegration, type WebsiteIntegration } from './integrations/website.js';
 import { IntervalJobScheduler, type JobScheduler } from './jobs/scheduler.js';
 import type { AppLogger } from './logging/logger.js';
 import { registerCommands } from './register-commands.js';
+import {
+  createCountingChainService,
+  type CountingChainService,
+} from './services/counting-chain.js';
 import {
   createWorkshopNotificationService,
   type WorkshopNotificationService,
@@ -23,6 +28,7 @@ export interface ApplicationDependencies {
   state: StateStore<JsonState>;
   website: WebsiteIntegration;
   stemcraft: StemCraftIntegration;
+  countingChain?: CountingChainService;
   workshopNotifications: WorkshopNotificationService;
 }
 
@@ -46,15 +52,32 @@ export function createApplication(
       logger,
       ...(config.stemcraft.token ? { token: config.stemcraft.token } : {}),
     });
+  const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
+  const countingChain =
+    dependencies?.countingChain ??
+    (config.countingChain.enabled
+      ? createCountingChainService({
+          config: config.countingChain,
+          recognizer: createOpenAINumberRecognizer({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
+          state,
+          logger,
+        })
+      : undefined);
   const discord =
     dependencies?.discord ??
     createDiscordGateway(config, logger, {
       website,
       stemcraft,
       timeZone: config.workshops.timeZone,
+      ...(countingChain ? { countingChain } : {}),
     });
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
-  const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
   const workshopNotifications =
     dependencies?.workshopNotifications ??
     createWorkshopNotificationService({

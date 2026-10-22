@@ -17,21 +17,28 @@ credential may have been exposed, say which kind so it can be rotated quickly.
 
 ## Security expectations
 
-- Keep DISCORD_TOKEN, STEMCRAFT_STATUS_TOKEN and any deployment secrets in
+- Keep DISCORD_TOKEN, STEMCRAFT_STATUS_TOKEN, OPENAI_API_KEY and any deployment secrets in
   the host secret store or protected environment file. Never commit them or
   include them in issue reports.
 - Use a protected STEMCraft status path with network access controls and
   authentication. The default HTTP URL exists for compatibility and testing;
   it is not a production security boundary.
-- Grant the Discord bot only the Guilds intent and the channel permissions it
-  needs. Review notification channel access when the bot is installed or
+- Grant the Discord bot only the intents and channel permissions it needs.
+  The optional counting-chain minigame requires GuildMessages and the
+  privileged Message Content intent because Discord attachment data is needed;
+  review that access and the counting channel when the bot is installed or
   moved.
 - /players exposes Minecraft usernames only and is intended for authorised
   access to the protected STEMCraft response. Do not add UUIDs, account
   metadata, Discord identities or other personal information to public
   messages.
 - Keep the persistent state directory private. It contains workshop identity
-  data, fingerprints, Discord message IDs and reminder delivery markers.
+  data, fingerprints, Discord message IDs, reminder delivery markers and
+  transient counting-chain Discord IDs. It does not store counting images.
+- The counting-chain service sends submitted images to the configured OpenAI
+  API only when the feature is enabled. Keep the OpenAI key private, limit the
+  feature to its configured channel, and do not enable it until that external
+  image-processing flow is acceptable for the server's privacy requirements.
 - Review structured logs before sharing them. They should not contain tokens,
   response bodies or unnecessary player information.
 - Keep the Docker service unprivileged, read-only at the root filesystem,

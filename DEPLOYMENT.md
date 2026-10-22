@@ -17,9 +17,12 @@ and persistent state directory on the TrueNAS host.
 - Access to the published GitHub Container Registry image, or a local image
   mirror configured through STEMBOT_IMAGE.
 
-The bot needs only the Discord Guilds gateway intent. Give it View Channel and
-Send Messages in each configured notification channel, plus the permissions
-required to use application commands.
+The bot needs only the Discord Guilds gateway intent by default. If the
+counting-chain minigame is enabled, enable the privileged Message Content
+intent in the Discord Developer Portal; STEMBot then also requests
+GuildMessages. Give it View Channel and Send Messages in each configured
+notification or counting channel, Add Reactions in the counting channel, and
+the permissions required to use application commands.
 
 ## Configure the host
 
@@ -32,7 +35,9 @@ bearer token.
     chmod 600 .env
 
 Set at least DISCORD_TOKEN and DISCORD_CLIENT_ID. Set the workshop announcement
-and reminder channel IDs before enabling those notifications. Set
+and reminder channel IDs before enabling those notifications. If enabling the
+counting-chain minigame, set COUNTING_CHAIN_ENABLED, COUNTING_CHAIN_CHANNEL_ID
+and OPENAI_API_KEY. Set
 STEMCRAFT_STATUS_URL and STEMCRAFT_STATUS_TOKEN to the protected STEMCraft
 path agreed with the plugin and infrastructure owners. Do not expose port
 8950 directly to the Internet.

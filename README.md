@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, and 24-hour and 1-hour reminders. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, and an optional image-based counting-chain minigame. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ src/
   config/env.ts                  Validated environment configuration
   logging/logger.ts              Structured JSON logging with Pino
   discord/                       Client, commands, interactions, channel delivery
-  integrations/                  Website RSS and STEMCraft HTTP adapters
-  services/                      Workshop notifications and streaming boundary
+  integrations/                  Website, STEMCraft and OpenAI HTTP adapters
+  services/                      Workshop notifications and minigames
   jobs/                          Background interval scheduler
   state/                         Atomic JSON-file persistent state
 scripts/
@@ -46,6 +46,26 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
+
+### Counting-chain minigame
+
+When `COUNTING_CHAIN_ENABLED=true`, STEMBot watches only
+`COUNTING_CHAIN_CHANNEL_ID` for image attachments. The first accepted image
+must contain `1`; each following image must contain the next number and come
+from a different Discord member than the previous accepted image. Accepted
+images receive a `👍` reaction and advance the persisted channel state.
+
+A wrong number or two consecutive images from the same member receives `❌`,
+posts a short game-over message, and resets the channel to `1`. An unreadable,
+unsupported or temporarily unavailable image receives `⚠️` and a retry message;
+it does not change the game state. Bot messages and messages outside the
+configured channel are ignored.
+
+The bot downloads Discord CDN attachments, samples animated GIF frames as PNG
+images, and sends those frames to the configured OpenAI model. It stores the
+current number and Discord IDs, but does not store the image. Enable the
+Message Content intent in the Discord Developer Portal and grant the bot
+permission to add reactions and send messages in the counting channel.
 
 ### Discord command synchronization
 
@@ -120,32 +140,39 @@ npm run validate
 
 ## Configuration
 
-| Variable                                    | Required | Purpose                                                                                      |
-| ------------------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `DISCORD_TOKEN`                             | Yes      | Discord bot token. Keep it in the deployment secret store.                                   |
-| `DISCORD_CLIENT_ID`                         | Yes      | Discord application ID.                                                                      |
-| `DISCORD_GUILD_ID`                          | Yes      | The single Discord guild where STEMBot commands are registered.                              |
-| `WORKSHOP_FEED_URL`                         | No       | Website RSS URL; defaults to the STEMMechanics workshop feed.                                |
-| `WEBSITE_REQUEST_TIMEOUT_MS`                | No       | RSS request timeout; defaults to 15 seconds.                                                 |
-| `STEMCRAFT_STATUS_URL`                      | No       | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.                |
-| `STEMCRAFT_STATUS_TOKEN`                    | No       | Optional bearer token for a protected status endpoint.                                       |
-| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No       | Status request timeout; defaults to 5 seconds.                                               |
-| `WORKSHOP_TIME_ZONE`                        | No       | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.        |
-| `WORKSHOP_POLL_INTERVAL_MS`                 | No       | Feed polling interval; defaults to 5 minutes.                                                |
-| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No       | Enable new/update/cancellation announcements; defaults to `true`.                            |
-| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No       | Delay lifecycle announcements so early feed changes can be included; defaults to 30 minutes. |
-| `WORKSHOP_REMINDERS_ENABLED`                | No       | Enable workshop reminders; defaults to `true`.                                               |
-| `WORKSHOP_REMINDER_24H_ENABLED`             | No       | Enable the 24-hour reminder; defaults to `true`.                                             |
-| `WORKSHOP_REMINDER_1H_ENABLED`              | No       | Enable the 1-hour reminder; defaults to `true`.                                              |
-| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No       | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.        |
-| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No       | Channel for workshop lifecycle announcements.                                                |
-| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No       | Channel for 24-hour and 1-hour reminders.                                                    |
-| `STREAMING_NOTIFICATIONS_ENABLED`           | No       | Reserved setting for the streaming workflow; defaults to `false`.                            |
-| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No       | Reserved streaming notification channel.                                                     |
-| `STATE_PATH`                                | No       | Persistent JSON state path; defaults to `./data/state.json`.                                 |
-| `SHUTDOWN_TIMEOUT_MS`                       | No       | Graceful shutdown deadline; defaults to 30 seconds.                                          |
-| `NODE_ENV`                                  | No       | `development`, `test`, or `production`; defaults to `production`.                            |
-| `LOG_LEVEL`                                 | No       | Pino level; defaults to `info`.                                                              |
+| Variable                                    | Required     | Purpose                                                                                      |
+| ------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------- |
+| `DISCORD_TOKEN`                             | Yes          | Discord bot token. Keep it in the deployment secret store.                                   |
+| `DISCORD_CLIENT_ID`                         | Yes          | Discord application ID.                                                                      |
+| `DISCORD_GUILD_ID`                          | Yes          | The single Discord guild where STEMBot commands are registered.                              |
+| `WORKSHOP_FEED_URL`                         | No           | Website RSS URL; defaults to the STEMMechanics workshop feed.                                |
+| `WEBSITE_REQUEST_TIMEOUT_MS`                | No           | RSS request timeout; defaults to 15 seconds.                                                 |
+| `STEMCRAFT_STATUS_URL`                      | No           | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.                |
+| `STEMCRAFT_STATUS_TOKEN`                    | No           | Optional bearer token for a protected status endpoint.                                       |
+| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No           | Status request timeout; defaults to 5 seconds.                                               |
+| `OPENAI_API_KEY`                            | When enabled | OpenAI API key; keep it in the deployment secret store.                                      |
+| `OPENAI_MODEL`                              | No           | Vision model; defaults to `gpt-6-luna`.                                                      |
+| `OPENAI_REASONING_EFFORT`                   | No           | Model reasoning setting; defaults to `max` and remains model-dependent.                      |
+| `OPENAI_TIMEOUT`                            | No           | OpenAI request timeout in seconds; defaults to 180.                                          |
+| `COUNTING_CHAIN_ENABLED`                    | No           | Enable the image-based minigame; defaults to `false`.                                        |
+| `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled | Discord channel watched by the minigame.                                                     |
+| `COUNTING_CHAIN_MAX_ATTACHMENT_BYTES`       | No           | Maximum downloaded image size; defaults to 8 MiB.                                            |
+| `WORKSHOP_TIME_ZONE`                        | No           | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.        |
+| `WORKSHOP_POLL_INTERVAL_MS`                 | No           | Feed polling interval; defaults to 5 minutes.                                                |
+| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No           | Enable new/update/cancellation announcements; defaults to `true`.                            |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No           | Delay lifecycle announcements so early feed changes can be included; defaults to 30 minutes. |
+| `WORKSHOP_REMINDERS_ENABLED`                | No           | Enable workshop reminders; defaults to `true`.                                               |
+| `WORKSHOP_REMINDER_24H_ENABLED`             | No           | Enable the 24-hour reminder; defaults to `true`.                                             |
+| `WORKSHOP_REMINDER_1H_ENABLED`              | No           | Enable the 1-hour reminder; defaults to `true`.                                              |
+| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No           | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.        |
+| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No           | Channel for workshop lifecycle announcements.                                                |
+| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No           | Channel for 24-hour and 1-hour reminders.                                                    |
+| `STREAMING_NOTIFICATIONS_ENABLED`           | No           | Reserved setting for the streaming workflow; defaults to `false`.                            |
+| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No           | Reserved streaming notification channel.                                                     |
+| `STATE_PATH`                                | No           | Persistent JSON state path; defaults to `./data/state.json`.                                 |
+| `SHUTDOWN_TIMEOUT_MS`                       | No           | Graceful shutdown deadline; defaults to 30 seconds.                                          |
+| `NODE_ENV`                                  | No           | `development`, `test`, or `production`; defaults to `production`.                            |
+| `LOG_LEVEL`                                 | No           | Pino level; defaults to `info`.                                                              |
 
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -155,7 +182,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has a short linked heading (`New:`, `Updated:`, `Cancelled:`, `Starts in 24h:`, or `Starts in 1h:`), the available workshop description, a longer labelled details section, and the HTTPS hero image as a normal Discord attachment. Registration appears on its own line with a short varied prompt; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, and reminder delivery markers. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MS` before delivery; a later feed poll can update the pending content during that window. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, and the counting-chain state for each configured channel. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MS` before delivery; a later feed poll can update the pending content during that window. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 
@@ -237,7 +264,7 @@ in CI.
 
 ## Security and privacy
 
-The bot uses only the `Guilds` gateway intent. It needs channel permissions only where notifications are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, or API credentials.
+The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame additionally enables `GuildMessages` and the privileged `MessageContent` intent so Discord attachments can be inspected. It needs channel permissions only where notifications or the minigame are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
 The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
 

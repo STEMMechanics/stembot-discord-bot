@@ -13,8 +13,8 @@ Priority levels:
 ### STEMBot repository
 
 - Strict TypeScript/NodeNext project with ESLint, Prettier, Vitest, build validation, and a locked dependency tree.
-- Environment-based configuration for Discord credentials, external URLs, request timeouts, polling, timezone, channel IDs, reminder switches, announcement switches, optional STEMCraft bearer token, state path, and shutdown deadline.
-- Discord client using only the `Guilds` gateway intent, structured Pino logging, interaction routing, graceful shutdown, and generic command error handling.
+- Environment-based configuration for Discord credentials, external URLs, request timeouts, polling, timezone, channel IDs, reminder switches, announcement switches, optional STEMCraft bearer token, optional OpenAI counting-chain settings, state path, and shutdown deadline.
+- Discord client using the `Guilds` gateway intent by default, with opt-in `GuildMessages` and `MessageContent` intents for the counting-chain minigame, structured Pino logging, interaction routing, graceful shutdown, and generic command error handling.
 - Node.js outbound networking prefers IPv4 to avoid dual-stack REST callback delays on TrueNAS deployments where IPv6 is advertised but unavailable.
 - Production Compose configuration provides configurable explicit DNS resolvers for deployments whose default container resolver cannot reach Discord reliably.
 - Slash commands `/ping`, `/workshops`, `/joke`, `/minecraft`, and `/players` are synchronized by a replacement script before every bot startup. It explicitly removes existing global registrations, clears the global set, and replaces the configured single guild set; the same operation remains available as an explicit manual command.
@@ -23,6 +23,7 @@ Priority levels:
 - `/joke` serves a randomly selected robot-themed joke from a local set of more than 100 unique jokes.
 - `/minecraft` reports online state, maintenance, player count, capacity, version, and an optional status message.
 - `/players` is available without a role gate and outputs usernames only. The adapter rejects the operation with a specific capability result when the upstream response has no player array.
+- Optional counting-chain minigame watches one configured channel for image attachments, samples GIF frames, uses the OpenAI Responses API to identify a positive integer, reacts with `👍` for accepted numbers, resets with `❌` for wrong numbers or consecutive users, and uses `⚠️` without changing state when the image cannot be read.
 - Website RSS adapter using `fast-xml-parser`, including primary `sm:id` identity with GUID fallback, `sm:startDate`, `sm:endDate`, `sm:location`, `sm:price`, `sm:ages`, `sm:registrationType`, `sm:registrationUrl`, `sm:status`, `sm:statusCode`, `sm:type`, descriptions, enclosures, malformed-item skipping, timeout handling, and registration compatibility aliases.
 - Narrow compatibility handling for older escaped XML declarations (`&quot;`); it does not broadly HTML-decode arbitrary feed content.
 - STEMCraft HTTP adapter compatible with the deployed aggregate payload and username-only `players` array, plus older `online_players`, `player_list`, or camel-case arrays. It accepts optional bearer authentication and removes UUIDs/other identity fields at the integration boundary.
@@ -30,7 +31,7 @@ Priority levels:
 - 24-hour and 1-hour reminders driven by the workshop start instant. Late polling after a restart can still deliver a reminder while the workshop is in the future; cancelled workshops are skipped.
 - Workshop announcements and reminders use plain Discord messages with short linked headings, longer workshop details, standalone varied registration calls to action, and the Website feed's HTTPS hero image uploaded as a normal attachment. Ticket links use `Book now` and interest links use `Register interest`. Feed descriptions preserve basic formatting, stop before `Learning Outcomes`, and remove the generated date/location suffix. Lifecycle announcements are delayed by the configured 30-minute default so early feed changes can be included.
 - Persistent atomic JSON state mounted by Docker. Reminder keys and announcement fingerprints survive restarts and prevent normal duplicate delivery.
-- Tests for configuration validation, RSS parsing and date conversion, legacy XML compatibility, STEMCraft response compatibility, command formatting and permissions, workshop lifecycle announcements, reminder idempotency, and the existing state store.
+- Tests for configuration validation, RSS parsing and date conversion, legacy XML compatibility, STEMCraft response compatibility, command formatting and permissions, workshop lifecycle announcements, reminder idempotency, counting-chain progression/reset/restart behavior, OpenAI structured image responses, and the existing state store.
 - README and `.env.example` updated for the implemented commands, contracts, deployment, security, and remaining blockers.
 - Deployment, contributing and security documentation, plus the GPLv3 license used by the other STEMMechanics code repositories.
 - GitHub Actions container publishing to GHCR, a pull-based production Compose file, and a local Docker build override.

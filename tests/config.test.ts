@@ -27,6 +27,15 @@ describe('loadConfig', () => {
         requestTimeoutMs: 5000,
         statusUrl: 'http://play.stemcraft.com.au:8950/status',
       },
+      openai: {
+        model: 'gpt-6-luna',
+        reasoningEffort: 'max',
+        timeoutMs: 180000,
+      },
+      countingChain: {
+        enabled: false,
+        maxAttachmentBytes: 8388608,
+      },
       workshops: {
         announcementsEnabled: true,
         announcementDelayMs: 1800000,
@@ -92,5 +101,50 @@ describe('loadConfig', () => {
         WORKSHOP_TIME_ZONE: 'not-a-time-zone',
       }),
     ).toThrow(/WORKSHOP_TIME_ZONE/);
+  });
+
+  it('requires counting-chain credentials and a channel when enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        COUNTING_CHAIN_ENABLED: 'true',
+      }),
+    ).toThrow(/COUNTING_CHAIN_CHANNEL_ID/);
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        COUNTING_CHAIN_ENABLED: 'true',
+        COUNTING_CHAIN_CHANNEL_ID: '3234567890',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      COUNTING_CHAIN_ENABLED: 'true',
+      COUNTING_CHAIN_CHANNEL_ID: '3234567890',
+      OPENAI_API_KEY: 'openai-test-key',
+      OPENAI_MODEL: 'test-model',
+      OPENAI_REASONING_EFFORT: 'low',
+      OPENAI_TIMEOUT: '42',
+    });
+
+    expect(config.openai).toEqual({
+      apiKey: 'openai-test-key',
+      model: 'test-model',
+      reasoningEffort: 'low',
+      timeoutMs: 42000,
+    });
+    expect(config.countingChain).toEqual({
+      enabled: true,
+      channelId: '3234567890',
+      maxAttachmentBytes: 8388608,
+    });
   });
 });
