@@ -135,6 +135,33 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('processes a GIF when Discord adds the embed after the message event', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
+    };
+    const service = createService(state, recognizer);
+    const created = createMessage('user-1', 'message-updated', {
+      content: 'https://tenor.com/view/example',
+      attachments: [],
+    });
+    const updated = createMessage('user-1', 'message-updated', {
+      content: 'https://tenor.com/view/example',
+      attachments: [],
+      imageUrls: ['https://media.tenor.com/example/number.gif'],
+    });
+
+    await service.handleMessage(created);
+    await service.handleMessage(updated);
+    await service.handleMessage({ ...updated, botReactionEmojis: ['👍'] });
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(updated.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: { expectedNumber: 2, lastMessageId: 'message-updated' },
+    });
+  });
+
   it('processes an image URL supplied by a Discord embed during history recovery', async () => {
     const state = new MemoryStateStore();
     const recognizer = {

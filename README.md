@@ -66,6 +66,8 @@ URLs supplied by Discord embeds, samples animated GIF frames as PNG images, and
 sends those frames to the configured OpenAI model. Tenor, Giphy, Imgur, and
 Discord media hosts are supported. It stores the current number, score history
 and Discord IDs, but does not store the image.
+Discord GIF-picker embeds can arrive after the initial message event, so the
+bot also checks message updates and ignores duplicate update events.
 Enable the Message Content intent in the Discord Developer Portal and grant the
 bot permission to view message history, add reactions and send messages in the
 counting channel.

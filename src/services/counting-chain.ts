@@ -79,6 +79,10 @@ interface CountingChainState {
   historyRecoveryPending: boolean;
 }
 
+interface ProcessMessageOptions {
+  fromHistory?: boolean;
+}
+
 const STATE_KEY = 'countingChain';
 const PASS_REACTION = '👍';
 const RULE_FAILURE_REACTION = '❌';
@@ -331,7 +335,7 @@ export class PersistentCountingChainService implements CountingChainService {
 
     try {
       for (const message of pendingMessages) {
-        await this.processMessage(message);
+        await this.processMessage(message, { fromHistory: true });
       }
 
       const latestRootState = await this.dependencies.state.load();
@@ -371,7 +375,10 @@ export class PersistentCountingChainService implements CountingChainService {
     }
   }
 
-  private async processMessage(message: CountingChainMessage): Promise<void> {
+  private async processMessage(
+    message: CountingChainMessage,
+    options: ProcessMessageOptions = {},
+  ): Promise<void> {
     const imageSource = selectImageSource(message);
     if (!imageSource) {
       this.dependencies.logger.debug(
@@ -379,6 +386,22 @@ export class PersistentCountingChainService implements CountingChainService {
         'Counting chain message had no supported image source',
       );
       return;
+    }
+
+    if (!options.fromHistory) {
+      const rootState = await this.dependencies.state.load();
+      const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+      const game = state.game;
+      const alreadyAccepted = game?.lastMessageId === message.id;
+      const alreadyMarked = game?.lastProcessedMessageId === message.id;
+      const alreadyFeedback = hasCountingChainFeedbackReaction(message.botReactionEmojis);
+      if (alreadyAccepted || (alreadyMarked && alreadyFeedback)) {
+        this.dependencies.logger.debug(
+          { channelId: message.channelId, messageId: message.id },
+          'Counting chain message already processed; skipping duplicate event',
+        );
+        return;
+      }
     }
 
     this.dependencies.logger.info(
@@ -701,6 +724,17 @@ function isCountingChainFailureMessage(message: CountingChainHistoryMessage): bo
 
   return message.botReactionEmojis.some(
     (emoji) => emoji === RULE_FAILURE_REACTION || emoji === RECOGNITION_FAILURE_REACTION,
+  );
+}
+
+function hasCountingChainFeedbackReaction(emojis: readonly string[] | undefined): boolean {
+  return Boolean(
+    emojis?.some(
+      (emoji) =>
+        emoji === PASS_REACTION ||
+        emoji === RULE_FAILURE_REACTION ||
+        emoji === RECOGNITION_FAILURE_REACTION,
+    ),
   );
 }
 

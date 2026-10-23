@@ -134,7 +134,7 @@ export function createDiscordGateway(
   });
 
   if (dependencies.countingChain && config.countingChain.enabled) {
-    client.on(Events.MessageCreate, (message) => {
+    const handleCountingChainMessage = (message: Message, eventType: string): void => {
       if (message.channelId === config.countingChain.channelId) {
         logger.info(
           {
@@ -143,11 +143,37 @@ export function createDiscordGateway(
             attachmentCount: message.attachments.size,
             imageUrlCount: getCountingChainImageUrls(message).length,
             authorIsBot: message.author.bot,
+            eventType,
           },
           'Counting chain Discord message received',
         );
       }
       void dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
+    };
+
+    client.on(Events.MessageCreate, (message) => {
+      handleCountingChainMessage(message, 'created');
+    });
+    client.on(Events.MessageUpdate, (_oldMessage, updatedMessage) => {
+      if (updatedMessage.channelId !== config.countingChain.channelId) {
+        return;
+      }
+
+      void (async (): Promise<void> => {
+        try {
+          const message = updatedMessage.partial ? await updatedMessage.fetch() : updatedMessage;
+          handleCountingChainMessage(message, 'updated');
+        } catch (error: unknown) {
+          logger.warn(
+            {
+              err: error,
+              channelId: updatedMessage.channelId,
+              messageId: updatedMessage.id,
+            },
+            'Counting chain Discord message update could not be read',
+          );
+        }
+      })();
     });
   }
 
@@ -232,6 +258,7 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
       ...(attachment.size !== undefined ? { size: attachment.size } : {}),
     })),
     imageUrls: getCountingChainImageUrls(message),
+    botReactionEmojis: getBotReactionEmojis(message),
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },
@@ -252,14 +279,18 @@ function getCountingChainImageUrls(message: Message): string[] {
   );
 }
 
+function getBotReactionEmojis(message: Message): string[] {
+  return [...message.reactions.cache.values()]
+    .filter((reaction) => reaction.me)
+    .map((reaction) => reaction.emoji.name ?? reaction.emoji.toString());
+}
+
 function toCountingChainHistoryMessage(message: Message): CountingChainHistoryMessage {
   const baseMessage = toCountingChainMessage(message);
   return {
     ...baseMessage,
     content: message.content,
-    botReactionEmojis: [...message.reactions.cache.values()]
-      .filter((reaction) => reaction.me)
-      .map((reaction) => reaction.emoji.name ?? reaction.emoji.toString()),
+    botReactionEmojis: getBotReactionEmojis(message),
   };
 }
 
