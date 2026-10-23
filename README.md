@@ -122,7 +122,7 @@ with low reasoning effort.
 
 ### AI STEM question chain
 
-When `STEM_QUIZ_ENABLED=true`, STEMBot posts one age-appropriate STEM question
+When `STEM_QUIZ_ENABLED=true`, STEMBot posts one age-appropriate question
 at a time in `STEM_QUIZ_CHANNEL_ID`. The question is aimed at ages 8–14, with
 an optional harder-question rate for players up to age 18. Members answer with
 ordinary Discord messages. The first accepted answer earns one point, receives
@@ -139,6 +139,11 @@ natural-language answer checking use the existing `OPENAI_API_KEY`,
 Responses API is used with strict structured output, and requests set `store` to
 `false`. Member answers are sent for evaluation but are not written to state or
 included in logs.
+
+The default topic mix covers science, technology, engineering, mathematics,
+space, nature, robotics and computing. If an existing deployment still has
+`STEM_QUIZ_TOPIC=mixed STEM, Minecraft and engineering`, update that environment
+value to the broader mix when deploying this version.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single information embed
 with the current number, high score and last round. Set

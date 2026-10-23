@@ -64,6 +64,7 @@ export class OpenAIStemQuizEngine implements StemQuizEngine {
       `The topic mix is: ${options.topic}.`,
       `The main audience is children aged ${options.targetAgeMin}-${options.targetAgeMax}, with players up to age ${options.olderAgeMax}.`,
       challengeInstructions,
+      'Vary the subject across the requested topic mix and avoid making every question about the same setting. Minecraft may be used only as an occasional context when the topic guidance explicitly requests it.',
       'Use clear Australian English and avoid trick questions, subjective questions, current events, personal information, unsafe activities, mature themes, or questions requiring specialist equipment.',
       'The question must have one objectively checkable answer.',
       'Return a short question, one canonical answer, useful accepted answer variants, and a brief explanation that teaches the idea.',

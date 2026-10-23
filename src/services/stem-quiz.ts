@@ -170,13 +170,12 @@ export class PersistentStemQuizService implements StemQuizService {
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
 
-    const score = state.scores[message.authorId] ?? 0;
-    const pointLabel = score === 1 ? 'point' : 'points';
     const leadIn = [
-      `🎉 <@${message.authorId}> got it! **${question.answer}** was correct. They now have **${score} ${pointLabel}**.`,
+      `🎉 <@${message.authorId}> got it! **${question.answer}** was correct.`,
       question.explanation,
     ].join('\n');
     await this.publishNextQuestion(rootState, state, leadIn);
+    const score = state.scores[message.authorId] ?? 0;
     this.dependencies.logger.info(
       {
         channelId: message.channelId,
@@ -308,12 +307,7 @@ export function formatStemQuizQuestion(
   questionNumber: number,
   leadIn?: string,
 ): string {
-  const sections = [
-    leadIn,
-    `🧠 **STEM Question ${questionNumber}**`,
-    question.prompt,
-    '*The first correct answer earns 1 point. The question stays open until it is answered.*',
-  ];
+  const sections = [leadIn, `🧠 **Question ${questionNumber}**`, question.prompt];
   return sections.filter((section): section is string => Boolean(section)).join('\n\n');
 }
 

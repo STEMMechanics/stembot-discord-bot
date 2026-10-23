@@ -120,7 +120,13 @@ const environmentSchema = z.object({
     (value) => (value === undefined || value === '' ? 0.15 : value),
     z.coerce.number().min(0).max(1),
   ),
-  STEM_QUIZ_TOPIC: z.string().trim().min(1).default('mixed STEM, Minecraft and engineering'),
+  STEM_QUIZ_TOPIC: z
+    .string()
+    .trim()
+    .min(1)
+    .default(
+      'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+    ),
   STEM_QUIZ_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
 });
 

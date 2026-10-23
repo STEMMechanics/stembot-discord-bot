@@ -44,7 +44,8 @@ describe('loadConfig', () => {
         targetAgeMax: 14,
         olderAgeMax: 18,
         olderPlayerRate: 0.15,
-        topic: 'mixed STEM, Minecraft and engineering',
+        topic:
+          'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
         retryIntervalMs: 300000,
       },
       workshops: {

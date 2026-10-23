@@ -104,7 +104,10 @@ describe('STEM quiz service', () => {
     });
     expect(publisher.send).toHaveBeenCalledWith(
       'quiz-channel',
-      expect.stringContaining('🧠 **STEM Question 1**'),
+      expect.stringContaining('🧠 **Question 1**'),
+    );
+    expect(publisher.send.mock.calls[0]?.[1]).not.toContain(
+      'The first correct answer earns 1 point',
     );
     expect(state.state).toMatchObject({
       stemQuiz: {
@@ -145,6 +148,9 @@ describe('STEM quiz service', () => {
       'quiz-channel',
       expect.stringContaining('What is the answer gravity?'),
     );
+    const nextQuestionMessage = String(publisher.send.mock.calls[1]?.[1]);
+    expect(nextQuestionMessage).toContain('🎉 <@user-1> got it! **water** was correct.');
+    expect(nextQuestionMessage).not.toMatch(/\bpoints?\b/i);
     expect(state.state).toMatchObject({
       stemQuiz: {
         question: { answer: 'gravity', questionNumber: 2 },
