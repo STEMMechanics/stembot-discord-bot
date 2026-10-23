@@ -108,6 +108,39 @@ describe('persistent user levels', () => {
     await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 105, level: 2 });
   });
 
+  it('does not repeat a level-up announcement when a stale award sees an already announced level', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      userLevels: {
+        version: 1,
+        users: {
+          'user-1': {
+            xp: 397,
+            level: 2,
+            lastAnnouncedLevel: 3,
+            messageCount: 0,
+            reactionCount: 0,
+            gameCount: 0,
+            lastMessageXpAt: null,
+            lastReactionXpAt: null,
+          },
+        },
+      },
+    };
+    const send = vi.fn().mockResolvedValue(undefined);
+    const service = new PersistentUserLevelService({
+      config: { ...config, announcementChannelId: 'announcement-channel' },
+      state,
+      logger,
+      announcementPublisher: { send },
+    });
+
+    await service.recordGameParticipation('user-1');
+
+    expect(send).not.toHaveBeenCalled();
+    await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 412, level: 3 });
+  });
+
   it('sorts the leaderboard by XP and limits the result', async () => {
     const state = new MemoryStateStore();
     const service = createService(state);

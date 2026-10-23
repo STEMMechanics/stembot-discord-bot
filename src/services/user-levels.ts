@@ -52,6 +52,7 @@ export interface UserLevelService {
 interface StoredUserLevelProfile {
   xp: number;
   level: number;
+  lastAnnouncedLevel: number;
   messageCount: number;
   reactionCount: number;
   gameCount: number;
@@ -175,6 +176,15 @@ export class PersistentUserLevelService implements UserLevelService {
         storedProfile.gameCount += 1;
       }
 
+      const levelUp = storedProfile.level > previousLevel;
+      const shouldAnnounceLevelUp =
+        Boolean(this.dependencies.config.announcementChannelId) &&
+        Boolean(this.dependencies.announcementPublisher) &&
+        storedProfile.level > storedProfile.lastAnnouncedLevel;
+      if (shouldAnnounceLevelUp) {
+        storedProfile.lastAnnouncedLevel = storedProfile.level;
+      }
+
       state.users[userId] = storedProfile;
       rootState[STATE_KEY] = state;
       await this.dependencies.state.save(rootState);
@@ -183,7 +193,7 @@ export class PersistentUserLevelService implements UserLevelService {
       const award = {
         profile,
         xpGained,
-        levelUp: profile.level > previousLevel,
+        levelUp,
       };
       this.dependencies.logger.info(
         {
@@ -193,10 +203,11 @@ export class PersistentUserLevelService implements UserLevelService {
           totalXp: profile.xp,
           level: profile.level,
           levelUp: award.levelUp,
+          announcementScheduled: shouldAnnounceLevelUp,
         },
         'User activity XP awarded',
       );
-      if (award.levelUp) {
+      if (shouldAnnounceLevelUp) {
         await this.announceLevelUp(award.profile);
       }
       return award;
@@ -324,9 +335,12 @@ function readStoredProfile(value: unknown): StoredUserLevelProfile | undefined {
   }
 
   const level = getLevelForXp(xp);
+  const storedLastAnnouncedLevel = readNonNegativeInteger(value.lastAnnouncedLevel);
   return {
     xp,
     level,
+    lastAnnouncedLevel:
+      storedLastAnnouncedLevel === undefined ? level : Math.max(1, storedLastAnnouncedLevel),
     messageCount,
     reactionCount,
     gameCount,
@@ -343,6 +357,7 @@ function createStoredProfile(): StoredUserLevelProfile {
   return {
     xp: 0,
     level: 1,
+    lastAnnouncedLevel: 1,
     messageCount: 0,
     reactionCount: 0,
     gameCount: 0,
