@@ -1,3 +1,6 @@
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { BlockList } from 'node:net';
+
 import type { NumberImage, NumberRecognizer } from '../integrations/openai.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
@@ -51,6 +54,15 @@ export interface CountingChainInfoPublisher {
   update(status: CountingChainGameStatus, messageId?: string): Promise<string | undefined>;
 }
 
+export interface CountingChainRemoteAddress {
+  address: string;
+  family: 4 | 6;
+}
+
+export type CountingChainRemoteAddressLookup = (
+  hostname: string,
+) => Promise<readonly CountingChainRemoteAddress[]>;
+
 export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
   initialize(
@@ -65,6 +77,7 @@ export interface CountingChainServiceDependencies {
   state: StateStore<JsonState>;
   logger: AppLogger;
   fetchImplementation?: typeof fetch;
+  lookupImplementation?: CountingChainRemoteAddressLookup;
   clock?: () => Date;
 }
 
@@ -87,28 +100,53 @@ const STATE_KEY = 'countingChain';
 const PASS_REACTION = '👍';
 const RULE_FAILURE_REACTION = '❌';
 const RECOGNITION_FAILURE_REACTION = '⚠️';
-const ALLOWED_IMAGE_HOSTS = new Set([
-  'cdn.discordapp.com',
-  'media.discordapp.net',
-  'images-ext-1.discordapp.net',
-  'images-ext-2.discordapp.net',
-  'media.tenor.com',
-  'c.tenor.com',
-  'media.giphy.com',
-  'i.giphy.com',
-  'i.imgur.com',
-  'static.klipy.com',
-]);
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
+const MAX_IMAGE_REDIRECTS = 3;
+const BLOCKED_REMOTE_NETWORKS = new BlockList();
+
+for (const [address, prefixLength] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['192.168.0.0', 16],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
+] as const) {
+  BLOCKED_REMOTE_NETWORKS.addSubnet(address, prefixLength, 'ipv4');
+}
+
+for (const [address, prefixLength] of [
+  ['::', 128],
+  ['::1', 128],
+  ['100::', 64],
+  ['2001:2::', 48],
+  ['2001:10::', 28],
+  ['2001:db8::', 32],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['ff00::', 8],
+] as const) {
+  BLOCKED_REMOTE_NETWORKS.addSubnet(address, prefixLength, 'ipv6');
+}
 
 export class PersistentCountingChainService implements CountingChainService {
   private readonly queues = new Map<string, Promise<void>>();
   private readonly fetchImplementation: typeof fetch;
+  private readonly lookupImplementation: CountingChainRemoteAddressLookup;
   private initializationPromise: Promise<void> | undefined;
   private infoPublisher: CountingChainInfoPublisher | undefined;
 
   public constructor(private readonly dependencies: CountingChainServiceDependencies) {
     this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
+    this.lookupImplementation = dependencies.lookupImplementation ?? lookupRemoteAddresses;
   }
 
   public initialize(
@@ -393,7 +431,7 @@ export class PersistentCountingChainService implements CountingChainService {
       if (contentUrlCount > 0 || embedImageUrlCount > 0) {
         this.dependencies.logger.info(
           logContext,
-          'Counting chain message had no approved image source',
+          'Counting chain message had no usable image source',
         );
       } else {
         this.dependencies.logger.debug(
@@ -513,24 +551,44 @@ export class PersistentCountingChainService implements CountingChainService {
       throw new Error('Counting chain image exceeds the configured attachment limit');
     }
 
-    const url = new URL(source.url);
-    if (url.protocol !== 'https:' || !isAllowedImageHost(url.hostname)) {
-      throw new Error('Counting chain image URL is not from an approved image host');
+    let requestUrl = source.url;
+    let response: Response | undefined;
+    let finalUrl: URL | undefined;
+    for (let redirectCount = 0; redirectCount <= MAX_IMAGE_REDIRECTS; redirectCount += 1) {
+      const validatedUrl = await validateRemoteImageUrl(requestUrl, this.lookupImplementation);
+      response = await this.fetchImplementation(validatedUrl.toString(), {
+        headers: { Accept: 'image/gif, image/jpeg, image/png, image/webp' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        await response.body?.cancel();
+        if (!location) {
+          throw new Error('Counting chain image redirect did not include a location');
+        }
+        if (redirectCount === MAX_IMAGE_REDIRECTS) {
+          throw new Error('Counting chain image exceeded the redirect limit');
+        }
+        requestUrl = new URL(location, validatedUrl).toString();
+        continue;
+      }
+
+      finalUrl = validatedUrl;
+      break;
     }
 
-    const response = await this.fetchImplementation(source.url, {
-      headers: { Accept: 'image/gif, image/jpeg, image/png, image/webp' },
-      signal: AbortSignal.timeout(15_000),
-    });
+    if (!response || !finalUrl) {
+      throw new Error('Counting chain image request did not produce a response');
+    }
+
     if (!response.ok) {
       throw new Error(`Counting chain image request failed with HTTP ${response.status}`);
     }
 
     if (response.url) {
-      const responseUrl = new URL(response.url);
-      if (responseUrl.protocol !== 'https:' || !isAllowedImageHost(responseUrl.hostname)) {
-        throw new Error('Counting chain image redirect is not from an approved image host');
-      }
+      await validateRemoteImageUrl(response.url, this.lookupImplementation);
     }
 
     const responseContentType = normalizeContentType(response.headers.get('content-type'));
@@ -913,7 +971,7 @@ function createImageUrlSource(
     url.protocol !== 'https:' ||
     url.username ||
     url.password ||
-    !isAllowedImageHost(url.hostname) ||
+    (url.port && url.port !== '443') ||
     (requireImagePath && !isLikelyImageUrl(url))
   ) {
     return undefined;
@@ -927,23 +985,7 @@ function createImageUrlSource(
 }
 
 function isLikelyImageUrl(url: URL): boolean {
-  return (
-    Boolean(contentTypeFromName(url.pathname.split('/').pop())) || isKnownImageHost(url.hostname)
-  );
-}
-
-function isAllowedImageHost(hostname: string): boolean {
-  const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
-  return (
-    ALLOWED_IMAGE_HOSTS.has(normalizedHostname) ||
-    /^media\d+\.(?:giphy|tenor)\.com$/.test(normalizedHostname) ||
-    /^images-ext-\d+\.discordapp\.net$/.test(normalizedHostname)
-  );
-}
-
-function isKnownImageHost(hostname: string): boolean {
-  const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
-  return isAllowedImageHost(normalizedHostname);
+  return Boolean(contentTypeFromName(url.pathname.split('/').pop()));
 }
 
 function getUrlHostname(value: string): string | undefined {
@@ -952,6 +994,72 @@ function getUrlHostname(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+async function lookupRemoteAddresses(
+  hostname: string,
+): Promise<readonly CountingChainRemoteAddress[]> {
+  const addresses = await dnsLookup(hostname.replace(/^\[|\]$/g, ''), {
+    all: true,
+    verbatim: true,
+  });
+  return addresses.map(({ address, family }) => {
+    if (family !== 4 && family !== 6) {
+      throw new Error('Counting chain image hostname returned an unsupported address family');
+    }
+    return { address, family };
+  });
+}
+
+async function validateRemoteImageUrl(
+  value: string,
+  lookupImplementation: CountingChainRemoteAddressLookup,
+): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (error: unknown) {
+    throw new Error('Counting chain image URL is invalid', { cause: error });
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    (url.port && url.port !== '443')
+  ) {
+    throw new Error('Counting chain image URL must use HTTPS on the default port');
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  let addresses: readonly CountingChainRemoteAddress[];
+  try {
+    addresses = await lookupImplementation(hostname);
+  } catch (error: unknown) {
+    throw new Error('Counting chain image hostname could not be resolved', { cause: error });
+  }
+
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address, family }) => isBlockedRemoteAddress(address, family))
+  ) {
+    throw new Error('Counting chain image hostname resolves to a private or reserved address');
+  }
+
+  return url;
+}
+
+function isBlockedRemoteAddress(address: string, family: 4 | 6): boolean {
+  if (family === 6 && isIPv4MappedAddress(address)) {
+    return true;
+  }
+
+  return BLOCKED_REMOTE_NETWORKS.check(address, family === 4 ? 'ipv4' : 'ipv6');
+}
+
+function isIPv4MappedAddress(address: string): boolean {
+  const normalizedAddress = address.toLowerCase();
+  return normalizedAddress.startsWith('::ffff:') || normalizedAddress.startsWith('0:0:0:0:0:ffff:');
 }
 
 function normalizeContentType(value: string | null | undefined): string | undefined {

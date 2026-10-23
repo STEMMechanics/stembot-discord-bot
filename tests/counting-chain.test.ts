@@ -5,6 +5,7 @@ import type { NumberRecognizer } from '../src/integrations/openai.js';
 import {
   PersistentCountingChainService,
   type CountingChainConfig,
+  type CountingChainRemoteAddressLookup,
   type CountingChainHistoryMessage,
   type CountingChainMessage,
 } from '../src/services/counting-chain.js';
@@ -57,18 +58,27 @@ function createMessage(
 function createService(
   state: MemoryStateStore,
   recognizer: NumberRecognizer,
+  options: {
+    fetchImplementation?: typeof fetch;
+    lookupImplementation?: CountingChainRemoteAddressLookup;
+  } = {},
 ): PersistentCountingChainService {
   return new PersistentCountingChainService({
     config,
     recognizer,
     state,
     logger,
-    fetchImplementation: vi.fn<typeof fetch>().mockImplementation(
-      async () =>
-        new Response(Buffer.from('gif-data'), {
-          headers: { 'content-type': 'image/gif' },
-        }),
-    ),
+    fetchImplementation:
+      options.fetchImplementation ??
+      vi.fn<typeof fetch>().mockImplementation(
+        async () =>
+          new Response(Buffer.from('gif-data'), {
+            headers: { 'content-type': 'image/gif' },
+          }),
+      ),
+    lookupImplementation:
+      options.lookupImplementation ??
+      (async () => [{ address: '93.184.216.34', family: 4 as const }]),
     clock: () => new Date('2026-10-23T00:00:00.000Z'),
   });
 }
@@ -152,7 +162,7 @@ describe('counting-chain service', () => {
     expect(message.react).toHaveBeenCalledWith('👍');
   });
 
-  it('processes GIF-picker images from Klipy', async () => {
+  it('processes GIF-picker images from an unlisted provider', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
       recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
@@ -161,13 +171,35 @@ describe('counting-chain service', () => {
     const message = createMessage('user-1', 'message-klipy', {
       content: 'https://klipy.com/gifs/example',
       attachments: [],
-      imageUrls: ['https://static.klipy.com/example/number.gif'],
+      imageUrls: ['https://new-provider.example/number.gif'],
     });
 
     await service.handleMessage(message);
 
     expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
     expect(message.react).toHaveBeenCalledWith('👍');
+  });
+
+  it('rejects image hosts that resolve to private network addresses', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
+    };
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const service = createService(state, recognizer, {
+      fetchImplementation,
+      lookupImplementation: async () => [{ address: '10.0.0.5', family: 4 }],
+    });
+    const message = createMessage('user-1', 'message-private-host', {
+      attachments: [],
+      imageUrls: ['https://internal.example/number.gif'],
+    });
+
+    await service.handleMessage(message);
+
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(message.react).toHaveBeenCalledWith('⚠️');
   });
 
   it('processes a GIF when Discord adds the embed after the message event', async () => {
@@ -250,12 +282,12 @@ describe('counting-chain service', () => {
     });
   });
 
-  it('ignores unapproved page URLs without treating them as image sources', async () => {
+  it('ignores ordinary page URLs without treating them as image sources', async () => {
     const state = new MemoryStateStore();
     const recognizer = { recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>() };
     const service = createService(state, recognizer);
     const message = createMessage('user-1', 'message-page-url', {
-      content: 'https://example.com/number.gif',
+      content: 'https://example.com/view/number',
       attachments: [],
     });
 
