@@ -107,6 +107,8 @@ const environmentSchema = z.object({
   COUNTING_CHAIN_CHANNEL_ID: optionalDiscordId,
   COUNTING_CHAIN_INFO_CHANNEL_ID: optionalDiscordId,
   COUNTING_CHAIN_INFO_MESSAGE_ID: optionalDiscordId,
+  COUNTING_CHAIN_REVIEW_ENABLED: booleanFromEnvironment(false),
+  COUNTING_CHAIN_REVIEW_ROLE_ID: optionalDiscordId,
   COUNTING_CHAIN_MAX_ATTACHMENT_BYTES: positiveInteger(8 * 1024 * 1024, 20 * 1024 * 1024),
 });
 
@@ -141,6 +143,8 @@ export interface AppConfig {
     channelId?: string;
     infoChannelId?: string;
     infoMessageId?: string;
+    reviewEnabled: boolean;
+    reviewRoleId?: string;
     maxAttachmentBytes: number;
   };
   workshops: {
@@ -189,6 +193,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('OPENAI_API_KEY is required when COUNTING_CHAIN_ENABLED is true');
   }
 
+  if (values.COUNTING_CHAIN_REVIEW_ENABLED && !values.COUNTING_CHAIN_REVIEW_ROLE_ID) {
+    throw new Error(
+      'COUNTING_CHAIN_REVIEW_ROLE_ID is required when COUNTING_CHAIN_REVIEW_ENABLED is true',
+    );
+  }
+
   if (values.COUNTING_CHAIN_INFO_MESSAGE_ID && !values.COUNTING_CHAIN_INFO_CHANNEL_ID) {
     throw new Error(
       'COUNTING_CHAIN_INFO_CHANNEL_ID is required when COUNTING_CHAIN_INFO_MESSAGE_ID is set',
@@ -234,6 +244,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : {}),
       ...(values.COUNTING_CHAIN_INFO_MESSAGE_ID
         ? { infoMessageId: values.COUNTING_CHAIN_INFO_MESSAGE_ID }
+        : {}),
+      reviewEnabled: values.COUNTING_CHAIN_REVIEW_ENABLED,
+      ...(values.COUNTING_CHAIN_REVIEW_ROLE_ID
+        ? { reviewRoleId: values.COUNTING_CHAIN_REVIEW_ROLE_ID }
         : {}),
       maxAttachmentBytes: values.COUNTING_CHAIN_MAX_ATTACHMENT_BYTES,
     },

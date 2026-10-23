@@ -53,6 +53,9 @@ export async function handleInteraction(
     ...(context.stemcraft ? { stemcraft: context.stemcraft } : {}),
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),
+    ...(context.requestCountingChainReview
+      ? { requestCountingChainReview: context.requestCountingChainReview }
+      : {}),
   };
 
   const commandStartedAtMs = Date.now();

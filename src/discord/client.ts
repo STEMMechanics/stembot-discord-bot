@@ -1,4 +1,16 @@
-import { Client, Events, GatewayIntentBits, type APIEmbed, type Message } from 'discord.js';
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Partials,
+  PermissionsBitField,
+  type APIEmbed,
+  type Message,
+  type MessageReaction,
+  type PartialMessageReaction,
+  type PartialUser,
+  type User,
+} from 'discord.js';
 import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
@@ -11,9 +23,12 @@ import type {
   CountingChainHistoryMessage,
   CountingChainInfoPublisher,
   CountingChainMessage,
+  CountingChainReplyOptions,
   CountingChainService,
 } from '../services/counting-chain.js';
 import { handleInteraction } from './interaction-handler.js';
+
+const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
 
 export interface DiscordGateway {
   start(): Promise<void>;
@@ -46,11 +61,34 @@ export function createDiscordGateway(
   const intents = [GatewayIntentBits.Guilds];
   if (config.countingChain.enabled && dependencies.countingChain) {
     intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+    if (config.countingChain.reviewEnabled) {
+      intents.push(GatewayIntentBits.GuildMessageReactions);
+    }
   }
 
-  const client = new Client({
+  const clientOptions = {
     intents,
-  });
+    ...(config.countingChain.enabled && config.countingChain.reviewEnabled
+      ? {
+          partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
+        }
+      : {}),
+  };
+  const client = new Client(clientOptions);
+  let countingChainEventQueue: Promise<void> = Promise.resolve();
+  const requestCountingChainReview =
+    dependencies.countingChain && config.countingChain.enabled && config.countingChain.reviewEnabled
+      ? (channelId: string, messageId?: string, proposedNumber?: number) =>
+          requestCountingChainReviewFromDiscord(
+            client,
+            config.countingChain.channelId!,
+            channelId,
+            dependencies.countingChain!,
+            logger,
+            messageId,
+            proposedNumber,
+          )
+      : undefined;
 
   let resolveClientReady!: () => void;
   const clientReady = new Promise<void>((resolve) => {
@@ -130,26 +168,73 @@ export function createDiscordGateway(
       website: dependencies.website,
       stemcraft: dependencies.stemcraft,
       timeZone: dependencies.timeZone,
+      ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });
   });
 
   if (dependencies.countingChain && config.countingChain.enabled) {
     const handleCountingChainMessage = (message: Message, eventType: string): void => {
-      if (message.channelId === config.countingChain.channelId) {
-        logger.info(
-          {
-            channelId: message.channelId,
-            messageId: message.id,
-            attachmentCount: message.attachments.size,
-            imageUrlCount: getCountingChainImageUrls(message).length,
-            imageUrlHosts: getCountingChainImageHosts(message),
-            authorIsBot: message.author.bot,
-            eventType,
-          },
-          'Counting chain Discord message received',
-        );
+      if (message.channelId !== config.countingChain.channelId) {
+        return;
       }
-      void dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          attachmentCount: message.attachments.size,
+          imageUrlCount: getCountingChainImageUrls(message).length,
+          imageUrlHosts: getCountingChainImageHosts(message),
+          authorIsBot: message.author.bot,
+          eventType,
+        },
+        'Counting chain Discord message received',
+      );
+
+      if (message.author.bot) {
+        return;
+      }
+
+      const previous = countingChainEventQueue;
+      const next = previous
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            if (message.attachments.size === 0 && /https?:\/\//i.test(message.content)) {
+              await new Promise<void>((resolve) => {
+                setTimeout(resolve, COUNTING_CHAIN_EMBED_SETTLE_MS);
+              });
+            }
+
+            const recentHistory = await fetchCountingChainRecentHistory(
+              client,
+              config.countingChain.channelId!,
+            );
+            const candidates = new Map<string, CountingChainMessage>();
+            for (const historyMessage of recentHistory) {
+              candidates.set(historyMessage.id, historyMessage);
+            }
+            candidates.set(message.id, toCountingChainMessage(message));
+
+            const orderedMessages = [...candidates.values()].sort(
+              compareCountingChainMessagesOldestFirst,
+            );
+            for (const candidate of orderedMessages) {
+              await dependencies.countingChain?.handleMessage(candidate);
+            }
+          } catch (error: unknown) {
+            logger.warn(
+              { err: error, channelId: message.channelId, messageId: message.id },
+              'Counting chain recent history could not be read; processing the current message',
+            );
+            await dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
+          }
+        });
+      countingChainEventQueue = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      void next;
     };
 
     client.on(Events.MessageCreate, (message) => {
@@ -176,6 +261,25 @@ export function createDiscordGateway(
         }
       })();
     });
+
+    if (config.countingChain.reviewEnabled) {
+      client.on(Events.MessageReactionAdd, (reaction, user) => {
+        if (
+          user.bot ||
+          !isCountingChainReviewReaction(reaction.emoji.name ?? reaction.emoji.toString())
+        ) {
+          return;
+        }
+
+        void handleCountingChainReviewReaction(
+          reaction,
+          user,
+          config,
+          dependencies.countingChain!,
+          logger,
+        );
+      });
+    }
   }
 
   client.on(Events.Error, (error) => {
@@ -263,10 +367,12 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },
-    reply: async (content: string): Promise<void> => {
+    reply: async (content: string, options?: CountingChainReplyOptions): Promise<void> => {
       await message.reply({
         content,
-        allowedMentions: { parse: [] },
+        allowedMentions: options?.mentionRoleId
+          ? { roles: [options.mentionRoleId] }
+          : { parse: [] },
       });
     },
   };
@@ -338,6 +444,136 @@ async function fetchCountingChainHistory(
   }
 
   return messages.sort(compareMessagesNewestFirst).map(toCountingChainHistoryMessage);
+}
+
+async function fetchCountingChainRecentHistory(
+  client: Client,
+  channelId: string,
+): Promise<readonly CountingChainHistoryMessage[]> {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel || !channel.isTextBased() || !('messages' in channel)) {
+    throw new Error(`Counting chain channel is not a readable text channel: ${channelId}`);
+  }
+
+  const messages = await channel.messages.fetch({ limit: 100 });
+  return [...messages.values()].sort(compareMessagesNewestFirst).map(toCountingChainHistoryMessage);
+}
+
+async function requestCountingChainReviewFromDiscord(
+  client: Client,
+  configuredChannelId: string | undefined,
+  channelId: string,
+  service: CountingChainService,
+  logger: AppLogger,
+  messageId?: string,
+  proposedNumber?: number,
+): Promise<boolean> {
+  if (!configuredChannelId || channelId !== configuredChannelId) {
+    return false;
+  }
+
+  const channel = await client.channels.fetch(channelId);
+  if (!channel || !channel.isTextBased() || !('messages' in channel)) {
+    return false;
+  }
+
+  let targetMessage: Message | undefined;
+  if (messageId) {
+    targetMessage = await channel.messages.fetch(messageId);
+  } else {
+    const recentMessages = await channel.messages.fetch({ limit: 100 });
+    targetMessage = [...recentMessages.values()]
+      .sort(compareMessagesNewestFirst)
+      .find((candidate) => !candidate.author.bot && hasCountingChainImageCandidate(candidate));
+  }
+
+  if (!targetMessage) {
+    return false;
+  }
+
+  logger.info(
+    { channelId, messageId: targetMessage.id, proposedNumber },
+    'Counting chain review command selected a message',
+  );
+  return service.requestReview(toCountingChainMessage(targetMessage), proposedNumber);
+}
+
+async function handleCountingChainReviewReaction(
+  reaction: MessageReaction | PartialMessageReaction,
+  user: User | PartialUser,
+  config: AppConfig,
+  service: CountingChainService,
+  logger: AppLogger,
+): Promise<void> {
+  try {
+    const resolvedReaction = reaction.partial ? await reaction.fetch() : reaction;
+    const partialMessage = resolvedReaction.message;
+    const message = partialMessage.partial ? await partialMessage.fetch() : partialMessage;
+    const emoji = resolvedReaction.emoji.name ?? resolvedReaction.emoji.toString();
+
+    if (
+      message.channelId !== config.countingChain.channelId ||
+      message.guildId !== config.discord.guildId
+    ) {
+      return;
+    }
+
+    const guild = message.guild;
+    if (!guild) {
+      return;
+    }
+
+    const member = await guild.members.fetch(user.id);
+    const authorized =
+      member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+      member.permissions.has(PermissionsBitField.Flags.ManageMessages) ||
+      (config.countingChain.reviewRoleId !== undefined &&
+        member.roles.cache.has(config.countingChain.reviewRoleId));
+    if (!authorized) {
+      logger.warn(
+        { channelId: message.channelId, messageId: message.id, userId: user.id, emoji },
+        'Ignoring counting chain review reaction from an unauthorized member',
+      );
+      return;
+    }
+
+    const decision = emoji === '✅' ? 'approve' : 'reject';
+    const applied = await service.reviewMessage(toCountingChainMessage(message), decision, user.id);
+    logger.info(
+      { channelId: message.channelId, messageId: message.id, userId: user.id, decision, applied },
+      'Counting chain review reaction processed',
+    );
+  } catch (error: unknown) {
+    logger.warn(
+      { err: error, channelId: config.countingChain.channelId, userId: user.id },
+      'Counting chain review reaction could not be processed',
+    );
+  }
+}
+
+function isCountingChainReviewReaction(emoji: string): boolean {
+  return emoji === '✅' || emoji === '❌';
+}
+
+function hasCountingChainImageCandidate(message: Message): boolean {
+  return (
+    message.attachments.size > 0 ||
+    getCountingChainImageUrls(message).length > 0 ||
+    /https?:\/\/\S+/i.test(message.content)
+  );
+}
+
+function compareCountingChainMessagesOldestFirst(
+  left: CountingChainMessage,
+  right: CountingChainMessage,
+): number {
+  if (/^\d+$/.test(left.id) && /^\d+$/.test(right.id)) {
+    const leftValue = BigInt(left.id);
+    const rightValue = BigInt(right.id);
+    return leftValue === rightValue ? 0 : leftValue < rightValue ? -1 : 1;
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 function compareMessagesNewestFirst(left: Message, right: Message): number {
@@ -469,6 +705,7 @@ function formatCountingChainReason(reason: string): string {
     {
       'same-user': 'reset after a consecutive post',
       'wrong-number': 'reset after an incorrect number',
+      'moderator-rejected': 'reset after moderator review',
       'history-failure': 'reset after a failed history check',
     }[reason] ?? reason
   );

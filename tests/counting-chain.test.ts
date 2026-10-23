@@ -61,10 +61,11 @@ function createService(
   options: {
     fetchImplementation?: typeof fetch;
     lookupImplementation?: CountingChainRemoteAddressLookup;
+    config?: Partial<CountingChainConfig>;
   } = {},
 ): PersistentCountingChainService {
   return new PersistentCountingChainService({
-    config,
+    config: { ...config, ...options.config },
     recognizer,
     state,
     logger,
@@ -346,6 +347,128 @@ describe('counting-chain service', () => {
     expect(state.state).toMatchObject({
       countingChain: {
         expectedNumber: 1,
+      },
+    });
+  });
+
+  it('pauses an incorrect post for moderator review and approves a corrected number', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(4),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const first = createMessage('user-1', 'review-message-1');
+    const wrong = createMessage('user-2', 'review-message-2');
+
+    await service.handleMessage(first);
+    await service.handleMessage(wrong);
+
+    expect(wrong.react).toHaveBeenCalledWith('🔎');
+    expect(wrong.reply).toHaveBeenCalledWith(expect.stringContaining('<@&moderator-role>'), {
+      mentionRoleId: 'moderator-role',
+    });
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 2,
+        pendingReview: {
+          messageId: 'review-message-2',
+          expectedNumber: 2,
+          proposedNumber: 4,
+          reason: 'wrong-number',
+        },
+      },
+    });
+
+    expect(await service.requestReview(wrong, 2)).toBe(true);
+    expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
+    expect(wrong.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 3,
+        lastMessageId: 'review-message-2',
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('pendingReview');
+  });
+
+  it('lets a moderator reject a pending review and reset the chain', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(9),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const message = createMessage('user-1', 'review-rejected');
+
+    await service.handleMessage(message);
+    expect(await service.reviewMessage(message, 'reject', 'moderator-1')).toBe(true);
+
+    expect(message.react).toHaveBeenCalledWith('❌');
+    expect(message.reply).toHaveBeenCalledWith(
+      'Counting chain review rejected — the chain is starting again at 1.',
+    );
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastRoundReason: 'moderator-rejected',
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('pendingReview');
+  });
+
+  it('requests review instead of changing state when an image cannot be read', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(null),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const message = createMessage('user-1', 'review-unreadable');
+
+    await service.handleMessage(message);
+
+    expect(message.react).toHaveBeenCalledWith('🔎');
+    expect(message.react).not.toHaveBeenCalledWith('⚠️');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        pendingReview: {
+          messageId: 'review-unreadable',
+          proposedNumber: null,
+          reason: 'unreadable',
+        },
+      },
+    });
+  });
+
+  it('retains a pending review across service restart without replaying channel history', async () => {
+    const state = new MemoryStateStore();
+    const firstService = createService(
+      state,
+      { recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(8) },
+      { config: { reviewEnabled: true, reviewRoleId: 'moderator-role' } },
+    );
+    const pendingMessage = createMessage('user-1', 'review-restart');
+    await firstService.handleMessage(pendingMessage);
+
+    const historyProvider = vi.fn().mockResolvedValue([]);
+    const restartedRecognizer = { recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>() };
+    await createService(state, restartedRecognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    }).initialize(historyProvider);
+
+    expect(historyProvider).not.toHaveBeenCalled();
+    expect(restartedRecognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        pendingReview: { messageId: 'review-restart', proposedNumber: 8 },
       },
     });
   });

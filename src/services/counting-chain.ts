@@ -9,6 +9,8 @@ export interface CountingChainConfig {
   enabled: boolean;
   channelId?: string;
   maxAttachmentBytes: number;
+  reviewEnabled?: boolean;
+  reviewRoleId?: string;
 }
 
 export interface CountingChainAttachment {
@@ -28,7 +30,11 @@ export interface CountingChainMessage {
   imageUrls?: readonly string[];
   botReactionEmojis?: readonly string[];
   react(emoji: string): Promise<void>;
-  reply(content: string): Promise<void>;
+  reply(content: string, options?: CountingChainReplyOptions): Promise<void>;
+}
+
+export interface CountingChainReplyOptions {
+  mentionRoleId?: string;
 }
 
 export interface CountingChainHistoryMessage extends CountingChainMessage {
@@ -65,6 +71,12 @@ export type CountingChainRemoteAddressLookup = (
 
 export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
+  requestReview(message: CountingChainMessage, proposedNumber?: number): Promise<boolean>;
+  reviewMessage(
+    message: CountingChainMessage,
+    decision: 'approve' | 'reject',
+    reviewerId: string,
+  ): Promise<boolean>;
   initialize(
     historyProvider: CountingChainHistoryProvider,
     infoPublisher?: CountingChainInfoPublisher,
@@ -85,11 +97,23 @@ type CountingChainGameState = CountingChainGameStatus & {
   lastProcessedMessageId: string | null;
 };
 
+type CountingChainReviewReason = 'unreadable' | 'wrong-number' | 'same-user' | 'manual';
+
+interface CountingChainPendingReview {
+  messageId: string;
+  authorId: string;
+  expectedNumber: number;
+  proposedNumber: number | null;
+  reason: CountingChainReviewReason;
+  requestedAt: string;
+}
+
 interface CountingChainState {
   version: 1;
   game: CountingChainGameState | null;
   infoMessageId: string | null;
   historyRecoveryPending: boolean;
+  pendingReview: CountingChainPendingReview | null;
 }
 
 interface ProcessMessageOptions {
@@ -100,6 +124,9 @@ const STATE_KEY = 'countingChain';
 const PASS_REACTION = '👍';
 const RULE_FAILURE_REACTION = '❌';
 const RECOGNITION_FAILURE_REACTION = '⚠️';
+const REVIEW_REQUEST_REACTION = '🔎';
+const REVIEW_APPROVE_REACTION = '✅';
+const REVIEW_REJECT_REACTION = '❌';
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 const MAX_IMAGE_REDIRECTS = 3;
 const BLOCKED_REMOTE_NETWORKS = new BlockList();
@@ -138,7 +165,7 @@ for (const [address, prefixLength] of [
 }
 
 export class PersistentCountingChainService implements CountingChainService {
-  private readonly queues = new Map<string, Promise<void>>();
+  private readonly queues = new Map<string, Promise<unknown>>();
   private readonly fetchImplementation: typeof fetch;
   private readonly lookupImplementation: CountingChainRemoteAddressLookup;
   private initializationPromise: Promise<void> | undefined;
@@ -185,25 +212,71 @@ export class PersistentCountingChainService implements CountingChainService {
       return Promise.resolve();
     }
 
-    const previous = this.queues.get(message.channelId) ?? Promise.resolve();
-    const next = previous
-      .catch(() => undefined)
-      .then(() => this.initializationPromise)
-      .then(() => this.processMessage(message))
-      .catch((error: unknown) => {
+    return this.enqueue(message.channelId, async () => {
+      try {
+        await this.processMessage(message);
+      } catch (error: unknown) {
         this.dependencies.logger.error(
           { err: error, channelId: message.channelId, messageId: message.id },
           'Counting chain message processing failed',
         );
-      })
-      .finally(() => {
-        if (this.queues.get(message.channelId) === next) {
-          this.queues.delete(message.channelId);
-        }
-      });
+      }
+    });
+  }
 
-    this.queues.set(message.channelId, next);
-    return next;
+  public requestReview(message: CountingChainMessage, proposedNumber?: number): Promise<boolean> {
+    if (
+      !this.dependencies.config.enabled ||
+      !this.dependencies.config.reviewEnabled ||
+      !this.dependencies.config.channelId ||
+      message.channelId !== this.dependencies.config.channelId ||
+      message.authorIsBot
+    ) {
+      return Promise.resolve(false);
+    }
+
+    return this.enqueue(message.channelId, () =>
+      this.createReviewRequest(message, proposedNumber, 'manual'),
+    );
+  }
+
+  public reviewMessage(
+    message: CountingChainMessage,
+    decision: 'approve' | 'reject',
+    reviewerId: string,
+  ): Promise<boolean> {
+    if (
+      !this.dependencies.config.enabled ||
+      !this.dependencies.config.reviewEnabled ||
+      !this.dependencies.config.channelId ||
+      message.channelId !== this.dependencies.config.channelId ||
+      message.authorIsBot
+    ) {
+      return Promise.resolve(false);
+    }
+
+    return this.enqueue(message.channelId, () =>
+      this.applyReviewDecision(message, decision, reviewerId),
+    );
+  }
+
+  private enqueue<T>(channelId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(channelId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(() => this.initializationPromise)
+      .then(task);
+    const tracked = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.queues.set(channelId, tracked);
+
+    return next.finally(() => {
+      if (this.queues.get(channelId) === tracked) {
+        this.queues.delete(channelId);
+      }
+    });
   }
 
   private async recoverMissingState(historyProvider: CountingChainHistoryProvider): Promise<void> {
@@ -220,10 +293,25 @@ export class PersistentCountingChainService implements CountingChainService {
       {
         channelId,
         hasPersistedGame: state.game !== null,
+        pendingReviewMessageId: state.pendingReview?.messageId,
         historyRecoveryPending: state.historyRecoveryPending,
       },
       'Counting chain startup reconciliation checking Discord history',
     );
+
+    if (state.pendingReview) {
+      this.dependencies.logger.info(
+        {
+          channelId,
+          messageId: state.pendingReview.messageId,
+          expectedNumber: state.pendingReview.expectedNumber,
+          proposedNumber: state.pendingReview.proposedNumber,
+        },
+        'Counting chain startup reconciliation retaining pending moderator review',
+      );
+      return;
+    }
+
     let history: readonly CountingChainHistoryMessage[];
     try {
       history = await historyProvider();
@@ -373,8 +461,18 @@ export class PersistentCountingChainService implements CountingChainService {
     );
 
     try {
+      let pausedForReview = false;
       for (const message of pendingMessages) {
         await this.processMessage(message, { fromHistory: true });
+        const currentRootState = await this.dependencies.state.load();
+        const currentState = readCountingChainState(
+          currentRootState[STATE_KEY],
+          this.dependencies.config.channelId,
+        );
+        if (currentState.pendingReview) {
+          pausedForReview = true;
+          break;
+        }
       }
 
       const latestRootState = await this.dependencies.state.load();
@@ -383,7 +481,11 @@ export class PersistentCountingChainService implements CountingChainService {
         this.dependencies.config.channelId,
       );
       const newestMessageId = history[0]?.id;
-      if (newestMessageId && isDiscordMessageAfter(newestMessageId, checkpointMessageId)) {
+      if (
+        !pausedForReview &&
+        newestMessageId &&
+        isDiscordMessageAfter(newestMessageId, checkpointMessageId)
+      ) {
         const game = latestState.game ?? createInitialGameState(this.currentTime());
         game.lastProcessedMessageId = newestMessageId;
         game.updatedAt = this.currentTime().toISOString();
@@ -398,6 +500,7 @@ export class PersistentCountingChainService implements CountingChainService {
           checkpointMessageId,
           processedImageCount: pendingMessages.length,
           newestMessageId,
+          pausedForReview,
         },
         'Counting chain startup reconciliation completed',
       );
@@ -442,17 +545,35 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    if (state.pendingReview) {
+      this.dependencies.logger.debug(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          pendingReviewMessageId: state.pendingReview.messageId,
+        },
+        'Counting chain is paused for moderator review; skipping message',
+      );
+      return;
+    }
+
     if (!options.fromHistory) {
-      const rootState = await this.dependencies.state.load();
-      const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
       const game = state.game;
+      const checkpointMessageId = game?.lastProcessedMessageId ?? game?.lastMessageId;
+      const alreadyCheckpointed =
+        checkpointMessageId !== undefined && checkpointMessageId !== null
+          ? message.id === checkpointMessageId ||
+            isDiscordMessageAtOrBefore(message.id, checkpointMessageId)
+          : false;
       const alreadyAccepted = game?.lastMessageId === message.id;
       const alreadyMarked = game?.lastProcessedMessageId === message.id;
       const alreadyFeedback = hasCountingChainFeedbackReaction(message.botReactionEmojis);
-      if (alreadyAccepted || (alreadyMarked && alreadyFeedback)) {
+      if (alreadyAccepted || alreadyCheckpointed || (alreadyMarked && alreadyFeedback)) {
         this.dependencies.logger.debug(
-          { channelId: message.channelId, messageId: message.id },
-          'Counting chain message already processed; skipping duplicate event',
+          { channelId: message.channelId, messageId: message.id, checkpointMessageId },
+          'Counting chain message already processed; skipping duplicate or out-of-order event',
         );
         return;
       }
@@ -478,6 +599,10 @@ export class PersistentCountingChainService implements CountingChainService {
         { err: error, channelId: message.channelId, messageId: message.id },
         'Counting chain image could not be read; game state unchanged',
       );
+      if (this.isReviewEnabled()) {
+        await this.createReviewRequest(message, undefined, 'unreadable');
+        return;
+      }
       await this.giveFeedback(
         message,
         RECOGNITION_FAILURE_REACTION,
@@ -488,6 +613,10 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     if (recognizedNumber === null) {
+      if (this.isReviewEnabled()) {
+        await this.createReviewRequest(message, undefined, 'unreadable');
+        return;
+      }
       await this.giveFeedback(
         message,
         RECOGNITION_FAILURE_REACTION,
@@ -497,8 +626,16 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
-    const rootState = await this.dependencies.state.load();
-    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        authorId: message.authorId,
+        recognizedNumber,
+      },
+      'Counting chain number recognized',
+    );
+
     const game = state.game ?? createInitialGameState(this.currentTime());
     const passes =
       recognizedNumber === game.expectedNumber && message.authorId !== game.lastAuthorId;
@@ -525,6 +662,13 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
+    const reviewReason: CountingChainReviewReason =
+      message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number';
+    if (this.isReviewEnabled()) {
+      await this.createReviewRequest(message, recognizedNumber, reviewReason);
+      return;
+    }
+
     const now = this.currentTime();
     const roundScore = Math.max(0, game.expectedNumber - 1);
     const highScore = Math.max(game.highScore, roundScore);
@@ -544,6 +688,178 @@ export class PersistentCountingChainService implements CountingChainService {
       message,
       'Counting chain over — the next number was not accepted. Starting again at 1.',
     );
+  }
+
+  private async createReviewRequest(
+    message: CountingChainMessage,
+    proposedNumber: number | undefined,
+    reason: CountingChainReviewReason,
+  ): Promise<boolean> {
+    if (!this.isReviewEnabled() || !selectImageSource(message)) {
+      return false;
+    }
+
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    if (state.pendingReview) {
+      if (state.pendingReview.messageId !== message.id) {
+        this.dependencies.logger.warn(
+          {
+            channelId: message.channelId,
+            messageId: message.id,
+            pendingReviewMessageId: state.pendingReview.messageId,
+          },
+          'Counting chain review request ignored because another review is pending',
+        );
+        return false;
+      }
+
+      if (proposedNumber !== undefined && proposedNumber !== state.pendingReview.proposedNumber) {
+        state.pendingReview = {
+          ...state.pendingReview,
+          proposedNumber,
+        };
+        writeCountingChainState(rootState, state);
+        await this.dependencies.state.save(rootState);
+        this.dependencies.logger.info(
+          {
+            channelId: message.channelId,
+            messageId: message.id,
+            proposedNumber,
+          },
+          'Counting chain pending review number updated',
+        );
+      }
+      return true;
+    }
+
+    const now = this.currentTime();
+    const game = state.game ?? createInitialGameState(now);
+    const normalizedProposedNumber = normalizeReviewNumber(proposedNumber);
+    state.pendingReview = {
+      messageId: message.id,
+      authorId: message.authorId,
+      expectedNumber: game.expectedNumber,
+      proposedNumber: normalizedProposedNumber,
+      reason,
+      requestedAt: now.toISOString(),
+    };
+    game.lastProcessedMessageId = message.id;
+    game.updatedAt = now.toISOString();
+    state.game = game;
+    writeCountingChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    await this.react(message, REVIEW_REQUEST_REACTION);
+    const roleId = this.dependencies.config.reviewRoleId;
+    const roleMention = roleId ? `<@&${roleId}> ` : '';
+    const proposedText =
+      normalizedProposedNumber === null ? 'not determined' : String(normalizedProposedNumber);
+    await this.reply(
+      message,
+      `${roleMention}Counting chain review requested. Expected **${game.expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve this post or ${REVIEW_REJECT_REACTION} to reset the chain.`,
+      roleId ? { mentionRoleId: roleId } : undefined,
+    );
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        authorId: message.authorId,
+        expectedNumber: game.expectedNumber,
+        proposedNumber: normalizedProposedNumber,
+        reason,
+      },
+      'Counting chain moderator review requested',
+    );
+    return true;
+  }
+
+  private async applyReviewDecision(
+    message: CountingChainMessage,
+    decision: 'approve' | 'reject',
+    reviewerId: string,
+  ): Promise<boolean> {
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    const pendingReview = state.pendingReview;
+    if (!pendingReview || pendingReview.messageId !== message.id) {
+      this.dependencies.logger.debug(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          decision,
+          reviewerId,
+        },
+        'Counting chain review reaction did not match a pending review',
+      );
+      return false;
+    }
+
+    const now = this.currentTime();
+    const game = state.game ?? createInitialGameState(now);
+    if (decision === 'approve') {
+      const approvedNumber = pendingReview.proposedNumber ?? game.expectedNumber;
+      const highScore = Math.max(game.highScore, approvedNumber);
+      state.game = {
+        expectedNumber: approvedNumber + 1,
+        lastAuthorId: message.authorId,
+        lastMessageId: message.id,
+        updatedAt: now.toISOString(),
+        highScore,
+        highScoreAt: approvedNumber > game.highScore ? now.toISOString() : game.highScoreAt,
+        lastRound: game.lastRound,
+        lastRoundAt: game.lastRoundAt,
+        lastRoundReason: game.lastRoundReason,
+        lastProcessedMessageId: message.id,
+      };
+      state.pendingReview = null;
+      writeCountingChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      await this.publishInfo();
+      await this.react(message, PASS_REACTION);
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          reviewerId,
+          approvedNumber,
+          expectedNumber: approvedNumber + 1,
+        },
+        'Counting chain moderator approved a post',
+      );
+      return true;
+    }
+
+    const roundScore = Math.max(0, game.expectedNumber - 1);
+    const highScore = Math.max(game.highScore, roundScore);
+    state.game = createInitialGameState(now, {
+      highScore,
+      highScoreAt: roundScore > game.highScore ? now.toISOString() : game.highScoreAt,
+      lastRound: roundScore,
+      lastRoundAt: now.toISOString(),
+      lastRoundReason: 'moderator-rejected',
+      lastProcessedMessageId: message.id,
+    });
+    state.pendingReview = null;
+    writeCountingChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.publishInfo();
+    await this.react(message, RULE_FAILURE_REACTION);
+    await this.reply(message, 'Counting chain review rejected — the chain is starting again at 1.');
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        reviewerId,
+        roundScore,
+      },
+      'Counting chain moderator rejected a post',
+    );
+    return true;
+  }
+
+  private isReviewEnabled(): boolean {
+    return this.dependencies.config.reviewEnabled === true;
   }
 
   private async downloadImage(source: CountingChainAttachment): Promise<NumberImage> {
@@ -666,9 +982,17 @@ export class PersistentCountingChainService implements CountingChainService {
     await this.reply(message, content);
   }
 
-  private async reply(message: CountingChainMessage, content: string): Promise<void> {
+  private async reply(
+    message: CountingChainMessage,
+    content: string,
+    options?: CountingChainReplyOptions,
+  ): Promise<void> {
     try {
-      await message.reply(content);
+      if (options) {
+        await message.reply(content, options);
+      } else {
+        await message.reply(content);
+      }
     } catch (error: unknown) {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id },
@@ -723,6 +1047,7 @@ function writeCountingChainState(rootState: JsonState, state: CountingChainState
     version: state.version,
     infoMessageId: state.infoMessageId,
     ...(state.historyRecoveryPending ? { historyRecoveryPending: true } : {}),
+    ...(state.pendingReview ? { pendingReview: state.pendingReview } : {}),
     ...(state.game ?? {}),
   };
 }
@@ -731,10 +1056,11 @@ function findLatestRelevantHistoryMessage(
   history: readonly CountingChainHistoryMessage[],
 ): CountingChainHistoryMessage | undefined {
   for (const message of history) {
+    if (isCountingChainFailureMessage(message)) {
+      return message;
+    }
+
     if (message.authorIsBot) {
-      if (isCountingChainFailureMessage(message)) {
-        return message;
-      }
       continue;
     }
 
@@ -789,16 +1115,29 @@ function isDiscordMessageAfter(messageId: string, checkpointMessageId: string): 
   return BigInt(messageId) > BigInt(checkpointMessageId);
 }
 
+function isDiscordMessageAtOrBefore(messageId: string, checkpointMessageId: string): boolean {
+  if (!isDiscordSnowflake(messageId) || !isDiscordSnowflake(checkpointMessageId)) {
+    return false;
+  }
+
+  return BigInt(messageId) <= BigInt(checkpointMessageId);
+}
+
 function isCountingChainFailureMessage(message: CountingChainHistoryMessage): boolean {
   if (
     message.content.startsWith('Counting chain over —') ||
-    message.content.startsWith('I could not read that image.')
+    message.content.startsWith('I could not read that image.') ||
+    message.content.startsWith('Counting chain review requested.') ||
+    message.content.includes('Counting chain review requested.')
   ) {
     return true;
   }
 
   return message.botReactionEmojis.some(
-    (emoji) => emoji === RULE_FAILURE_REACTION || emoji === RECOGNITION_FAILURE_REACTION,
+    (emoji) =>
+      emoji === RULE_FAILURE_REACTION ||
+      emoji === RECOGNITION_FAILURE_REACTION ||
+      emoji === REVIEW_REQUEST_REACTION,
   );
 }
 
@@ -808,14 +1147,22 @@ function hasCountingChainFeedbackReaction(emojis: readonly string[] | undefined)
       (emoji) =>
         emoji === PASS_REACTION ||
         emoji === RULE_FAILURE_REACTION ||
-        emoji === RECOGNITION_FAILURE_REACTION,
+        emoji === RECOGNITION_FAILURE_REACTION ||
+        emoji === REVIEW_REQUEST_REACTION ||
+        emoji === REVIEW_APPROVE_REACTION,
     ),
   );
 }
 
 function readCountingChainState(value: unknown, channelId?: string): CountingChainState {
   if (!isRecord(value) || value.version !== 1) {
-    return { version: 1, game: null, infoMessageId: null, historyRecoveryPending: false };
+    return {
+      version: 1,
+      game: null,
+      infoMessageId: null,
+      historyRecoveryPending: false,
+      pendingReview: null,
+    };
   }
 
   const currentGame = readGameState(value);
@@ -834,7 +1181,57 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     game: currentGame ?? nestedGame ?? legacyGame ?? null,
     infoMessageId: readNullableString(value.infoMessageId),
     historyRecoveryPending: value.historyRecoveryPending === true,
+    pendingReview: readPendingReview(value.pendingReview),
   };
+}
+
+function readPendingReview(value: unknown): CountingChainPendingReview | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const messageId = value.messageId;
+  const authorId = value.authorId;
+  const expectedNumber = value.expectedNumber;
+  const proposedNumber = value.proposedNumber;
+  const reason = value.reason;
+  const requestedAt = value.requestedAt;
+  if (
+    typeof messageId !== 'string' ||
+    typeof authorId !== 'string' ||
+    typeof expectedNumber !== 'number' ||
+    !Number.isSafeInteger(expectedNumber) ||
+    expectedNumber <= 0 ||
+    (typeof proposedNumber !== 'number' && proposedNumber !== null) ||
+    (typeof proposedNumber === 'number' &&
+      (!Number.isSafeInteger(proposedNumber) || proposedNumber <= 0)) ||
+    !isCountingChainReviewReason(reason) ||
+    typeof requestedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    messageId,
+    authorId,
+    expectedNumber,
+    proposedNumber,
+    reason,
+    requestedAt,
+  };
+}
+
+function isCountingChainReviewReason(value: unknown): value is CountingChainReviewReason {
+  return (
+    value === 'unreadable' ||
+    value === 'wrong-number' ||
+    value === 'same-user' ||
+    value === 'manual'
+  );
+}
+
+function normalizeReviewNumber(value: number | undefined): number | null {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function readGameState(value: unknown): CountingChainGameState | undefined {

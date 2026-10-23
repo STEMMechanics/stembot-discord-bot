@@ -42,6 +42,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/ping` — Discord gateway latency.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
+- `/review` — request moderator review of a counting-chain post; optionally provide its message ID and the number to approve.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 
@@ -61,6 +62,17 @@ unsupported or temporarily unavailable image receives `⚠️` and a retry messa
 it does not change the game state. Bot messages and messages outside the
 configured channel are ignored.
 
+Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
+`COUNTING_CHAIN_REVIEW_ROLE_ID` to pause wrong or unreadable posts for
+moderator review instead of resetting or asking the member to retry. STEMBot
+mentions that role and adds `🔎`. A moderator with that role, `Manage Messages`,
+or `Administrator` can react with `✅` to approve the proposed number or `❌`
+to reset the chain. Use `/review message_id number` when the model recognised
+the wrong number; the number option updates the pending proposal before the
+reaction is applied. While a review is pending, later posts are held until a
+moderator approves or rejects the pending post. The pending review is persisted
+across restarts.
+
 The bot downloads Discord CDN attachments, direct image URLs, and image URLs
 supplied by Discord embeds, samples animated GIF frames as PNG images, and sends
 those frames to the configured OpenAI model. It does not require a provider
@@ -71,7 +83,10 @@ the image. Recognition accepts digits, spelled-out number words, and clear
 corrective phrases such as `not one, but two!`; ambiguous or inferred values
 return no number.
 Discord GIF-picker embeds can arrive after the initial message event, so the
-bot also checks message updates and ignores duplicate update events.
+bot checks message updates and recent channel history. Recent human posts are
+fed to the counting service in Discord message-ID order, and duplicate or older
+events are ignored. This prevents a later GIF embed update from being judged
+before an earlier post.
 Enable the Message Content intent in the Discord Developer Portal and grant the
 bot permission to view message history, add reactions and send messages in the
 counting channel.
@@ -121,7 +136,7 @@ manually editing the game fields.
 
 ### Discord command synchronization
 
-`npm run sync:commands` performs a complete Discord replacement with the five
+`npm run sync:commands` performs a complete Discord replacement with the six
 supported commands in the configured guild scope. It first removes existing
 global command registrations for this application, then bulk-replaces the
 global set with an empty list and the target guild set with the supported
@@ -192,43 +207,45 @@ npm run validate
 
 ## Configuration
 
-| Variable                                    | Required     | Purpose                                                                                     |
-| ------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
-| `DISCORD_TOKEN`                             | Yes          | Discord bot token. Keep it in the deployment secret store.                                  |
-| `DISCORD_CLIENT_ID`                         | Yes          | Discord application ID.                                                                     |
-| `DISCORD_GUILD_ID`                          | Yes          | The single Discord guild where STEMBot commands are registered.                             |
-| `WORKSHOP_FEED_URL`                         | No           | Website RSS URL; defaults to the STEMMechanics workshop feed.                               |
-| `WEBSITE_REQUEST_TIMEOUT_MS`                | No           | RSS request timeout; defaults to 15 seconds.                                                |
-| `STEMCRAFT_STATUS_URL`                      | No           | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.               |
-| `STEMCRAFT_STATUS_TOKEN`                    | No           | Optional bearer token for a protected status endpoint.                                      |
-| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No           | Status request timeout; defaults to 5 seconds.                                              |
-| `OPENAI_API_KEY`                            | When enabled | OpenAI API key; keep it in the deployment secret store.                                     |
-| `OPENAI_MODEL`                              | No           | Vision model; defaults to `gpt-6-luna`.                                                     |
-| `OPENAI_REASONING_EFFORT`                   | No           | Model reasoning setting; defaults to `low` for this simple image-recognition task.          |
-| `OPENAI_TIMEOUT`                            | No           | OpenAI request timeout in seconds; defaults to 180.                                         |
-| `COUNTING_CHAIN_ENABLED`                    | No           | Enable the image-based minigame; defaults to `false`.                                       |
-| `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled | Discord channel watched by the minigame.                                                    |
-| `COUNTING_CHAIN_INFO_CHANNEL_ID`            | No           | Channel containing the live counting-chain information embed.                               |
-| `COUNTING_CHAIN_INFO_MESSAGE_ID`            | No           | Existing STEMBot message to edit; if omitted, the bot discovers its embed.                  |
-| `COUNTING_CHAIN_MAX_ATTACHMENT_BYTES`       | No           | Maximum downloaded image size; defaults to 8 MiB.                                           |
-| `WORKSHOP_TIME_ZONE`                        | No           | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
-| `WORKSHOP_POLL_INTERVAL_MS`                 | No           | Feed polling interval; defaults to 5 minutes.                                               |
-| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No           | Enable new/update/cancellation announcements; defaults to `true`.                           |
-| `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`         | No           | Only announce future workshops within this many days; defaults to 28.                       |
-| `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES`       | No           | Delay lifecycle announcements in minutes; defaults to 30. Set to `0` for immediate testing. |
-| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No           | Legacy millisecond setting; used only when the minutes setting is unset.                    |
-| `WORKSHOP_REMINDERS_ENABLED`                | No           | Enable workshop reminders; defaults to `true`.                                              |
-| `WORKSHOP_REMINDER_24H_ENABLED`             | No           | Enable the 24-hour reminder; defaults to `true`.                                            |
-| `WORKSHOP_REMINDER_1H_ENABLED`              | No           | Enable the 1-hour reminder; defaults to `true`.                                             |
-| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No           | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.       |
-| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No           | Channel for workshop lifecycle announcements.                                               |
-| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No           | Channel for 24-hour and 1-hour reminders.                                                   |
-| `STREAMING_NOTIFICATIONS_ENABLED`           | No           | Reserved setting for the streaming workflow; defaults to `false`.                           |
-| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No           | Reserved streaming notification channel.                                                    |
-| `STATE_PATH`                                | No           | Persistent JSON state path; defaults to `./data/state.json`.                                |
-| `SHUTDOWN_TIMEOUT_MS`                       | No           | Graceful shutdown deadline; defaults to 30 seconds.                                         |
-| `NODE_ENV`                                  | No           | `development`, `test`, or `production`; defaults to `production`.                           |
-| `LOG_LEVEL`                                 | No           | Pino level; defaults to `info`.                                                             |
+| Variable                                    | Required            | Purpose                                                                                     |
+| ------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| `DISCORD_TOKEN`                             | Yes                 | Discord bot token. Keep it in the deployment secret store.                                  |
+| `DISCORD_CLIENT_ID`                         | Yes                 | Discord application ID.                                                                     |
+| `DISCORD_GUILD_ID`                          | Yes                 | The single Discord guild where STEMBot commands are registered.                             |
+| `WORKSHOP_FEED_URL`                         | No                  | Website RSS URL; defaults to the STEMMechanics workshop feed.                               |
+| `WEBSITE_REQUEST_TIMEOUT_MS`                | No                  | RSS request timeout; defaults to 15 seconds.                                                |
+| `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.               |
+| `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                      |
+| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No                  | Status request timeout; defaults to 5 seconds.                                              |
+| `OPENAI_API_KEY`                            | When enabled        | OpenAI API key; keep it in the deployment secret store.                                     |
+| `OPENAI_MODEL`                              | No                  | Vision model; defaults to `gpt-6-luna`.                                                     |
+| `OPENAI_REASONING_EFFORT`                   | No                  | Model reasoning setting; defaults to `low` for this simple image-recognition task.          |
+| `OPENAI_TIMEOUT`                            | No                  | OpenAI request timeout in seconds; defaults to 180.                                         |
+| `COUNTING_CHAIN_ENABLED`                    | No                  | Enable the image-based minigame; defaults to `false`.                                       |
+| `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled        | Discord channel watched by the minigame.                                                    |
+| `COUNTING_CHAIN_INFO_CHANNEL_ID`            | No                  | Channel containing the live counting-chain information embed.                               |
+| `COUNTING_CHAIN_INFO_MESSAGE_ID`            | No                  | Existing STEMBot message to edit; if omitted, the bot discovers its embed.                  |
+| `COUNTING_CHAIN_REVIEW_ENABLED`             | No                  | Pause uncertain counting posts and request moderator reactions; defaults to `false`.        |
+| `COUNTING_CHAIN_REVIEW_ROLE_ID`             | When review enabled | Role to mention and authorize for counting-chain review.                                    |
+| `COUNTING_CHAIN_MAX_ATTACHMENT_BYTES`       | No                  | Maximum downloaded image size; defaults to 8 MiB.                                           |
+| `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
+| `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                               |
+| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No                  | Enable new/update/cancellation announcements; defaults to `true`.                           |
+| `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`         | No                  | Only announce future workshops within this many days; defaults to 28.                       |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES`       | No                  | Delay lifecycle announcements in minutes; defaults to 30. Set to `0` for immediate testing. |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No                  | Legacy millisecond setting; used only when the minutes setting is unset.                    |
+| `WORKSHOP_REMINDERS_ENABLED`                | No                  | Enable workshop reminders; defaults to `true`.                                              |
+| `WORKSHOP_REMINDER_24H_ENABLED`             | No                  | Enable the 24-hour reminder; defaults to `true`.                                            |
+| `WORKSHOP_REMINDER_1H_ENABLED`              | No                  | Enable the 1-hour reminder; defaults to `true`.                                             |
+| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No                  | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.       |
+| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No                  | Channel for workshop lifecycle announcements.                                               |
+| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No                  | Channel for 24-hour and 1-hour reminders.                                                   |
+| `STREAMING_NOTIFICATIONS_ENABLED`           | No                  | Reserved setting for the streaming workflow; defaults to `false`.                           |
+| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No                  | Reserved streaming notification channel.                                                    |
+| `STATE_PATH`                                | No                  | Persistent JSON state path; defaults to `./data/state.json`.                                |
+| `SHUTDOWN_TIMEOUT_MS`                       | No                  | Graceful shutdown deadline; defaults to 30 seconds.                                         |
+| `NODE_ENV`                                  | No                  | `development`, `test`, or `production`; defaults to `production`.                           |
+| `LOG_LEVEL`                                 | No                  | Pino level; defaults to `info`.                                                             |
 
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -258,7 +275,15 @@ when editing it offline:
     "highScoreAt": "2026-10-22T23:55:00.000Z",
     "lastRound": 66,
     "lastRoundAt": "2026-10-22T23:56:00.000Z",
-    "lastRoundReason": "same-user"
+    "lastRoundReason": "same-user",
+    "pendingReview": {
+      "messageId": "DISCORD_MESSAGE_ID",
+      "authorId": "DISCORD_USER_ID",
+      "expectedNumber": 67,
+      "proposedNumber": 67,
+      "reason": "wrong-number",
+      "requestedAt": "2026-10-23T00:00:00.000Z"
+    }
   }
 }
 ```
@@ -266,7 +291,10 @@ when editing it offline:
 `expectedNumber` is the next number accepted, `highScore` is the highest
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
-display note. `lastProcessedMessageId` is the Discord history scan checkpoint
+display note. A pending review contains the target message, the number the
+model or moderator proposed, and the reason (`unreadable`, `wrong-number`,
+`same-user`, or `manual`). While it exists, the service holds newer counting
+posts. `lastProcessedMessageId` is the Discord history scan checkpoint
 used for startup reconciliation. It advances to the newest scanned message,
 including messages without a supported image; `lastMessageId` remains the last
 accepted counting image. This lets a restart resume from the newest message
@@ -364,7 +392,7 @@ in CI.
 
 ## Security and privacy
 
-The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame additionally enables `GuildMessages` and the privileged `MessageContent` intent so Discord attachments can be inspected. It needs channel permissions only where notifications or the minigame are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
+The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame additionally enables `GuildMessages` and the privileged `MessageContent` intent so Discord attachments can be inspected. Enabling review also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or the minigame are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
 The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
 

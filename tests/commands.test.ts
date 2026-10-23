@@ -12,6 +12,7 @@ import {
   jokeCommand,
   pingCommand,
   playersCommand,
+  reviewCommand,
   robotJokes,
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
@@ -38,6 +39,7 @@ describe('Discord commands', () => {
       'ping',
       'workshops',
       'joke',
+      'review',
       'minecraft',
       'players',
     ]);
@@ -180,6 +182,32 @@ describe('Discord commands', () => {
     expect(editReply).toHaveBeenCalledWith({
       content: 'Online Minecraft players:\n• Alex',
       allowedMentions: { parse: [] },
+    });
+  });
+
+  it('requests counting-chain review for a selected message and number', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const requestCountingChainReview = vi.fn().mockResolvedValue(true);
+    const interaction = {
+      channelId: 'counting-channel',
+      options: {
+        getString: vi.fn().mockReturnValue('message-2'),
+        getInteger: vi.fn().mockReturnValue(2),
+      },
+      deferReply,
+      editReply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await reviewCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      requestCountingChainReview,
+    });
+
+    expect(requestCountingChainReview).toHaveBeenCalledWith('counting-channel', 'message-2', 2);
+    expect(deferReply).toHaveBeenCalledOnce();
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Review requested'),
     });
   });
 

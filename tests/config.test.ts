@@ -34,6 +34,7 @@ describe('loadConfig', () => {
       },
       countingChain: {
         enabled: false,
+        reviewEnabled: false,
         maxAttachmentBytes: 8388608,
       },
       workshops: {
@@ -174,7 +175,32 @@ describe('loadConfig', () => {
       channelId: '3234567890',
       infoChannelId: '4234567890',
       infoMessageId: '5234567890',
+      reviewEnabled: false,
       maxAttachmentBytes: 8388608,
+    });
+  });
+
+  it('requires a moderator role when counting-chain review is enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        COUNTING_CHAIN_REVIEW_ENABLED: 'true',
+      }),
+    ).toThrow(/COUNTING_CHAIN_REVIEW_ROLE_ID/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      COUNTING_CHAIN_REVIEW_ENABLED: 'true',
+      COUNTING_CHAIN_REVIEW_ROLE_ID: '6234567890',
+    });
+
+    expect(config.countingChain).toMatchObject({
+      reviewEnabled: true,
+      reviewRoleId: '6234567890',
     });
   });
 });
