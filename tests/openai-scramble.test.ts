@@ -77,4 +77,39 @@ describe('OpenAI STEM scramble generator', () => {
       }),
     ).rejects.toThrow('failed validation');
   });
+
+  it('requests a different clue without revealing the scramble answer', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            hint: 'It has pathways that carry electricity from one part to another.',
+          }),
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const generator = createGenerator(fetchImplementation);
+
+    await expect(
+      generator.generateHint({
+        word: 'circuit',
+        topic: 'technology and computing',
+        targetAgeMin: 8,
+        targetAgeMax: 14,
+        previousHints: ['It is a loop used in electronics.'],
+      }),
+    ).resolves.toBe('It has pathways that carry electricity from one part to another.');
+
+    const request = fetchImplementation.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      input: Array<{ content: Array<{ text?: string }> }>;
+      text: { format: { name: string } };
+    };
+    expect(body.text.format.name).toBe('stem_scramble_hint');
+    expect(body.input[0]?.content[0]?.text).toContain('aged 8-14');
+    expect(body.input[0]?.content[0]?.text).toContain('<previous-hints>');
+    expect(body.input[0]?.content[0]?.text).toContain('It is a loop used in electronics.');
+    expect(body.input[0]?.content[0]?.text).toContain('<answer>circuit</answer>');
+  });
 });

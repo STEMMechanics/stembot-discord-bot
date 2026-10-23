@@ -52,6 +52,7 @@ function createMessage(
     authorIsBot: false,
     content,
     react: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -116,6 +117,44 @@ describe('STEM scramble service', () => {
       stemScramble: {
         nextRoundNumber: 3,
         round: { word: 'robot', roundNumber: 2 },
+      },
+    });
+  });
+
+  it('provides an additional clue without counting it as an answer', async () => {
+    const state = new MemoryStateStore();
+    const generateHint = vi
+      .fn<NonNullable<ScrambleWordGenerator['generateHint']>>()
+      .mockResolvedValue('It can carry electricity around a loop.');
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi.fn().mockResolvedValue(word('circuit')),
+      generateHint,
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('scramble-message-1') };
+    const service = createService(state, generator, publisher);
+    const hint = createMessage('user-1', 'hint-1', 'hint');
+
+    await service.initialize();
+    await service.handleMessage(hint);
+
+    expect(generateHint).toHaveBeenCalledWith({
+      word: 'circuit',
+      topic: 'mixed STEM',
+      targetAgeMin: 8,
+      targetAgeMax: 14,
+      previousHints: ['A clue for circuit.'],
+    });
+    expect(hint.reply).toHaveBeenCalledWith(
+      '💡 Another hint: It can carry electricity around a loop.',
+    );
+    expect(hint.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        round: {
+          word: 'circuit',
+          wrongAttempts: 0,
+          hints: ['A clue for circuit.', 'It can carry electricity around a loop.'],
+        },
       },
     });
   });

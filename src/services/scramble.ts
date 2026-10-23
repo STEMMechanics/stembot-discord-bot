@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   ScrambleWord,
   ScrambleWordGenerator,
+  ScrambleHintOptions,
   ScrambleWordOptions,
 } from '../integrations/openai-scramble.js';
 import type { AppLogger } from '../logging/logger.js';
@@ -14,6 +15,7 @@ import {
   toMinigameLeaderboard,
   type MinigameLeaderboardEntry,
 } from './minigame-leaderboards.js';
+import { isMinigameHintRequest } from './minigame-hints.js';
 
 export interface StemScrambleConfig {
   enabled: boolean;
@@ -30,7 +32,9 @@ export interface StemScrambleMessage {
   authorId: string;
   authorIsBot: boolean;
   content: string;
+  hintRequest?: boolean;
   react(emoji: string): Promise<void>;
+  reply(content: string): Promise<void>;
 }
 
 export interface StemScramblePublisher {
@@ -51,6 +55,7 @@ interface StemScrambleRoundState {
   roundNumber: number;
   word: string;
   hint: string;
+  hints: string[];
   scrambled: string;
   wrongAttempts: number;
   startedAt: string;
@@ -84,12 +89,19 @@ const MAX_WRONG_ATTEMPTS = 5;
 const MAX_RECENT_WORDS = 50;
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_WORD_GENERATION_ATTEMPTS = 3;
+const MAX_HINTS_PER_ROUND = 5;
+const SCRAMBLE_HINT_USER_COOLDOWN_MS = 5_000;
+const SCRAMBLE_HINT_GLOBAL_WINDOW_MS = 60_000;
+const SCRAMBLE_HINT_GLOBAL_LIMIT = 30;
 
 export class PersistentStemScrambleService implements StemScrambleService {
   private readonly currentTime: () => Date;
   private readonly random: () => number;
   private readonly idFactory: () => string;
   private eventQueue: Promise<void> = Promise.resolve();
+  private readonly lastHintAt = new Map<string, number>();
+  private hintWindowStartedAt = 0;
+  private hintWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemScrambleServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
@@ -186,6 +198,11 @@ export class PersistentStemScrambleService implements StemScrambleService {
       return;
     }
 
+    if (message.hintRequest === true || isMinigameHintRequest(message.content)) {
+      await this.processHintRequest(rootState, state, round, message);
+      return;
+    }
+
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     const answer = normalizeScrambleText(message.content);
     if (answer !== normalizeScrambleText(round.word)) {
@@ -237,6 +254,69 @@ export class PersistentStemScrambleService implements StemScrambleService {
     );
   }
 
+  private async processHintRequest(
+    rootState: JsonState,
+    state: StemScrambleState,
+    round: StemScrambleRoundState,
+    message: StemScrambleMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemScrambleState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    if (round.hints.length >= MAX_HINTS_PER_ROUND) {
+      await this.replySafely(
+        message,
+        '💡 I have given all the extra clues I have for this round. Have a go with the clues above!',
+      );
+      return;
+    }
+
+    if (!this.canRequestHint(message.authorId)) {
+      await this.replySafely(
+        message,
+        '💡 Give me a moment to think before asking for another clue.',
+      );
+      return;
+    }
+
+    let hint: string | undefined;
+    const generator = this.dependencies.generator;
+    if (generator.generateHint) {
+      const options: ScrambleHintOptions = {
+        word: round.word,
+        topic: this.dependencies.config.topic,
+        targetAgeMin: this.dependencies.config.targetAgeMin,
+        targetAgeMax: this.dependencies.config.targetAgeMax,
+        previousHints: round.hints,
+      };
+      try {
+        const generatedHint = (await generator.generateHint(options)).trim();
+        if (
+          generatedHint &&
+          !round.hints.some((previousHint) => sameHint(previousHint, generatedHint)) &&
+          !containsWholeWord(generatedHint, round.word)
+        ) {
+          hint = generatedHint;
+        }
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, roundNumber: round.roundNumber },
+          'STEM scramble hint could not be generated; using the original clue',
+        );
+      }
+    }
+
+    if (!hint) {
+      hint = round.hint;
+    }
+
+    round.hints = [...round.hints, hint].slice(-MAX_HINTS_PER_ROUND);
+    writeStemScrambleState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.replySafely(message, `💡 Another hint: ${hint}`);
+  }
+
   private async publishNextRound(
     rootState: JsonState,
     state: StemScrambleState,
@@ -264,6 +344,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
       roundNumber,
       word: word.word,
       hint: word.hint,
+      hints: [word.hint],
       scrambled,
       wrongAttempts: 0,
       startedAt: this.currentTime().toISOString(),
@@ -330,6 +411,38 @@ export class PersistentStemScrambleService implements StemScrambleService {
         'STEM scramble reaction could not be added',
       );
     }
+  }
+
+  private async replySafely(message: StemScrambleMessage, content: string): Promise<void> {
+    try {
+      await message.reply(content);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'STEM scramble hint reply could not be sent',
+      );
+    }
+  }
+
+  private canRequestHint(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastHintAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < SCRAMBLE_HINT_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.hintWindowStartedAt >= SCRAMBLE_HINT_GLOBAL_WINDOW_MS) {
+      this.hintWindowStartedAt = now;
+      this.hintWindowRequestCount = 0;
+    }
+
+    if (this.hintWindowRequestCount >= SCRAMBLE_HINT_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastHintAt.set(authorId, now);
+    this.hintWindowRequestCount += 1;
+    return true;
   }
 
   private isEnabled(): boolean {
@@ -457,6 +570,12 @@ function readRoundState(value: unknown): StemScrambleRoundState | null {
     roundNumber: value.roundNumber,
     word: value.word,
     hint: value.hint,
+    hints:
+      Array.isArray(value.hints) &&
+      value.hints.every((hint): hint is string => typeof hint === 'string') &&
+      value.hints.length > 0
+        ? value.hints.slice(-MAX_HINTS_PER_ROUND)
+        : [value.hint],
     scrambled: value.scrambled,
     wrongAttempts: typeof value.wrongAttempts === 'number' ? value.wrongAttempts : 0,
     startedAt: value.startedAt,
@@ -495,6 +614,15 @@ function hasSameLetters(left: string, right: string): boolean {
   const leftLetters = [...normalizeScrambleText(left)].sort().join('');
   const rightLetters = [...normalizeScrambleText(right)].sort().join('');
   return leftLetters.length > 0 && leftLetters === rightLetters;
+}
+
+function sameHint(left: string, right: string): boolean {
+  return normalizeScrambleText(left) === normalizeScrambleText(right);
+}
+
+function containsWholeWord(value: string, word: string): boolean {
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escapedWord}\\b`, 'i').test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

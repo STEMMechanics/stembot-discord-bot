@@ -37,6 +37,7 @@ import type {
 } from '../services/minigame-leaderboards.js';
 import type { UserLevelService } from '../services/user-levels.js';
 import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
+import { isMinigameHintRequest } from '../services/minigame-hints.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -422,10 +423,14 @@ export function createDiscordGateway(
 
   if (dependencies.scramble && config.scramble.enabled && config.scramble.channelId) {
     client.on(Events.MessageCreate, (message) => {
+      const botMentioned = messageMentionsBot(message, client.user?.id);
+      const gameContent = client.user
+        ? removeBotMentions(message.content, client.user.id)
+        : message.content;
       if (
         message.channelId !== config.scramble.channelId ||
         message.author.bot ||
-        messageMentionsBot(message, client.user?.id)
+        (botMentioned && !isMinigameHintRequest(gameContent))
       ) {
         return;
       }
@@ -441,7 +446,7 @@ export function createDiscordGateway(
       );
 
       void dependencies
-        .scramble!.handleMessage(toStemScrambleMessage(message))
+        .scramble!.handleMessage(toStemScrambleMessage(message, client.user?.id))
         .catch((error: unknown) => {
           logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id },
@@ -454,10 +459,14 @@ export function createDiscordGateway(
 
   if (dependencies.wordChain && config.wordChain.enabled && config.wordChain.channelId) {
     client.on(Events.MessageCreate, (message) => {
+      const botMentioned = messageMentionsBot(message, client.user?.id);
+      const gameContent = client.user
+        ? removeBotMentions(message.content, client.user.id)
+        : message.content;
       if (
         message.channelId !== config.wordChain.channelId ||
         message.author.bot ||
-        messageMentionsBot(message, client.user?.id)
+        (botMentioned && !isMinigameHintRequest(gameContent))
       ) {
         return;
       }
@@ -473,7 +482,7 @@ export function createDiscordGateway(
       );
 
       void dependencies
-        .wordChain!.handleMessage(toStemWordChainMessage(message))
+        .wordChain!.handleMessage(toStemWordChainMessage(message, client.user?.id))
         .catch((error: unknown) => {
           logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id },
@@ -491,6 +500,13 @@ export function createDiscordGateway(
       }
 
       const question = removeBotMentions(message.content, client.user.id);
+      const isMinigameChannel =
+        message.channelId === config.scramble.channelId ||
+        message.channelId === config.wordChain.channelId;
+      if (isMinigameChannel && isMinigameHintRequest(question)) {
+        return;
+      }
+
       logger.info(
         {
           channelId: message.channelId,
@@ -729,26 +745,36 @@ function toStemQuizMessage(message: Message): StemQuizMessage {
   };
 }
 
-function toStemScrambleMessage(message: Message): StemScrambleMessage {
+function toStemScrambleMessage(message: Message, botUserId?: string): StemScrambleMessage {
+  const content = botUserId ? removeBotMentions(message.content, botUserId) : message.content;
   return {
     id: message.id,
     channelId: message.channelId,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
-    content: message.content,
+    content,
+    hintRequest: isMinigameHintRequest(content),
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
+    },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
     },
   };
 }
 
-function toStemWordChainMessage(message: Message): StemWordChainMessage {
+function toStemWordChainMessage(message: Message, botUserId?: string): StemWordChainMessage {
+  const content = botUserId ? removeBotMentions(message.content, botUserId) : message.content;
   return {
     id: message.id,
     channelId: message.channelId,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
-    content: message.content,
+    content,
+    hintRequest: isMinigameHintRequest(content),
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },

@@ -1,12 +1,16 @@
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
-import type { StemWordChainThemeValidator } from '../integrations/openai-word-chain.js';
+import type {
+  StemWordChainHint,
+  StemWordChainThemeValidator,
+} from '../integrations/openai-word-chain.js';
 import {
   readMinigameScores,
   toMinigameLeaderboard,
   type MinigameLeaderboardEntry,
 } from './minigame-leaderboards.js';
 import { isDiscordMessageBefore } from './message-order.js';
+import { isMinigameHintRequest } from './minigame-hints.js';
 import type { UserLevelService } from './user-levels.js';
 
 export interface StemWordChainConfig {
@@ -21,6 +25,7 @@ export interface StemWordChainMessage {
   authorId: string;
   authorIsBot: boolean;
   content: string;
+  hintRequest?: boolean;
   react(emoji: string): Promise<void>;
   reply(content: string): Promise<void>;
 }
@@ -148,6 +153,7 @@ export const STEM_WORD_CHAIN_THEMES: readonly StemWordChainTheme[] = [
       'robot',
       'sensor',
       'software',
+      'typescript',
       'web',
     ],
   },
@@ -193,6 +199,9 @@ interface StemWordChainState {
   bestStreak: number;
   roundStreaks: Record<string, number>;
   bestStreaks: Record<string, number>;
+  usedWords: string[];
+  hintedWords: string[];
+  hintHistory: string[];
   processedMessageIds: string[];
 }
 
@@ -208,6 +217,7 @@ interface StemWordChainServiceDependencies {
 const STATE_KEY = 'stemWordChain';
 const PASS_REACTION = '✅';
 const FAILURE_REACTION = '❌';
+const NEAR_MISS_REACTION = '🤔';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_THEME_VALIDATION_CACHE_ENTRIES = 500;
 const THEME_VALIDATION_USER_COOLDOWN_MS = 5_000;
@@ -217,6 +227,12 @@ const MAX_WORD_DEFINITION_CACHE_ENTRIES = 500;
 const WORD_DEFINITION_USER_COOLDOWN_MS = 5_000;
 const WORD_DEFINITION_GLOBAL_WINDOW_MS = 60_000;
 const WORD_DEFINITION_GLOBAL_LIMIT = 30;
+const MAX_USED_WORDS = 500;
+const MAX_HINTED_WORDS = 5;
+const MAX_HINT_HISTORY = 5;
+const WORD_CHAIN_HINT_USER_COOLDOWN_MS = 5_000;
+const WORD_CHAIN_HINT_GLOBAL_WINDOW_MS = 60_000;
+const WORD_CHAIN_HINT_GLOBAL_LIMIT = 30;
 
 export class PersistentStemWordChainService implements StemWordChainService {
   private eventQueue: Promise<void> = Promise.resolve();
@@ -229,6 +245,9 @@ export class PersistentStemWordChainService implements StemWordChainService {
   private readonly lastWordDefinitionAt = new Map<string, number>();
   private wordDefinitionWindowStartedAt = 0;
   private wordDefinitionWindowRequestCount = 0;
+  private readonly lastHintAt = new Map<string, number>();
+  private hintWindowStartedAt = 0;
+  private hintWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemWordChainServiceDependencies) {}
 
@@ -300,12 +319,32 @@ export class PersistentStemWordChainService implements StemWordChainService {
       return;
     }
 
+    if (message.hintRequest === true || isMinigameHintRequest(message.content)) {
+      await this.processHintRequest(rootState, state, theme, message);
+      return;
+    }
+
     const word = normalizeWordChainWord(message.content);
     const expectedLetter = state.lastWord?.slice(-1) ?? undefined;
+    if (!word) {
+      await this.endRound(rootState, state, message, theme, word);
+      return;
+    }
+
+    if (state.usedWords.includes(word)) {
+      await this.endRound(rootState, state, message, theme, word);
+      return;
+    }
+
+    const nearMiss = findNearMiss(theme, word, expectedLetter);
+    if (nearMiss) {
+      await this.handleNearMiss(rootState, state, message);
+      return;
+    }
+
     const startsWithExpectedLetter =
-      word !== undefined &&
-      (!state.lastWord || (expectedLetter !== undefined && word.startsWith(expectedLetter)));
-    if (!startsWithExpectedLetter || !word) {
+      !state.lastWord || (expectedLetter !== undefined && word.startsWith(expectedLetter));
+    if (!startsWithExpectedLetter) {
       await this.endRound(rootState, state, message, theme, word);
       return;
     }
@@ -319,6 +358,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
 
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     if (valid && word) {
+      state.usedWords = [...state.usedWords, word].slice(-MAX_USED_WORDS);
       state.lastWord = word;
       state.lastAuthorId = message.authorId;
       state.lastMessageId = message.id;
@@ -334,7 +374,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       await this.dependencies.state.save(rootState);
       await this.react(message, PASS_REACTION);
       await this.recordGameParticipation(message);
-      this.queueWordDefinition(message, theme, word);
+      this.queueWordDefinition(message, theme, word, word.slice(-1), state.usedWords);
       this.dependencies.logger.info(
         {
           channelId: message.channelId,
@@ -350,6 +390,112 @@ export class PersistentStemWordChainService implements StemWordChainService {
     }
 
     await this.endRound(rootState, state, message, theme, word);
+  }
+
+  private async handleNearMiss(
+    rootState: JsonState,
+    state: StemWordChainState,
+    message: StemWordChainMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemWordChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.react(message, NEAR_MISS_REACTION);
+    await this.replySafely(
+      message,
+      '🤔 Close! Check the spelling and try again — the round is still open.',
+    );
+  }
+
+  private async processHintRequest(
+    rootState: JsonState,
+    state: StemWordChainState,
+    theme: StemWordChainTheme,
+    message: StemWordChainMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemWordChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    if (state.hintHistory.length >= MAX_HINT_HISTORY) {
+      await this.replySafely(
+        message,
+        '💡 I have given all the extra clues I have for this round. Have a go with the clues above!',
+      );
+      return;
+    }
+
+    if (!this.canRequestWordChainHint(message.authorId)) {
+      await this.replySafely(
+        message,
+        '💡 Give me a moment to think before asking for another clue.',
+      );
+      return;
+    }
+
+    const expectedLetter = state.lastWord?.slice(-1);
+    const excludedWords = [...state.usedWords, ...state.hintedWords];
+    let selectedHint: StemWordChainHint | undefined;
+
+    if (this.dependencies.themeValidator?.getWordChainHint) {
+      try {
+        const generatedHint = await this.dependencies.themeValidator.getWordChainHint(
+          theme.name,
+          expectedLetter,
+          excludedWords,
+        );
+        selectedHint = validateWordChainHint(generatedHint, expectedLetter, excludedWords);
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, theme: theme.name, userId: message.authorId },
+          'STEM word chain hint could not be generated; using a local fallback',
+        );
+      }
+    }
+
+    if (!selectedHint) {
+      const fallbackWord = findUnusedThemeWord(theme, expectedLetter, excludedWords);
+      if (
+        fallbackWord &&
+        this.dependencies.themeValidator?.getWordDefinition &&
+        this.canRequestWordDefinition(message.authorId)
+      ) {
+        try {
+          const definition = (
+            await this.dependencies.themeValidator.getWordDefinition(theme.name, fallbackWord)
+          ).trim();
+          if (definition && !containsWholeWord(definition, fallbackWord)) {
+            selectedHint = { word: fallbackWord, hint: definition };
+          }
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, theme: theme.name, word: fallbackWord },
+            'STEM word chain fallback hint definition could not be generated',
+          );
+        }
+      }
+
+      if (!selectedHint) {
+        selectedHint = {
+          word: fallbackWord ?? '',
+          hint: expectedLetter
+            ? `Try an unused ${theme.name} word that starts with ${expectedLetter.toLocaleUpperCase()}.`
+            : `Try an unused word connected to ${theme.name}.`,
+        };
+      }
+    }
+
+    state.hintHistory = [...state.hintHistory, selectedHint.hint].slice(-MAX_HINT_HISTORY);
+    if (selectedHint.word) {
+      state.hintedWords = [...state.hintedWords, selectedHint.word].slice(-MAX_HINTED_WORDS);
+    }
+    writeStemWordChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    const letterPrompt = expectedLetter
+      ? ` It starts with **${expectedLetter.toLocaleUpperCase()}**.`
+      : '';
+    await this.replySafely(message, `💡${letterPrompt} ${selectedHint.hint}`.trim());
   }
 
   private async endRound(
@@ -370,6 +516,10 @@ export class PersistentStemWordChainService implements StemWordChainService {
     state.lastMessageId = null;
     state.streak = 0;
     state.roundStreaks = {};
+    state.usedWords = [];
+    state.hintedWords = [];
+    state.hintHistory = [];
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     writeStemWordChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, FAILURE_REACTION);
@@ -436,6 +586,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
     message: StemWordChainMessage,
     theme: StemWordChainTheme,
     word: string,
+    nextLetter: string,
+    usedWords: readonly string[],
   ): void {
     const next = this.definitionQueue
       .catch(() => undefined)
@@ -446,7 +598,9 @@ export class PersistentStemWordChainService implements StemWordChainService {
         }
 
         try {
-          await message.reply(`📖 **${word}** — ${definition}`);
+          await message.reply(
+            `📖 ${word} — ${definition}\n\n${formatWordChainContinuation(theme, nextLetter, usedWords)}`,
+          );
         } catch (error: unknown) {
           this.dependencies.logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id, word },
@@ -466,7 +620,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
     word: string,
     authorId: string,
   ): Promise<string | undefined> {
-    const cachedDefinition = this.wordDefinitionCache.get(word);
+    const cacheKey = `${theme.name}:${word}`;
+    const cachedDefinition = this.wordDefinitionCache.get(cacheKey);
     if (cachedDefinition) {
       return cachedDefinition;
     }
@@ -486,7 +641,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
         return undefined;
       }
 
-      this.cacheWordDefinition(word, definition);
+      this.cacheWordDefinition(cacheKey, definition);
       return definition;
     } catch (error: unknown) {
       this.dependencies.logger.warn(
@@ -549,14 +704,35 @@ export class PersistentStemWordChainService implements StemWordChainService {
     return true;
   }
 
-  private cacheWordDefinition(word: string, definition: string): void {
+  private canRequestWordChainHint(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastHintAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < WORD_CHAIN_HINT_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.hintWindowStartedAt >= WORD_CHAIN_HINT_GLOBAL_WINDOW_MS) {
+      this.hintWindowStartedAt = now;
+      this.hintWindowRequestCount = 0;
+    }
+
+    if (this.hintWindowRequestCount >= WORD_CHAIN_HINT_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastHintAt.set(authorId, now);
+    this.hintWindowRequestCount += 1;
+    return true;
+  }
+
+  private cacheWordDefinition(cacheKey: string, definition: string): void {
     if (this.wordDefinitionCache.size >= MAX_WORD_DEFINITION_CACHE_ENTRIES) {
-      const oldestWord = this.wordDefinitionCache.keys().next().value;
-      if (oldestWord) {
-        this.wordDefinitionCache.delete(oldestWord);
+      const oldestKey = this.wordDefinitionCache.keys().next().value;
+      if (oldestKey) {
+        this.wordDefinitionCache.delete(oldestKey);
       }
     }
-    this.wordDefinitionCache.set(word, definition);
+    this.wordDefinitionCache.set(cacheKey, definition);
   }
 
   private async publishRound(
@@ -610,6 +786,17 @@ export class PersistentStemWordChainService implements StemWordChainService {
     }
   }
 
+  private async replySafely(message: StemWordChainMessage, content: string): Promise<void> {
+    try {
+      await message.reply(content);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'STEM word chain hint reply could not be sent',
+      );
+    }
+  }
+
   private isEnabled(): boolean {
     return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
   }
@@ -640,6 +827,7 @@ export function formatStemWordChainRound(
     `🔗 **Word Chain ${roundNumber}**`,
     `Theme: **${theme.name}**`,
     'Start with any word that fits the theme. Each next word must start with the last letter of the previous word.',
+    'Words cannot be repeated in the same round.',
     'A word outside the theme or the wrong starting letter ends the round and changes the theme.',
   ]
     .filter((section): section is string => Boolean(section))
@@ -678,6 +866,9 @@ function readStemWordChainState(value: unknown): StemWordChainState {
   const bestStreak = readNonNegativeInteger(value.bestStreak);
   const roundStreaks = readMinigameScores(value.roundStreaks);
   const bestStreaks = readMinigameScores(value.bestStreaks);
+  const usedWords = readWordList(value.usedWords, MAX_USED_WORDS);
+  const hintedWords = readWordList(value.hintedWords, MAX_HINTED_WORDS);
+  const hintHistory = readStringList(value.hintHistory, MAX_HINT_HISTORY);
   const processedMessageIds = Array.isArray(value.processedMessageIds)
     ? value.processedMessageIds
         .filter((id): id is string => typeof id === 'string')
@@ -696,6 +887,9 @@ function readStemWordChainState(value: unknown): StemWordChainState {
     bestStreak: Math.max(streak, bestStreak),
     roundStreaks,
     bestStreaks,
+    usedWords: lastWord && !usedWords.includes(lastWord) ? [...usedWords, lastWord] : usedWords,
+    hintedWords,
+    hintHistory,
     processedMessageIds,
   };
 }
@@ -713,6 +907,9 @@ function createInitialState(): StemWordChainState {
     bestStreak: 0,
     roundStreaks: {},
     bestStreaks: {},
+    usedWords: [],
+    hintedWords: [],
+    hintHistory: [],
     processedMessageIds: [],
   };
 }
@@ -733,6 +930,144 @@ function rememberMessageId(messageIds: readonly string[], messageId: string): st
 
 function readNonNegativeInteger(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function readWordList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((word) => (typeof word === 'string' ? normalizeWordChainWord(word) : undefined))
+    .filter((word): word is string => word !== undefined)
+    .filter((word, index, words) => words.indexOf(word) === index)
+    .slice(-limit);
+}
+
+function readStringList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(-limit);
+}
+
+function findUnusedThemeWord(
+  theme: StemWordChainTheme,
+  expectedLetter: string | undefined,
+  excludedWords: readonly string[],
+): string | undefined {
+  const excluded = new Set(excludedWords);
+  return theme.words
+    .map((word) => normalizeWordChainWord(word))
+    .find(
+      (word): word is string =>
+        word !== undefined &&
+        !excluded.has(word) &&
+        (expectedLetter === undefined || word.startsWith(expectedLetter)),
+    );
+}
+
+function findNearMiss(
+  theme: StemWordChainTheme,
+  word: string,
+  expectedLetter: string | undefined,
+): string | undefined {
+  if (word.length < 4) {
+    return undefined;
+  }
+
+  return theme.words
+    .map((candidate) => normalizeWordChainWord(candidate))
+    .find(
+      (candidate): candidate is string =>
+        candidate !== undefined &&
+        candidate !== word &&
+        (expectedLetter === undefined || candidate.startsWith(expectedLetter)) &&
+        editDistanceAtMostOne(word, candidate),
+    );
+}
+
+function editDistanceAtMostOne(left: string, right: string): boolean {
+  if (Math.abs(left.length - right.length) > 1) {
+    return false;
+  }
+
+  let differences = 0;
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex += 1;
+      rightIndex += 1;
+      continue;
+    }
+
+    differences += 1;
+    if (differences > 1) {
+      return false;
+    }
+
+    if (left.length > right.length) {
+      leftIndex += 1;
+    } else if (right.length > left.length) {
+      rightIndex += 1;
+    } else {
+      leftIndex += 1;
+      rightIndex += 1;
+    }
+  }
+
+  differences += left.length - leftIndex + (right.length - rightIndex);
+  return differences <= 1;
+}
+
+function validateWordChainHint(
+  value: StemWordChainHint,
+  expectedLetter: string | undefined,
+  excludedWords: readonly string[],
+): StemWordChainHint | undefined {
+  if (
+    !value ||
+    typeof value.word !== 'string' ||
+    typeof value.hint !== 'string' ||
+    value.hint.trim().length === 0
+  ) {
+    return undefined;
+  }
+
+  const word = normalizeWordChainWord(value.word);
+  const hint = value.hint.trim();
+  if (
+    !word ||
+    excludedWords.includes(word) ||
+    (expectedLetter !== undefined && !word.startsWith(expectedLetter)) ||
+    containsWholeWord(hint, word)
+  ) {
+    return undefined;
+  }
+
+  return { word, hint };
+}
+
+function formatWordChainContinuation(
+  theme: StemWordChainTheme,
+  nextLetter: string,
+  usedWords: readonly string[],
+): string {
+  const visibleWords = usedWords.slice(-20);
+  const omittedCount = Math.max(0, usedWords.length - visibleWords.length);
+  const listedWords = visibleWords.map((word) => `**${word}**`).join(', ');
+  const omittedText = omittedCount > 0 ? `, and ${omittedCount} more` : '';
+  return `Give me a word starting with **${nextLetter.toLocaleUpperCase()}** on the theme of **${theme.name}**. You can't use the words ${listedWords}${omittedText}.`;
+}
+
+function containsWholeWord(value: string, word: string): boolean {
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escapedWord}\\b`, 'i').test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

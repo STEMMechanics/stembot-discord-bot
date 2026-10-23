@@ -160,6 +160,84 @@ describe('STEM word chain service', () => {
     ]);
   });
 
+  it('ends the round when a word is repeated in the same game', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 0,
+        roundNumber: 4,
+        promptMessageId: '100',
+        lastWord: 'fusion',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 3,
+        bestStreak: 3,
+        roundStreaks: { 'user-one': 3 },
+        bestStreaks: { 'user-one': 3 },
+        usedWords: ['moon', 'nebula', 'fusion'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-5') };
+    const service = createService(state, publisher);
+    const repeated = createMessage('200', 'nebula');
+
+    await service.handleMessage(repeated);
+
+    expect(repeated.react).toHaveBeenCalledWith('❌');
+    expect(publisher.send).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        themeIndex: 1,
+        roundNumber: 5,
+        usedWords: [],
+        hintHistory: [],
+      },
+    });
+  });
+
+  it('keeps the round open for a one-letter typo in a themed word', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 3,
+        roundNumber: 4,
+        promptMessageId: '100',
+        lastWord: 'robot',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 1,
+        bestStreak: 1,
+        roundStreaks: { 'user-one': 1 },
+        bestStreaks: { 'user-one': 1 },
+        usedWords: ['robot'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-4') };
+    const service = createService(state, publisher);
+    const typo = createMessage('200', 'Typescrip');
+
+    await service.handleMessage(typo);
+
+    expect(typo.react).toHaveBeenCalledWith('🤔');
+    expect(typo.react).not.toHaveBeenCalledWith('❌');
+    expect(typo.reply).toHaveBeenCalledWith(
+      '🤔 Close! Check the spelling and try again — the round is still open.',
+    );
+    expect(publisher.send).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        themeIndex: 3,
+        roundNumber: 4,
+        lastWord: 'robot',
+        streak: 1,
+      },
+    });
+  });
+
   it('asks AI to validate valid themed words outside the built-in vocabulary', async () => {
     const state = new MemoryStateStore();
     const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
@@ -233,11 +311,57 @@ describe('STEM word chain service', () => {
     resolveDefinition('a natural satellite that orbits a planet');
     await vi.waitFor(() => {
       expect(message.reply).toHaveBeenCalledWith(
-        '📖 **moon** — a natural satellite that orbits a planet',
+        "📖 moon — a natural satellite that orbits a planet\n\nGive me a word starting with **N** on the theme of **Space**. You can't use the words **moon**.",
       );
     });
     expect(state.state).toMatchObject({
       stemWordChain: { lastWord: 'moon', streak: 1 },
+    });
+  });
+
+  it('provides a theme-aware hint without using an accepted or previously hinted word', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 0,
+        roundNumber: 1,
+        promptMessageId: '100',
+        lastWord: 'fusion',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 1,
+        bestStreak: 1,
+        roundStreaks: { 'user-one': 1 },
+        bestStreaks: { 'user-one': 1 },
+        usedWords: ['fusion'],
+        hintedWords: ['nebula'],
+        hintHistory: ['An earlier clue.'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    const getWordChainHint = vi
+      .fn<NonNullable<StemWordChainThemeValidator['getWordChainHint']>>()
+      .mockResolvedValue({ word: 'nova', hint: 'A star that suddenly becomes much brighter.' });
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+      getWordChainHint,
+    };
+    const service = createService(state, publisher, themeValidator);
+    const hint = createMessage('200', 'hint', { authorId: 'hint-user' });
+
+    await service.handleMessage(hint);
+
+    expect(getWordChainHint).toHaveBeenCalledWith('Space', 'n', ['fusion', 'nebula']);
+    expect(hint.reply).toHaveBeenCalledWith(
+      '💡 It starts with **N**. A star that suddenly becomes much brighter.',
+    );
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        hintedWords: ['nebula', 'nova'],
+        hintHistory: ['An earlier clue.', 'A star that suddenly becomes much brighter.'],
+      },
     });
   });
 
@@ -269,7 +393,7 @@ describe('STEM word chain service', () => {
 
   it('formats the theme and chain rules in the opening message', () => {
     expect(formatStemWordChainRound(STEM_WORD_CHAIN_THEMES[0]!, 3)).toBe(
-      '🔗 **Word Chain 3**\n\nTheme: **Space**\n\nStart with any word that fits the theme. Each next word must start with the last letter of the previous word.\n\nA word outside the theme or the wrong starting letter ends the round and changes the theme.',
+      '🔗 **Word Chain 3**\n\nTheme: **Space**\n\nStart with any word that fits the theme. Each next word must start with the last letter of the previous word.\n\nWords cannot be repeated in the same round.\n\nA word outside the theme or the wrong starting letter ends the round and changes the theme.',
     );
   });
 });

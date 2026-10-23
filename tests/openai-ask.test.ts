@@ -40,6 +40,8 @@ describe('OpenAI STEM ask answerer', () => {
     expect(body.reasoning.effort).toBe('low');
     expect(body.store).toBe(false);
     expect(body.input[0]?.content[0]?.text).toContain('youth-friendly');
+    expect(body.input[0]?.content[0]?.text).toContain('do not identify yourself as ChatGPT');
+    expect(body.input[0]?.content[0]?.text).toContain('avoid profanity');
     expect(body.input[1]?.content[0]?.text).toContain('Why do objects fall?');
   });
 

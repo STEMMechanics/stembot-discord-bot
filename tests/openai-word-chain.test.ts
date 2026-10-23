@@ -82,6 +82,39 @@ describe('OpenAI STEM word-chain validator', () => {
     expect(body.text.format.name).toBe('stem_word_chain_definition');
     expect(body.text.format.schema.properties.definition).toBeDefined();
     expect(body.input[0]?.content[0]?.text).toContain('Word: <word>moon</word>');
+    expect(body.input[0]?.content[0]?.text).toContain('active theme');
+    expect(body.input[0]?.content[0]?.text).toContain('LAMP means');
+  });
+
+  it('requests a fresh hint for an unused word and required starting letter', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            word: 'nova',
+            hint: 'A star that suddenly becomes much brighter.',
+          }),
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const validator = createValidator(fetchImplementation);
+
+    await expect(validator.getWordChainHint('Space', 'n', ['fusion', 'nebula'])).resolves.toEqual({
+      word: 'nova',
+      hint: 'A star that suddenly becomes much brighter.',
+    });
+
+    const request = fetchImplementation.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      input: Array<{ content: Array<{ text?: string }> }>;
+      text: { format: { name: string } };
+    };
+    expect(body.text.format.name).toBe('stem_word_chain_hint');
+    expect(body.input[0]?.content[0]?.text).toContain(
+      'Required starting letter: <starting-letter>n</starting-letter>',
+    );
+    expect(body.input[0]?.content[0]?.text).toContain('<excluded-words>\nfusion\nnebula');
   });
 
   it('retries an incomplete high-effort response with the shared low setting', async () => {
