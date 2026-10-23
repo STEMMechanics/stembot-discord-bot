@@ -4,6 +4,7 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 import {
   formatMinecraftStatus,
   formatPlayers,
+  buildUptimeStatusEmbed,
   formatWorkshopList,
   formatUserLeaderboard,
   formatUserLevel,
@@ -271,6 +272,22 @@ describe('Discord commands', () => {
       embeds: [expect.objectContaining({ color: 0x2ecc71 })],
       allowedMentions: { parse: [] },
     });
+  });
+
+  it('keeps the public uptime card concise', () => {
+    const embed = buildUptimeStatusEmbed({
+      overall: 'up',
+      title: 'STEMMechanics Status',
+      statusPageUrl: 'https://uptime.example.test/status/stem',
+      checkedAt: new Date('2026-10-23T00:00:00.000Z'),
+      monitors: [{ id: '1', name: 'Website', state: 'up', uptime24h: 0.9998 }],
+    });
+
+    expect(embed.description).toBe('All monitored services are online.');
+    expect(embed.footer).toEqual({ text: 'Last checked' });
+    expect(embed.fields?.[0]?.value).toContain('🟢 **Website** — Online');
+    expect(embed.fields?.[0]?.value).not.toContain('Operational');
+    expect(embed.fields?.[0]?.value).not.toContain('24h');
   });
 
   it('lets members with Manage Messages reset the scramble', async () => {

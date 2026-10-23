@@ -544,10 +544,8 @@ export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
   const dot = isOperational ? '🟢' : '🔴';
   const serviceLines = status.monitors.map((monitor) => {
     const monitorDot = monitor.state === 'up' ? '🟢' : '🔴';
-    const uptime =
-      monitor.uptime24h === undefined ? '' : ` · ${(monitor.uptime24h * 100).toFixed(2)}% 24h`;
     const message = monitor.message ? ` · ${escapeEmbedText(monitor.message)}` : '';
-    return `${monitorDot} **${escapeEmbedText(monitor.name)}** — ${formatMonitorState(monitor.state)}${message}${uptime}`;
+    return `${monitorDot} **${escapeEmbedText(monitor.name)}** — ${formatMonitorState(monitor.state)}${message}`;
   });
 
   if (serviceLines.length === 0 && !status.sourceError) {
@@ -557,7 +555,7 @@ export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
   const description = status.sourceError
     ? `**Monitoring unavailable.** ${status.sourceError}`
     : isOperational
-      ? 'All monitored services are operational.'
+      ? 'All monitored services are online.'
       : 'One or more monitored services require attention.';
 
   return {
@@ -587,7 +585,7 @@ export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
         : []),
     ],
     timestamp: status.checkedAt.toISOString(),
-    footer: { text: 'Powered by Uptime Kuma · Last checked' },
+    footer: { text: 'Last checked' },
   };
 }
 
@@ -684,7 +682,7 @@ function formatProgressBar(percent: number): string {
 function formatMonitorState(state: UptimeKumaStatus['monitors'][number]['state']): string {
   return (
     {
-      up: 'Operational',
+      up: 'Online',
       down: 'Offline',
       pending: 'Pending',
       maintenance: 'Maintenance',
