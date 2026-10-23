@@ -110,6 +110,18 @@ const environmentSchema = z.object({
   COUNTING_CHAIN_REVIEW_ENABLED: booleanFromEnvironment(false),
   COUNTING_CHAIN_REVIEW_ROLE_ID: optionalDiscordId,
   COUNTING_CHAIN_MAX_ATTACHMENT_BYTES: positiveInteger(8 * 1024 * 1024, 20 * 1024 * 1024),
+  STEM_QUIZ_ENABLED: booleanFromEnvironment(false),
+  STEM_QUIZ_CHANNEL_ID: optionalDiscordId,
+  STEM_QUIZ_MAX_WRONG_ANSWERS: positiveInteger(5, 50),
+  STEM_QUIZ_TARGET_AGE_MIN: positiveInteger(8, 18),
+  STEM_QUIZ_TARGET_AGE_MAX: positiveInteger(14, 18),
+  STEM_QUIZ_OLDER_AGE_MAX: positiveInteger(18, 18),
+  STEM_QUIZ_OLDER_PLAYER_RATE: z.preprocess(
+    (value) => (value === undefined || value === '' ? 0.15 : value),
+    z.coerce.number().min(0).max(1),
+  ),
+  STEM_QUIZ_TOPIC: z.string().trim().min(1).default('mixed STEM, Minecraft and engineering'),
+  STEM_QUIZ_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
 });
 
 export type AppEnvironment = (typeof ENVIRONMENTS)[number];
@@ -146,6 +158,17 @@ export interface AppConfig {
     reviewEnabled: boolean;
     reviewRoleId?: string;
     maxAttachmentBytes: number;
+  };
+  quiz: {
+    enabled: boolean;
+    channelId?: string;
+    maxWrongAnswers: number;
+    targetAgeMin: number;
+    targetAgeMax: number;
+    olderAgeMax: number;
+    olderPlayerRate: number;
+    topic: string;
+    retryIntervalMs: number;
   };
   workshops: {
     timeZone: string;
@@ -205,6 +228,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  if (values.STEM_QUIZ_ENABLED && !values.STEM_QUIZ_CHANNEL_ID) {
+    throw new Error('STEM_QUIZ_CHANNEL_ID is required when STEM_QUIZ_ENABLED is true');
+  }
+
+  if (values.STEM_QUIZ_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_QUIZ_ENABLED is true');
+  }
+
+  if (values.STEM_QUIZ_TARGET_AGE_MIN > values.STEM_QUIZ_TARGET_AGE_MAX) {
+    throw new Error('STEM_QUIZ_TARGET_AGE_MIN cannot be greater than STEM_QUIZ_TARGET_AGE_MAX');
+  }
+
+  if (values.STEM_QUIZ_TARGET_AGE_MAX > values.STEM_QUIZ_OLDER_AGE_MAX) {
+    throw new Error('STEM_QUIZ_TARGET_AGE_MAX cannot be greater than STEM_QUIZ_OLDER_AGE_MAX');
+  }
+
   try {
     new Intl.DateTimeFormat('en-AU', { timeZone: values.WORKSHOP_TIME_ZONE }).format();
   } catch (error: unknown) {
@@ -250,6 +289,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? { reviewRoleId: values.COUNTING_CHAIN_REVIEW_ROLE_ID }
         : {}),
       maxAttachmentBytes: values.COUNTING_CHAIN_MAX_ATTACHMENT_BYTES,
+    },
+    quiz: {
+      enabled: values.STEM_QUIZ_ENABLED,
+      ...(values.STEM_QUIZ_CHANNEL_ID ? { channelId: values.STEM_QUIZ_CHANNEL_ID } : {}),
+      maxWrongAnswers: values.STEM_QUIZ_MAX_WRONG_ANSWERS,
+      targetAgeMin: values.STEM_QUIZ_TARGET_AGE_MIN,
+      targetAgeMax: values.STEM_QUIZ_TARGET_AGE_MAX,
+      olderAgeMax: values.STEM_QUIZ_OLDER_AGE_MAX,
+      olderPlayerRate: values.STEM_QUIZ_OLDER_PLAYER_RATE,
+      topic: values.STEM_QUIZ_TOPIC,
+      retryIntervalMs: values.STEM_QUIZ_RETRY_INTERVAL_MS,
     },
     workshops: {
       timeZone: values.WORKSHOP_TIME_ZONE,

@@ -37,6 +37,16 @@ describe('loadConfig', () => {
         reviewEnabled: false,
         maxAttachmentBytes: 8388608,
       },
+      quiz: {
+        enabled: false,
+        maxWrongAnswers: 5,
+        targetAgeMin: 8,
+        targetAgeMax: 14,
+        olderAgeMax: 18,
+        olderPlayerRate: 0.15,
+        topic: 'mixed STEM, Minecraft and engineering',
+        retryIntervalMs: 300000,
+      },
       workshops: {
         announcementsEnabled: true,
         announcementWindowMs: 2419200000,
@@ -201,6 +211,55 @@ describe('loadConfig', () => {
     expect(config.countingChain).toMatchObject({
       reviewEnabled: true,
       reviewRoleId: '6234567890',
+    });
+  });
+
+  it('requires quiz credentials and parses the age and retry settings', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_QUIZ_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_QUIZ_CHANNEL_ID/);
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_QUIZ_ENABLED: 'true',
+        STEM_QUIZ_CHANNEL_ID: '7234567890',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_QUIZ_ENABLED: 'true',
+      STEM_QUIZ_CHANNEL_ID: '7234567890',
+      STEM_QUIZ_MAX_WRONG_ANSWERS: '6',
+      STEM_QUIZ_TARGET_AGE_MIN: '8',
+      STEM_QUIZ_TARGET_AGE_MAX: '14',
+      STEM_QUIZ_OLDER_AGE_MAX: '18',
+      STEM_QUIZ_OLDER_PLAYER_RATE: '0.2',
+      STEM_QUIZ_TOPIC: 'space science',
+      STEM_QUIZ_RETRY_INTERVAL_MS: '60000',
+    });
+
+    expect(config.quiz).toEqual({
+      enabled: true,
+      channelId: '7234567890',
+      maxWrongAnswers: 6,
+      targetAgeMin: 8,
+      targetAgeMax: 14,
+      olderAgeMax: 18,
+      olderPlayerRate: 0.2,
+      topic: 'space science',
+      retryIntervalMs: 60000,
     });
   });
 });

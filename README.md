@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, and an optional image-based counting-chain minigame. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, and an optional AI-generated STEM question chain. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -116,6 +116,26 @@ full model payload. If an existing deployment still uses a higher reasoning
 setting and exhausts its output budget, STEMBot retries that recognition once
 with low reasoning effort.
 
+### AI STEM question chain
+
+When `STEM_QUIZ_ENABLED=true`, STEMBot posts one age-appropriate STEM question
+at a time in `STEM_QUIZ_CHANNEL_ID`. The question is aimed at ages 8–14, with
+an optional harder-question rate for players up to age 18. Members answer with
+ordinary Discord messages. The first accepted answer earns one point, receives
+`✅`, and advances the game. Incorrect answers receive `❌`; after the configured
+number of wrong answers, STEMBot reveals the answer and explanation before
+posting the next question. Unclear answers leave the question open without
+using an attempt.
+
+The active question, wrong-attempt count, scores, question sequence and recent
+message IDs are persisted in the shared JSON state file. A restart keeps an
+active question instead of generating a replacement. Question generation and
+natural-language answer checking use the existing `OPENAI_API_KEY`,
+`OPENAI_MODEL`, `OPENAI_REASONING_EFFORT` and `OPENAI_TIMEOUT` settings. The
+Responses API is used with strict structured output, and requests set `store` to
+`false`. Member answers are sent for evaluation but are not written to state or
+included in logs.
+
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single information embed
 with the current number, high score and last round. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
@@ -215,45 +235,54 @@ npm run validate
 
 ## Configuration
 
-| Variable                                    | Required            | Purpose                                                                                     |
-| ------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| `DISCORD_TOKEN`                             | Yes                 | Discord bot token. Keep it in the deployment secret store.                                  |
-| `DISCORD_CLIENT_ID`                         | Yes                 | Discord application ID.                                                                     |
-| `DISCORD_GUILD_ID`                          | Yes                 | The single Discord guild where STEMBot commands are registered.                             |
-| `WORKSHOP_FEED_URL`                         | No                  | Website RSS URL; defaults to the STEMMechanics workshop feed.                               |
-| `WEBSITE_REQUEST_TIMEOUT_MS`                | No                  | RSS request timeout; defaults to 15 seconds.                                                |
-| `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.               |
-| `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                      |
-| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No                  | Status request timeout; defaults to 5 seconds.                                              |
-| `OPENAI_API_KEY`                            | When enabled        | OpenAI API key; keep it in the deployment secret store.                                     |
-| `OPENAI_MODEL`                              | No                  | Vision model; defaults to `gpt-6-luna`.                                                     |
-| `OPENAI_REASONING_EFFORT`                   | No                  | Model reasoning setting; defaults to `low` for this simple image-recognition task.          |
-| `OPENAI_TIMEOUT`                            | No                  | OpenAI request timeout in seconds; defaults to 180.                                         |
-| `COUNTING_CHAIN_ENABLED`                    | No                  | Enable the image-based minigame; defaults to `false`.                                       |
-| `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled        | Discord channel watched by the minigame.                                                    |
-| `COUNTING_CHAIN_INFO_CHANNEL_ID`            | No                  | Channel containing the live counting-chain information embed.                               |
-| `COUNTING_CHAIN_INFO_MESSAGE_ID`            | No                  | Existing STEMBot message to edit; if omitted, the bot discovers its embed.                  |
-| `COUNTING_CHAIN_REVIEW_ENABLED`             | No                  | Pause uncertain counting posts and request moderator reactions; defaults to `false`.        |
-| `COUNTING_CHAIN_REVIEW_ROLE_ID`             | When review enabled | Role to mention and authorize for counting-chain review.                                    |
-| `COUNTING_CHAIN_MAX_ATTACHMENT_BYTES`       | No                  | Maximum downloaded image size; defaults to 8 MiB.                                           |
-| `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
-| `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                               |
-| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No                  | Enable new/update/cancellation announcements; defaults to `true`.                           |
-| `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`         | No                  | Only announce future workshops within this many days; defaults to 28.                       |
-| `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES`       | No                  | Delay lifecycle announcements in minutes; defaults to 30. Set to `0` for immediate testing. |
-| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No                  | Legacy millisecond setting; used only when the minutes setting is unset.                    |
-| `WORKSHOP_REMINDERS_ENABLED`                | No                  | Enable workshop reminders; defaults to `true`.                                              |
-| `WORKSHOP_REMINDER_24H_ENABLED`             | No                  | Enable the 24-hour reminder; defaults to `true`.                                            |
-| `WORKSHOP_REMINDER_1H_ENABLED`              | No                  | Enable the 1-hour reminder; defaults to `true`.                                             |
-| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No                  | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.       |
-| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No                  | Channel for workshop lifecycle announcements.                                               |
-| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No                  | Channel for 24-hour and 1-hour reminders.                                                   |
-| `STREAMING_NOTIFICATIONS_ENABLED`           | No                  | Reserved setting for the streaming workflow; defaults to `false`.                           |
-| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No                  | Reserved streaming notification channel.                                                    |
-| `STATE_PATH`                                | No                  | Persistent JSON state path; defaults to `./data/state.json`.                                |
-| `SHUTDOWN_TIMEOUT_MS`                       | No                  | Graceful shutdown deadline; defaults to 30 seconds.                                         |
-| `NODE_ENV`                                  | No                  | `development`, `test`, or `production`; defaults to `production`.                           |
-| `LOG_LEVEL`                                 | No                  | Pino level; defaults to `info`.                                                             |
+| Variable                                    | Required            | Purpose                                                                                      |
+| ------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| `DISCORD_TOKEN`                             | Yes                 | Discord bot token. Keep it in the deployment secret store.                                   |
+| `DISCORD_CLIENT_ID`                         | Yes                 | Discord application ID.                                                                      |
+| `DISCORD_GUILD_ID`                          | Yes                 | The single Discord guild where STEMBot commands are registered.                              |
+| `WORKSHOP_FEED_URL`                         | No                  | Website RSS URL; defaults to the STEMMechanics workshop feed.                                |
+| `WEBSITE_REQUEST_TIMEOUT_MS`                | No                  | RSS request timeout; defaults to 15 seconds.                                                 |
+| `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.                |
+| `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                       |
+| `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No                  | Status request timeout; defaults to 5 seconds.                                               |
+| `OPENAI_API_KEY`                            | When enabled        | OpenAI API key; keep it in the deployment secret store.                                      |
+| `OPENAI_MODEL`                              | No                  | Shared OpenAI model for counting-chain recognition and quiz calls; defaults to `gpt-6-luna`. |
+| `OPENAI_REASONING_EFFORT`                   | No                  | Shared reasoning setting; defaults to `low` for routine image and quiz calls.                |
+| `OPENAI_TIMEOUT`                            | No                  | OpenAI request timeout in seconds; defaults to 180.                                          |
+| `COUNTING_CHAIN_ENABLED`                    | No                  | Enable the image-based minigame; defaults to `false`.                                        |
+| `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled        | Discord channel watched by the minigame.                                                     |
+| `COUNTING_CHAIN_INFO_CHANNEL_ID`            | No                  | Channel containing the live counting-chain information embed.                                |
+| `COUNTING_CHAIN_INFO_MESSAGE_ID`            | No                  | Existing STEMBot message to edit; if omitted, the bot discovers its embed.                   |
+| `COUNTING_CHAIN_REVIEW_ENABLED`             | No                  | Pause uncertain counting posts and request moderator reactions; defaults to `false`.         |
+| `COUNTING_CHAIN_REVIEW_ROLE_ID`             | When review enabled | Role to mention and authorize for counting-chain review.                                     |
+| `COUNTING_CHAIN_MAX_ATTACHMENT_BYTES`       | No                  | Maximum downloaded image size; defaults to 8 MiB.                                            |
+| `STEM_QUIZ_ENABLED`                         | No                  | Enable the AI STEM question chain; defaults to `false`.                                      |
+| `STEM_QUIZ_CHANNEL_ID`                      | When enabled        | Discord channel where questions and answers are processed.                                   |
+| `STEM_QUIZ_MAX_WRONG_ANSWERS`               | No                  | Wrong answers before the bot reveals the answer; defaults to `5`.                            |
+| `STEM_QUIZ_TARGET_AGE_MIN`                  | No                  | Lower end of the main question age range; defaults to `8`.                                   |
+| `STEM_QUIZ_TARGET_AGE_MAX`                  | No                  | Upper end of the main question age range; defaults to `14`.                                  |
+| `STEM_QUIZ_OLDER_AGE_MAX`                   | No                  | Maximum age used for occasional harder questions; defaults to `18`.                          |
+| `STEM_QUIZ_OLDER_PLAYER_RATE`               | No                  | Fraction of generated questions that are harder; defaults to `0.15`.                         |
+| `STEM_QUIZ_TOPIC`                           | No                  | Topic guidance for question generation.                                                      |
+| `STEM_QUIZ_RETRY_INTERVAL_MS`               | No                  | Retry interval when a question cannot be generated or posted; defaults to 5 minutes.         |
+| `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.        |
+| `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                                |
+| `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No                  | Enable new/update/cancellation announcements; defaults to `true`.                            |
+| `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`         | No                  | Only announce future workshops within this many days; defaults to 28.                        |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES`       | No                  | Delay lifecycle announcements in minutes; defaults to 30. Set to `0` for immediate testing.  |
+| `WORKSHOP_ANNOUNCEMENT_DELAY_MS`            | No                  | Legacy millisecond setting; used only when the minutes setting is unset.                     |
+| `WORKSHOP_REMINDERS_ENABLED`                | No                  | Enable workshop reminders; defaults to `true`.                                               |
+| `WORKSHOP_REMINDER_24H_ENABLED`             | No                  | Enable the 24-hour reminder; defaults to `true`.                                             |
+| `WORKSHOP_REMINDER_1H_ENABLED`              | No                  | Enable the 1-hour reminder; defaults to `true`.                                              |
+| `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No                  | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.        |
+| `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No                  | Channel for workshop lifecycle announcements.                                                |
+| `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No                  | Channel for 24-hour and 1-hour reminders.                                                    |
+| `STREAMING_NOTIFICATIONS_ENABLED`           | No                  | Reserved setting for the streaming workflow; defaults to `false`.                            |
+| `DISCORD_STREAMING_NOTIFICATION_CHANNEL_ID` | No                  | Reserved streaming notification channel.                                                     |
+| `STATE_PATH`                                | No                  | Persistent JSON state path; defaults to `./data/state.json`.                                 |
+| `SHUTDOWN_TIMEOUT_MS`                       | No                  | Graceful shutdown deadline; defaults to 30 seconds.                                          |
+| `NODE_ENV`                                  | No                  | `development`, `test`, or `production`; defaults to `production`.                            |
+| `LOG_LEVEL`                                 | No                  | Pino level; defaults to `info`.                                                              |
 
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -263,7 +292,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, and the counting-chain state for the configured channel. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, and AI quiz state. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:
@@ -413,7 +442,7 @@ in CI.
 
 ## Security and privacy
 
-The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame additionally enables `GuildMessages` and the privileged `MessageContent` intent so Discord attachments can be inspected. Enabling review also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or the minigame are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
+The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame or AI quiz additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
 The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
 

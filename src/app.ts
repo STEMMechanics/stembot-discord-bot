@@ -1,6 +1,7 @@
 import type { AppConfig } from './config/env.js';
 import { createDiscordGateway, type DiscordGateway } from './discord/client.js';
 import { createOpenAINumberRecognizer } from './integrations/openai.js';
+import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
 import { createWebsiteIntegration, type WebsiteIntegration } from './integrations/website.js';
 import { IntervalJobScheduler, type JobScheduler } from './jobs/scheduler.js';
@@ -14,6 +15,7 @@ import {
   createWorkshopNotificationService,
   type WorkshopNotificationService,
 } from './services/workshop-notifications.js';
+import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
 import { createJsonFileStateStore } from './state/json-file-state-store.js';
 import type { JsonState, StateStore } from './state/state-store.js';
 
@@ -29,6 +31,7 @@ export interface ApplicationDependencies {
   website: WebsiteIntegration;
   stemcraft: StemCraftIntegration;
   countingChain?: CountingChainService;
+  quiz?: StemQuizService;
   workshopNotifications: WorkshopNotificationService;
 }
 
@@ -69,6 +72,32 @@ export function createApplication(
           logger,
         })
       : undefined);
+  const discordGatewayRef: { current?: DiscordGateway } = {};
+  const quiz =
+    dependencies?.quiz ??
+    (config.quiz.enabled
+      ? createStemQuizService({
+          config: config.quiz,
+          engine: createOpenAIStemQuizEngine({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for STEM quiz'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
+          state,
+          logger,
+        })
+      : undefined);
   const discord =
     dependencies?.discord ??
     createDiscordGateway(config, logger, {
@@ -76,7 +105,9 @@ export function createApplication(
       stemcraft,
       timeZone: config.workshops.timeZone,
       ...(countingChain ? { countingChain } : {}),
+      ...(quiz ? { quiz } : {}),
     });
+  discordGatewayRef.current = discord;
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
   const workshopNotifications =
     dependencies?.workshopNotifications ??
@@ -93,6 +124,14 @@ export function createApplication(
     intervalMs: config.workshops.pollIntervalMs,
     run: () => workshopNotifications.synchronizeWorkshops(),
   });
+
+  if (quiz && config.quiz.enabled) {
+    scheduler.register({
+      name: 'stem-quiz-maintenance',
+      intervalMs: config.quiz.retryIntervalMs,
+      run: () => quiz.ensureQuestion(),
+    });
+  }
 
   let started = false;
   let stopped = false;

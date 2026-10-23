@@ -26,6 +26,7 @@ import type {
   CountingChainReplyOptions,
   CountingChainService,
 } from '../services/counting-chain.js';
+import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -49,6 +50,7 @@ export interface DiscordCommandDependencies {
   stemcraft: StemCraftIntegration;
   timeZone: string;
   countingChain?: CountingChainService;
+  quiz?: StemQuizService;
 }
 
 export function createDiscordGateway(
@@ -59,7 +61,10 @@ export function createDiscordGateway(
   configureNetworkDefaults();
 
   const intents = [GatewayIntentBits.Guilds];
-  if (config.countingChain.enabled && dependencies.countingChain) {
+  const messageGameEnabled =
+    (config.countingChain.enabled && dependencies.countingChain) ||
+    (config.quiz.enabled && dependencies.quiz);
+  if (messageGameEnabled) {
     intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
     if (config.countingChain.reviewEnabled) {
       intents.push(GatewayIntentBits.GuildMessageReactions);
@@ -103,6 +108,7 @@ export function createDiscordGateway(
       'Discord client ready',
     );
 
+    const initializationTasks: Promise<void>[] = [];
     if (
       dependencies.countingChain &&
       config.countingChain.enabled &&
@@ -118,24 +124,35 @@ export function createDiscordGateway(
           )
         : undefined;
 
-      void dependencies.countingChain
-        .initialize(
-          () => fetchCountingChainHistory(client, config.countingChain.channelId!),
-          infoPublisher,
-        )
-        .catch((error: unknown) => {
-          logger.warn(
-            { err: error, channelId: config.countingChain.channelId },
-            'Counting chain startup initialization failed',
-          );
-        })
-        .finally(() => {
-          resolveClientReady();
-        });
-      return;
+      initializationTasks.push(
+        dependencies.countingChain
+          .initialize(
+            () => fetchCountingChainHistory(client, config.countingChain.channelId!),
+            infoPublisher,
+          )
+          .catch((error: unknown) => {
+            logger.warn(
+              { err: error, channelId: config.countingChain.channelId },
+              'Counting chain startup initialization failed',
+            );
+          }),
+      );
     }
 
-    resolveClientReady();
+    if (dependencies.quiz && config.quiz.enabled && config.quiz.channelId) {
+      initializationTasks.push(
+        dependencies.quiz.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.quiz.channelId },
+            'STEM quiz startup initialization failed',
+          );
+        }),
+      );
+    }
+
+    void Promise.all(initializationTasks).finally(() => {
+      resolveClientReady();
+    });
   });
 
   client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
@@ -280,6 +297,21 @@ export function createDiscordGateway(
     }
   }
 
+  if (dependencies.quiz && config.quiz.enabled && config.quiz.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (message.channelId !== config.quiz.channelId || message.author.bot) {
+        return;
+      }
+
+      void dependencies.quiz!.handleMessage(toStemQuizMessage(message)).catch((error: unknown) => {
+        logger.warn(
+          { err: error, channelId: message.channelId, messageId: message.id },
+          'STEM quiz message could not be processed',
+        );
+      });
+    });
+  }
+
   client.on(Events.Error, (error) => {
     logger.error({ err: error }, 'Discord client error');
   });
@@ -387,6 +419,19 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
 
       const reply = await channel.messages.fetch(messageId);
       await reply.delete();
+    },
+  };
+}
+
+function toStemQuizMessage(message: Message): StemQuizMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
     },
   };
 }
