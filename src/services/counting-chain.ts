@@ -628,10 +628,6 @@ export class PersistentCountingChainService implements CountingChainService {
         { err: error, channelId: message.channelId, messageId: message.id },
         'Counting chain image could not be read; game state unchanged',
       );
-      if (sameUser && this.isReviewEnabled()) {
-        await this.createReviewRequest(message, undefined, 'same-user');
-        return;
-      }
       if (sameUser) {
         await this.resetAfterRuleFailure(rootState, state, game, message, 'same-user', null);
         return;
@@ -650,10 +646,6 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     if (recognizedNumber === null) {
-      if (sameUser && this.isReviewEnabled()) {
-        await this.createReviewRequest(message, undefined, 'same-user');
-        return;
-      }
       if (sameUser) {
         await this.resetAfterRuleFailure(rootState, state, game, message, 'same-user', null);
         return;
@@ -707,8 +699,18 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
-    const reviewReason: CountingChainReviewReason =
-      message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number';
+    const reviewReason: CountingChainReviewReason = 'wrong-number';
+    if (sameUser) {
+      await this.resetAfterRuleFailure(
+        rootState,
+        state,
+        game,
+        message,
+        'same-user',
+        recognizedNumber,
+      );
+      return;
+    }
     if (this.isReviewEnabled()) {
       await this.createReviewRequest(message, recognizedNumber, reviewReason);
       return;
@@ -955,7 +957,10 @@ export class PersistentCountingChainService implements CountingChainService {
     await this.publishInfo();
     await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
     await this.react(message, RULE_FAILURE_REACTION);
-    await this.reply(message, 'Counting chain review rejected — the chain is starting again at 1.');
+    await this.reply(
+      message,
+      'The moderator checked it — this round starts again at 1. Give it another go!',
+    );
     this.dependencies.logger.info(
       {
         channelId: message.channelId,

@@ -60,13 +60,16 @@ A wrong number or two consecutive images from the same member receives `❌`,
 posts a short game-over message, and resets the channel to `1`. With review
 disabled, an unreadable, unsupported or temporarily unavailable image receives
 `⚠️` and a retry message; it does not change the game state. With review
-enabled, the same image receives `🔎`, STEMBot mentions the moderator role and
-pauses the chain until a moderator decides. Bot messages and messages outside
-the configured channel are ignored.
+enabled, an unreadable image from another member receives `🔎`, STEMBot mentions
+the moderator role and pauses the chain until a moderator decides. A second
+consecutive image from the same member always ends the round immediately because
+that rule is unambiguous. Bot messages and messages outside the configured channel
+are ignored.
 
 Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
-`COUNTING_CHAIN_REVIEW_ROLE_ID` to pause wrong or unreadable posts for
-moderator review instead of resetting or asking the member to retry. STEMBot
+`COUNTING_CHAIN_REVIEW_ROLE_ID` to pause wrong-number or unreadable posts from
+another member for moderator review instead of resetting or asking the member to
+retry. STEMBot
 mentions that role and adds `🔎`. A moderator with that role, `Manage Messages`,
 or `Administrator` can react with `✅` to approve the proposed number or `❌`
 to confirm the reset. If review is enabled after a normal reset, any member can

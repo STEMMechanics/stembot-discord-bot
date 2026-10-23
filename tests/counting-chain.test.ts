@@ -392,7 +392,7 @@ describe('counting-chain service', () => {
     });
   });
 
-  it('pauses an unreadable consecutive post for moderator review', async () => {
+  it('resets an unreadable consecutive post even when review is enabled', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
       recognizeNumber: vi
@@ -405,7 +405,43 @@ describe('counting-chain service', () => {
     });
     const first = createMessage('same-user', 'review-unreadable-same-user-1');
     const second = createMessage('same-user', 'review-unreadable-same-user-2');
-    const later = createMessage('different-user', 'review-paused-later');
+
+    await service.handleMessage(first);
+    await service.handleMessage(second);
+
+    expect(second.react).toHaveBeenCalledWith('❌');
+    expect(second.react).not.toHaveBeenCalledWith('🔎');
+    expect(second.reply).toHaveBeenCalledWith(
+      'Counting chain over — the next number was not accepted. Starting again at 1.',
+    );
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastRoundReason: 'same-user',
+        lastGameEnding: {
+          messageId: 'review-unreadable-same-user-2',
+          reason: 'same-user',
+          proposedNumber: null,
+        },
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('pendingReview');
+  });
+
+  it('pauses an unreadable post from another member for moderator review', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(null),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const first = createMessage('user-1', 'review-unreadable-user-1');
+    const second = createMessage('user-2', 'review-unreadable-user-2');
+    const later = createMessage('user-3', 'review-paused-later');
 
     await service.handleMessage(first);
     await service.handleMessage(second);
@@ -421,14 +457,39 @@ describe('counting-chain service', () => {
       countingChain: {
         expectedNumber: 2,
         pendingReview: {
-          messageId: 'review-unreadable-same-user-2',
-          reason: 'same-user',
+          messageId: 'review-unreadable-user-2',
+          reason: 'unreadable',
           proposedNumber: null,
           reviewMessageId: 'review-reply-message',
         },
       },
     });
     expect(recognizer.recognizeNumber).toHaveBeenCalledTimes(2);
+  });
+
+  it('always resets a recognized consecutive post instead of sending it to review', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(2),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const first = createMessage('same-user', 'same-user-review-1');
+    const second = createMessage('same-user', 'same-user-review-2');
+
+    await service.handleMessage(first);
+    await service.handleMessage(second);
+
+    expect(second.react).toHaveBeenCalledWith('❌');
+    expect(second.react).not.toHaveBeenCalledWith('🔎');
+    expect(second.reply).toHaveBeenCalledWith(
+      'Counting chain over — the next number was not accepted. Starting again at 1.',
+    );
+    expect(state.state.countingChain).not.toHaveProperty('pendingReview');
   });
 
   it('pauses an incorrect post for moderator review and approves the proposed number', async () => {
@@ -538,7 +599,7 @@ describe('counting-chain service', () => {
     expect(message.react).toHaveBeenCalledWith('❌');
     expect(message.deleteMessage).toHaveBeenCalledWith('review-reply-message');
     expect(message.reply).toHaveBeenCalledWith(
-      'Counting chain review rejected — the chain is starting again at 1.',
+      'The moderator checked it — this round starts again at 1. Give it another go!',
     );
     expect(state.state).toMatchObject({
       countingChain: {
