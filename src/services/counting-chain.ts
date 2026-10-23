@@ -96,6 +96,7 @@ export interface CountingChainService {
     historyProvider: CountingChainHistoryProvider,
     infoPublisher?: CountingChainInfoPublisher,
   ): Promise<void>;
+  reconcileHistory(): Promise<void>;
 }
 
 export interface CountingChainServiceDependencies {
@@ -214,6 +215,8 @@ export class PersistentCountingChainService implements CountingChainService {
   private readonly fetchImplementation: typeof fetch;
   private readonly lookupImplementation: CountingChainRemoteAddressLookup;
   private initializationPromise: Promise<void> | undefined;
+  private recoveryPromise: Promise<void> = Promise.resolve();
+  private historyProvider: CountingChainHistoryProvider | undefined;
   private infoPublisher: CountingChainInfoPublisher | undefined;
 
   public constructor(private readonly dependencies: CountingChainServiceDependencies) {
@@ -225,26 +228,24 @@ export class PersistentCountingChainService implements CountingChainService {
     historyProvider: CountingChainHistoryProvider,
     infoPublisher?: CountingChainInfoPublisher,
   ): Promise<void> {
+    this.historyProvider = historyProvider;
     if (infoPublisher) {
       this.infoPublisher = infoPublisher;
     }
 
     if (!this.initializationPromise) {
-      this.initializationPromise = (async (): Promise<void> => {
-        try {
-          await this.recoverMissingState(historyProvider);
-        } catch (error: unknown) {
-          this.dependencies.logger.warn(
-            { err: error, channelId: this.dependencies.config.channelId },
-            'Counting chain startup reconciliation failed; retrying on next startup',
-          );
-        }
-
-        await this.publishInfo();
-      })();
+      this.initializationPromise = this.scheduleRecovery(historyProvider);
     }
 
     return this.initializationPromise;
+  }
+
+  public reconcileHistory(): Promise<void> {
+    if (!this.dependencies.config.enabled || !this.historyProvider) {
+      return Promise.resolve();
+    }
+
+    return this.scheduleRecovery(this.historyProvider);
   }
 
   public handleMessage(message: CountingChainMessage): Promise<void> {
@@ -275,8 +276,11 @@ export class PersistentCountingChainService implements CountingChainService {
       return Promise.resolve([]);
     }
 
-    return this.enqueue(channelId, async () => {
-      const rootState = await this.dependencies.state.load();
+    // This is a read-only dashboard lookup. Keep it outside the game queue:
+    // a dashboard refresh can run while a counting message is being handled,
+    // and the counting task may itself be waiting for the dashboard update.
+    // Queueing this read would create a circular wait and freeze the chain.
+    return this.dependencies.state.load().then((rootState) => {
       const state = readCountingChainState(rootState[STATE_KEY], channelId);
       return toMinigameLeaderboard(state.playerHighScores, limit);
     });
@@ -341,6 +345,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const next = previous
       .catch(() => undefined)
       .then(() => this.initializationPromise)
+      .then(() => this.recoveryPromise)
       .then(task);
     const tracked = next.then(
       () => undefined,
@@ -353,6 +358,28 @@ export class PersistentCountingChainService implements CountingChainService {
         this.queues.delete(channelId);
       }
     });
+  }
+
+  private scheduleRecovery(historyProvider: CountingChainHistoryProvider): Promise<void> {
+    const next = this.recoveryPromise
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await this.recoverMissingState(historyProvider);
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, channelId: this.dependencies.config.channelId },
+            'Counting chain startup reconciliation failed; retrying on the next recovery',
+          );
+        }
+
+        await this.publishInfo();
+      });
+    this.recoveryPromise = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   }
 
   private async recoverMissingState(historyProvider: CountingChainHistoryProvider): Promise<void> {
@@ -541,8 +568,19 @@ export class PersistentCountingChainService implements CountingChainService {
 
     try {
       let pausedForReview = false;
+      let processedImageCount = 0;
       for (const message of pendingMessages) {
+        this.dependencies.logger.info(
+          {
+            channelId: this.dependencies.config.channelId,
+            checkpointMessageId,
+            messageId: message.id,
+            authorId: message.authorId,
+          },
+          'Counting chain startup reconciliation processing pending image',
+        );
         await this.processMessage(message, { fromHistory: true });
+        processedImageCount += 1;
         const currentRootState = await this.dependencies.state.load();
         const currentState = readCountingChainState(
           currentRootState[STATE_KEY],
@@ -559,7 +597,7 @@ export class PersistentCountingChainService implements CountingChainService {
         latestRootState[STATE_KEY],
         this.dependencies.config.channelId,
       );
-      const newestMessageId = history[0]?.id;
+      const newestMessageId = sortHistoryNewestFirst(history)[0]?.id;
       if (
         !pausedForReview &&
         newestMessageId &&
@@ -577,7 +615,7 @@ export class PersistentCountingChainService implements CountingChainService {
         {
           channelId: this.dependencies.config.channelId,
           checkpointMessageId,
-          processedImageCount: pendingMessages.length,
+          processedImageCount,
           newestMessageId,
           pausedForReview,
         },

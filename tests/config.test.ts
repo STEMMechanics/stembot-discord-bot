@@ -336,6 +336,26 @@ describe('loadConfig', () => {
     });
   });
 
+  it('allows older-player quiz challenges beyond age 18', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_QUIZ_ENABLED: 'true',
+      STEM_QUIZ_CHANNEL_ID: '7234567890',
+      STEM_QUIZ_TARGET_AGE_MIN: '14',
+      STEM_QUIZ_TARGET_AGE_MAX: '18',
+      STEM_QUIZ_OLDER_AGE_MAX: '25',
+    });
+
+    expect(config.quiz).toMatchObject({
+      targetAgeMin: 14,
+      targetAgeMax: 18,
+      olderAgeMax: 25,
+    });
+  });
+
   it('requires scramble credentials and parses level settings', () => {
     expect(() =>
       loadConfig({

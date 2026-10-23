@@ -128,7 +128,8 @@ with low reasoning effort.
 
 When `STEM_QUIZ_ENABLED=true`, STEMBot posts one age-appropriate question
 at a time in `STEM_QUIZ_CHANNEL_ID`. The question is aimed at ages 8–14, with
-an optional harder-question rate for players up to age 18. Members answer with
+an optional harder-question rate for players up to the configured older-player
+age. Members answer with
 ordinary Discord messages. Questions may be short answer, true/false or multiple
 choice. The first accepted answer earns one point, receives `✅`, and advances
 the game. Incorrect answers receive `❌`; after the configured
@@ -358,7 +359,7 @@ npm run validate
 | `STEM_QUIZ_MAX_WRONG_ANSWERS`               | No                  | Wrong answers before the bot reveals the answer; defaults to `5`.                            |
 | `STEM_QUIZ_TARGET_AGE_MIN`                  | No                  | Lower end of the main question age range; defaults to `8`.                                   |
 | `STEM_QUIZ_TARGET_AGE_MAX`                  | No                  | Upper end of the main question age range; defaults to `14`.                                  |
-| `STEM_QUIZ_OLDER_AGE_MAX`                   | No                  | Maximum age used for occasional harder questions; defaults to `18`.                          |
+| `STEM_QUIZ_OLDER_AGE_MAX`                   | No                  | Maximum age for harder questions; defaults to `18`, max `100`.                               |
 | `STEM_QUIZ_OLDER_PLAYER_RATE`               | No                  | Fraction of generated questions that are harder; defaults to `0.15`.                         |
 | `STEM_QUIZ_TOPIC`                           | No                  | Topic guidance for question generation.                                                      |
 | `STEM_QUIZ_RETRY_INTERVAL_MS`               | No                  | Retry interval when a question cannot be generated or posted; defaults to 5 minutes.         |

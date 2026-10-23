@@ -125,7 +125,7 @@ const environmentSchema = z.object({
   STEM_QUIZ_MAX_WRONG_ANSWERS: positiveInteger(5, 50),
   STEM_QUIZ_TARGET_AGE_MIN: positiveInteger(8, 18),
   STEM_QUIZ_TARGET_AGE_MAX: positiveInteger(14, 18),
-  STEM_QUIZ_OLDER_AGE_MAX: positiveInteger(18, 18),
+  STEM_QUIZ_OLDER_AGE_MAX: positiveInteger(18, 100),
   STEM_QUIZ_OLDER_PLAYER_RATE: z.preprocess(
     (value) => (value === undefined || value === '' ? 0.15 : value),
     z.coerce.number().min(0).max(1),

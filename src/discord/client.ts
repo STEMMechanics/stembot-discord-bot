@@ -961,6 +961,9 @@ async function handleCountingChainReviewReaction(
       { channelId: message.channelId, messageId: message.id, userId: user.id, decision, applied },
       'Counting chain review reaction processed',
     );
+    if (applied) {
+      await service.reconcileHistory();
+    }
   } catch (error: unknown) {
     logger.warn(
       { err: error, channelId: config.countingChain.channelId, userId: user.id },

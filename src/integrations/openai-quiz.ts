@@ -89,7 +89,7 @@ export class OpenAIStemQuizEngine implements StemQuizEngine {
 
   public async generateQuestion(options: StemQuizQuestionOptions): Promise<StemQuizQuestion> {
     const challengeInstructions = options.olderPlayerChallenge
-      ? `This is an occasional challenge for older players up to age ${options.olderAgeMax}. It may be more difficult, but it must still be suitable for a youth community.`
+      ? `This is an occasional challenge for older players up to age ${options.olderAgeMax}. It may be more difficult, but it must remain appropriate for a family-friendly community and avoid mature content.`
       : `Keep the question accessible to the main age range ${options.targetAgeMin}-${options.targetAgeMax}.`;
     const recentQuestionInstructions =
       options.avoidQuestions && options.avoidQuestions.length > 0

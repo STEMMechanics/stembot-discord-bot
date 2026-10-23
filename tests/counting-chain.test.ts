@@ -132,6 +132,26 @@ describe('counting-chain service', () => {
     ]);
   });
 
+  it('does not wait on the game queue for a concurrent leaderboard read', async () => {
+    const state = new MemoryStateStore();
+    const serviceHolder: { service?: PersistentCountingChainService } = {};
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>(async () => {
+        await serviceHolder.service?.getLeaderboard(3);
+        return 1;
+      }),
+    };
+    const service = createService(state, recognizer);
+    serviceHolder.service = service;
+
+    await service.handleMessage(createMessage('user-1', 'message-1'));
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      countingChain: { expectedNumber: 2, lastMessageId: 'message-1' },
+    });
+  });
+
   it('processes a direct approved GIF URL in message content', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
@@ -627,6 +647,50 @@ describe('counting-chain service', () => {
     });
     expect(state.state.countingChain).not.toHaveProperty('pendingReview');
     expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
+  });
+
+  it('catches up messages posted while a moderator review was pending', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(4)
+        .mockResolvedValueOnce(5),
+    };
+    let history: readonly CountingChainHistoryMessage[] = [];
+    const historyProvider = vi.fn<() => Promise<readonly CountingChainHistoryMessage[]>>(
+      async () => history,
+    );
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    await service.initialize(historyProvider);
+
+    const first = createMessage('user-1', '1562802766370447500');
+    const pending = createMessage('user-2', '1562802766370447501');
+    const later = createHistoryMessage('user-3', '1562802766370447502');
+    await service.handleMessage(first);
+    await service.handleMessage(pending);
+
+    history = [
+      later,
+      createHistoryMessage('user-2', pending.id, {
+        botReactionEmojis: ['🔎', '✅', '❌'],
+      }),
+    ];
+    expect(await service.reviewMessage(pending, 'approve', 'moderator-1')).toBe(true);
+    await service.reconcileHistory();
+
+    expect(later.react).toHaveBeenCalledWith('👍');
+    expect(historyProvider).toHaveBeenCalledTimes(2);
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 6,
+        lastMessageId: '1562802766370447502',
+        lastProcessedMessageId: '1562802766370447502',
+      },
+    });
   });
 
   it('reopens the last game-ending image after a normal reset', async () => {
