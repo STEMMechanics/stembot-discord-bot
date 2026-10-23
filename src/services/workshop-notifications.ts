@@ -444,7 +444,7 @@ export function formatWorkshopAnnouncement(
     cancelled: '❌ Cancelled:',
   }[kind];
 
-  return formatWorkshopMessage(workshop, heading, timeZone);
+  return formatWorkshopMessage(workshop, heading, timeZone, true);
 }
 
 export function formatWorkshopReminder(
@@ -460,6 +460,7 @@ function formatWorkshopMessage(
   workshop: WorkshopRecord,
   heading: string,
   timeZone: string,
+  crosspost = false,
 ): DiscordChannelMessage {
   const description = formatWorkshopDescription(workshop.description);
   const details = formatWorkshopDetails(workshop, timeZone);
@@ -469,6 +470,7 @@ function formatWorkshopMessage(
 
   return {
     content,
+    ...(crosspost ? { crosspost: true } : {}),
     ...(imageUrl ? { heroImageUrl: imageUrl } : {}),
   };
 }

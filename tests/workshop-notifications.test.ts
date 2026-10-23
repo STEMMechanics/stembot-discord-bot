@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   formatWorkshopAnnouncement,
+  formatWorkshopReminder,
   PersistentWorkshopNotificationService,
   type WorkshopNotificationConfig,
 } from '../src/services/workshop-notifications.js';
@@ -230,9 +231,16 @@ describe('persistent workshop notifications', () => {
     expect(message.content).not.toContain('[Details](');
     expect(message.content).not.toContain('Learning Outcomes');
     expect(message).not.toHaveProperty('embeds');
+    expect(message.crosspost).toBe(true);
     expect(message.heroImageUrl).toBe(
       'https://www.stemmechanics.com.au/media/download/redstone.png',
     );
+  });
+
+  it('does not crosspost reminder messages automatically', () => {
+    const message = formatWorkshopReminder(workshop(), '24-hours', 'Australia/Brisbane');
+
+    expect(message).not.toHaveProperty('crosspost');
   });
 
   it('uses a separate booking prompt for ticket registration', () => {

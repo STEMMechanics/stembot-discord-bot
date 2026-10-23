@@ -43,6 +43,8 @@ export interface DiscordChannelMessage {
   embeds?: APIEmbed[];
   /** Internal image URL that is downloaded and attached to the message. */
   heroImageUrl?: string;
+  /** Publish the sent message to followers when this is an announcement-channel message. */
+  crosspost?: boolean;
 }
 
 export interface DiscordCommandDependencies {
@@ -368,7 +370,7 @@ export function createDiscordGateway(
         return sentMessage.id;
       }
 
-      const { heroImageUrl, ...messagePayload } = message;
+      const { heroImageUrl, crosspost, ...messagePayload } = message;
       const heroImage = heroImageUrl ? await downloadHeroImage(heroImageUrl, logger) : undefined;
       const embeds = heroImage
         ? messagePayload.embeds?.map((embed) =>
@@ -388,9 +390,39 @@ export function createDiscordGateway(
         allowedMentions: { parse: [] },
       };
       const sentMessage = await channel.send(payload);
+      if (crosspost) {
+        await crosspostMessage(sentMessage, channelId, logger);
+      }
       return sentMessage.id;
     },
   };
+}
+
+async function crosspostMessage(
+  message: Message,
+  channelId: string,
+  logger: AppLogger,
+): Promise<void> {
+  if (!message.crosspostable) {
+    logger.debug(
+      { channelId, messageId: message.id, channelType: message.channel.type },
+      'Discord message was sent but is not eligible for automatic crossposting',
+    );
+    return;
+  }
+
+  try {
+    await message.crosspost();
+    logger.info(
+      { channelId, messageId: message.id },
+      'Discord announcement message crossposted to followers',
+    );
+  } catch (error: unknown) {
+    logger.warn(
+      { err: error, channelId, messageId: message.id },
+      'Discord announcement message was sent but could not be crossposted',
+    );
+  }
 }
 
 function toCountingChainMessage(message: Message): CountingChainMessage {
