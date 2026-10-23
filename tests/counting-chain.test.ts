@@ -39,6 +39,7 @@ function createMessage(
     channelId: 'counting-channel',
     authorId,
     authorIsBot: false,
+    content: '',
     attachments: [
       {
         url: `https://cdn.discordapp.com/attachments/1/${id}/number.gif`,
@@ -112,6 +113,95 @@ describe('counting-chain service', () => {
         lastMessageId: 'message-2',
       },
     });
+  });
+
+  it('processes a direct approved GIF URL in message content', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-url', {
+      content: 'https://media.tenor.com/example/number.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(message.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: { expectedNumber: 2, lastMessageId: 'message-url' },
+    });
+  });
+
+  it('processes an image URL supplied by a Discord embed during history recovery', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(8),
+    };
+    const service = createService(state, recognizer);
+    const message = createHistoryMessage('user-1', 'history-gif-url', {
+      attachments: [],
+      content: 'https://tenor.com/view/example',
+      imageUrls: ['https://media.tenor.com/example/number.gif'],
+    });
+
+    await service.initialize(() => Promise.resolve([message]));
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      countingChain: { expectedNumber: 9, lastMessageId: 'history-gif-url' },
+    });
+  });
+
+  it('reconciles an approved GIF URL posted while the bot was offline', async () => {
+    const state = new MemoryStateStore();
+    const firstService = createService(state, {
+      recognizeNumber: vi.fn().mockResolvedValue(1),
+    });
+    const checkpointMessageId = '1562802766370447400';
+    await firstService.handleMessage(createMessage('user-1', checkpointMessageId));
+
+    const offlineGif = createHistoryMessage('user-2', '1562802766370447401', {
+      attachments: [],
+      content: 'https://media.giphy.com/media/example/number.gif',
+    });
+    const checkpoint = createHistoryMessage('user-1', checkpointMessageId, {
+      botReactionEmojis: ['👍'],
+    });
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(2),
+    };
+    const service = createService(state, recognizer);
+
+    await service.initialize(() => Promise.resolve([offlineGif, checkpoint]));
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(offlineGif.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 3,
+        lastMessageId: '1562802766370447401',
+        lastProcessedMessageId: '1562802766370447401',
+      },
+    });
+  });
+
+  it('ignores unapproved page URLs without treating them as image sources', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = { recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>() };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-page-url', {
+      content: 'https://example.com/number.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(recognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(message.react).not.toHaveBeenCalled();
+    expect(state.state).toEqual({});
   });
 
   it('reacts and resets when the number is wrong', async () => {

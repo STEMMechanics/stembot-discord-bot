@@ -20,7 +20,9 @@ export interface CountingChainMessage {
   channelId: string;
   authorId: string;
   authorIsBot: boolean;
+  content: string;
   attachments: readonly CountingChainAttachment[];
+  imageUrls?: readonly string[];
   botReactionEmojis?: readonly string[];
   react(emoji: string): Promise<void>;
   reply(content: string): Promise<void>;
@@ -81,7 +83,17 @@ const STATE_KEY = 'countingChain';
 const PASS_REACTION = '👍';
 const RULE_FAILURE_REACTION = '❌';
 const RECOGNITION_FAILURE_REACTION = '⚠️';
-const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'cdn.discordapp.com',
+  'media.discordapp.net',
+  'images-ext-1.discordapp.net',
+  'images-ext-2.discordapp.net',
+  'media.tenor.com',
+  'c.tenor.com',
+  'media.giphy.com',
+  'i.giphy.com',
+  'i.imgur.com',
+]);
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 
 export class PersistentCountingChainService implements CountingChainService {
@@ -198,6 +210,7 @@ export class PersistentCountingChainService implements CountingChainService {
         newestMessageId: newestMessage?.id,
         newestMessageAuthorIsBot: newestMessage?.authorIsBot,
         newestMessageAttachmentCount: newestMessage?.attachments.length,
+        newestMessageImageUrlCount: newestMessage?.imageUrls?.length,
       },
       'Counting chain history newest message identified',
     );
@@ -234,8 +247,8 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
-    const attachment = selectImageAttachment(latestMessage.attachments);
-    if (!attachment) {
+    const imageSource = selectImageSource(latestMessage);
+    if (!imageSource) {
       await saveInitialState(
         rootState,
         state,
@@ -248,7 +261,7 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     try {
-      const image = await this.downloadImage(attachment);
+      const image = await this.downloadImage(imageSource);
       const recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
       if (recognizedNumber === null) {
         throw new Error('Counting chain history image could not be read');
@@ -303,7 +316,7 @@ export class PersistentCountingChainService implements CountingChainService {
       (message) =>
         !message.authorIsBot &&
         isDiscordMessageAfter(message.id, checkpointMessageId) &&
-        selectImageAttachment(message.attachments) !== undefined,
+        selectImageSource(message) !== undefined,
     );
 
     this.dependencies.logger.info(
@@ -359,11 +372,11 @@ export class PersistentCountingChainService implements CountingChainService {
   }
 
   private async processMessage(message: CountingChainMessage): Promise<void> {
-    const attachment = selectImageAttachment(message.attachments);
-    if (!attachment) {
+    const imageSource = selectImageSource(message);
+    if (!imageSource) {
       this.dependencies.logger.debug(
         { channelId: message.channelId, messageId: message.id },
-        'Counting chain message had no supported image attachment',
+        'Counting chain message had no supported image source',
       );
       return;
     }
@@ -372,15 +385,15 @@ export class PersistentCountingChainService implements CountingChainService {
       {
         channelId: message.channelId,
         messageId: message.id,
-        contentType: attachment.contentType,
-        size: attachment.size,
+        contentType: imageSource.contentType,
+        size: imageSource.size,
       },
       'Counting chain image received',
     );
 
     let recognizedNumber: number | null;
     try {
-      const image = await this.downloadImage(attachment);
+      const image = await this.downloadImage(imageSource);
       recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
     } catch (error: unknown) {
       this.dependencies.logger.warn(
@@ -455,17 +468,17 @@ export class PersistentCountingChainService implements CountingChainService {
     );
   }
 
-  private async downloadImage(attachment: CountingChainAttachment): Promise<NumberImage> {
-    if (attachment.size && attachment.size > this.dependencies.config.maxAttachmentBytes) {
+  private async downloadImage(source: CountingChainAttachment): Promise<NumberImage> {
+    if (source.size && source.size > this.dependencies.config.maxAttachmentBytes) {
       throw new Error('Counting chain image exceeds the configured attachment limit');
     }
 
-    const url = new URL(attachment.url);
-    if (url.protocol !== 'https:' || !ALLOWED_HOSTS.has(url.hostname)) {
-      throw new Error('Counting chain attachment URL is not a Discord CDN URL');
+    const url = new URL(source.url);
+    if (url.protocol !== 'https:' || !isAllowedImageHost(url.hostname)) {
+      throw new Error('Counting chain image URL is not from an approved image host');
     }
 
-    const response = await this.fetchImplementation(attachment.url, {
+    const response = await this.fetchImplementation(source.url, {
       headers: { Accept: 'image/gif, image/jpeg, image/png, image/webp' },
       signal: AbortSignal.timeout(15_000),
     });
@@ -473,18 +486,23 @@ export class PersistentCountingChainService implements CountingChainService {
       throw new Error(`Counting chain image request failed with HTTP ${response.status}`);
     }
 
+    if (response.url) {
+      const responseUrl = new URL(response.url);
+      if (responseUrl.protocol !== 'https:' || !isAllowedImageHost(responseUrl.hostname)) {
+        throw new Error('Counting chain image redirect is not from an approved image host');
+      }
+    }
+
     const responseContentType = normalizeContentType(response.headers.get('content-type'));
-    const attachmentContentType = normalizeContentType(attachment.contentType);
+    const sourceContentType = normalizeContentType(source.contentType);
     const contentType =
       (responseContentType && IMAGE_TYPES.has(responseContentType)
         ? responseContentType
         : undefined) ??
-      (attachmentContentType && IMAGE_TYPES.has(attachmentContentType)
-        ? attachmentContentType
-        : undefined) ??
-      contentTypeFromName(attachment.name);
+      (sourceContentType && IMAGE_TYPES.has(sourceContentType) ? sourceContentType : undefined) ??
+      contentTypeFromName(source.name);
     if (!contentType || !IMAGE_TYPES.has(contentType)) {
-      throw new Error('Counting chain attachment is not a supported image');
+      throw new Error('Counting chain source is not a supported image');
     }
 
     const data = await readResponseBody(response, this.dependencies.config.maxAttachmentBytes);
@@ -622,7 +640,7 @@ function findLatestRelevantHistoryMessage(
       continue;
     }
 
-    if (selectImageAttachment(message.attachments)) {
+    if (selectImageSource(message)) {
       return message;
     }
   }
@@ -799,6 +817,86 @@ function selectImageAttachment(
       (contentType && IMAGE_TYPES.has(contentType)) || Boolean(contentTypeFromName(attachment.name))
     );
   });
+}
+
+function selectImageSource(message: CountingChainMessage): CountingChainAttachment | undefined {
+  const attachment = selectImageAttachment(message.attachments);
+  if (attachment) {
+    return attachment;
+  }
+
+  for (const url of extractImageUrls(message.content)) {
+    const source = createImageUrlSource(url, true);
+    if (source) {
+      return source;
+    }
+  }
+
+  for (const url of message.imageUrls ?? []) {
+    const source = createImageUrlSource(url, false);
+    if (source) {
+      return source;
+    }
+  }
+
+  return undefined;
+}
+
+function extractImageUrls(content: string): string[] {
+  const urls = content.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
+  return urls.map((url) => url.replace(/[),.!?;:'\]]+$/g, ''));
+}
+
+function createImageUrlSource(
+  urlValue: string,
+  requireImagePath: boolean,
+): CountingChainAttachment | undefined {
+  let url: URL;
+  try {
+    url = new URL(urlValue);
+  } catch {
+    return undefined;
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    !isAllowedImageHost(url.hostname) ||
+    (requireImagePath && !isLikelyImageUrl(url))
+  ) {
+    return undefined;
+  }
+
+  const name = url.pathname.split('/').pop() || undefined;
+  return {
+    url: url.toString(),
+    ...(name ? { name } : {}),
+  };
+}
+
+function isLikelyImageUrl(url: URL): boolean {
+  return (
+    Boolean(contentTypeFromName(url.pathname.split('/').pop())) || isKnownImageHost(url.hostname)
+  );
+}
+
+function isAllowedImageHost(hostname: string): boolean {
+  const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
+  return (
+    ALLOWED_IMAGE_HOSTS.has(normalizedHostname) || /^media\d+\.giphy\.com$/.test(normalizedHostname)
+  );
+}
+
+function isKnownImageHost(hostname: string): boolean {
+  const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
+  return (
+    normalizedHostname.endsWith('.tenor.com') ||
+    normalizedHostname.endsWith('.giphy.com') ||
+    normalizedHostname === 'i.imgur.com' ||
+    normalizedHostname.endsWith('.discordapp.com') ||
+    normalizedHostname.endsWith('.discordapp.net')
+  );
 }
 
 function normalizeContentType(value: string | null | undefined): string | undefined {

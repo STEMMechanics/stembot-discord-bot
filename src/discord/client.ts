@@ -141,6 +141,7 @@ export function createDiscordGateway(
             channelId: message.channelId,
             messageId: message.id,
             attachmentCount: message.attachments.size,
+            imageUrlCount: getCountingChainImageUrls(message).length,
             authorIsBot: message.author.bot,
           },
           'Counting chain Discord message received',
@@ -223,12 +224,14 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
     channelId: message.channelId,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
+    content: message.content,
     attachments: [...message.attachments.values()].map((attachment) => ({
       url: attachment.url,
       ...(attachment.name ? { name: attachment.name } : {}),
       ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
       ...(attachment.size !== undefined ? { size: attachment.size } : {}),
     })),
+    imageUrls: getCountingChainImageUrls(message),
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },
@@ -239,6 +242,14 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
       });
     },
   };
+}
+
+function getCountingChainImageUrls(message: Message): string[] {
+  return message.embeds.flatMap((embed) =>
+    [embed.image?.url, embed.thumbnail?.url].filter(
+      (url): url is string => typeof url === 'string' && url.length > 0,
+    ),
+  );
 }
 
 function toCountingChainHistoryMessage(message: Message): CountingChainHistoryMessage {

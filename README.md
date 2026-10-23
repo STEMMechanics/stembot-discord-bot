@@ -50,8 +50,8 @@ Synchronize these application commands with `npm run sync:commands`:
 ### Counting-chain minigame
 
 When `COUNTING_CHAIN_ENABLED=true`, STEMBot watches only
-`COUNTING_CHAIN_CHANNEL_ID` for image attachments. The first accepted image
-must contain `1`; each following image must contain the next number and come
+`COUNTING_CHAIN_CHANNEL_ID` for image attachments and approved GIF/image URLs.
+The first accepted image must contain `1`; each following image must contain the next number and come
 from a different Discord member than the previous accepted image. Accepted
 images receive a `👍` reaction and advance the persisted channel state.
 
@@ -61,17 +61,21 @@ unsupported or temporarily unavailable image receives `⚠️` and a retry messa
 it does not change the game state. Bot messages and messages outside the
 configured channel are ignored.
 
-The bot downloads Discord CDN attachments, samples animated GIF frames as PNG
-images, and sends those frames to the configured OpenAI model. It stores the
-current number, score history and Discord IDs, but does not store the image.
+The bot downloads Discord CDN attachments, direct approved GIF URLs, and image
+URLs supplied by Discord embeds, samples animated GIF frames as PNG images, and
+sends those frames to the configured OpenAI model. Tenor, Giphy, Imgur, and
+Discord media hosts are supported. It stores the current number, score history
+and Discord IDs, but does not store the image.
 Enable the Message Content intent in the Discord Developer Portal and grant the
 bot permission to view message history, add reactions and send messages in the
 counting channel.
 
 For troubleshooting, the log entry `Counting chain Discord message received`
 confirms that the gateway delivered a message from the configured channel. Its
-`attachmentCount` should be greater than zero for an uploaded image. If the
-entry is absent, check `COUNTING_CHAIN_CHANNEL_ID`, the bot's channel access,
+`attachmentCount` should be greater than zero for an uploaded image. A GIF
+picker post may instead have `attachmentCount: 0` and `imageUrlCount: 1`; a
+direct approved image URL may have both counts at zero and is still processed
+from the message content. If the entry is absent, check `COUNTING_CHAIN_CHANNEL_ID`, the bot's channel access,
 and the Message Content intent. If it is present but the image cannot be read,
 the following warning identifies whether the Discord CDN download, image
 conversion, or OpenAI response failed. OpenAI responses that are incomplete or
@@ -88,11 +92,14 @@ messages for its `Counting Chain Game` embed and creates one only when it cannot
 find an existing message. The embed is updated after accepted numbers and
 resets, and once when the service starts.
 
-If the counting channel has no saved game record, startup recovery paginates
-through the channel in 100-message pages. It resumes after the newest unmarked image, silently
-starts at `1` after a `❌`/`⚠️` reaction or game-over/read-failure reply, and
-does not send reactions or replies while recovering old messages. Missing or
-unreadable history also results in a silent reset.
+Startup reconciliation paginates through the channel in 100-message pages. If
+the game has a saved checkpoint, it processes approved image attachments and
+GIF URLs newer than that checkpoint in chronological order, sending the normal
+reactions and reset replies for missed posts. If the game has no saved record,
+it recovers the newest relevant image without sending historical feedback;
+a `❌`/`⚠️` reaction or game-over/read-failure reply starts the game at `1`.
+Missing or unreadable history retains the last durable state and retries on the
+next startup.
 
 If the logs report `Unknown Channel` during startup recovery, the configured
 `COUNTING_CHAIN_CHANNEL_ID` is not a readable channel for this bot. Check that
