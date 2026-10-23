@@ -63,6 +63,7 @@ describe('OpenAI number recognizer', () => {
     expect(prompt).toMatchObject({
       text: expect.stringContaining('not one, but two'),
     });
+    expect(prompt?.text).toContain('holding up two fingers for 2');
     expect(body.text.format).toMatchObject({
       type: 'json_schema',
       name: 'counting_chain_number',
