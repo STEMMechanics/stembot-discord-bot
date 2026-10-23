@@ -52,6 +52,7 @@ export async function handleInteraction(
     ...(context.website ? { website: context.website } : {}),
     ...(context.stemcraft ? { stemcraft: context.stemcraft } : {}),
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
+    ...(context.userLevels ? { userLevels: context.userLevels } : {}),
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),
     ...(context.requestCountingChainReview
       ? { requestCountingChainReview: context.requestCountingChainReview }

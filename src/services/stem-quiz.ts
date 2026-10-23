@@ -9,6 +9,7 @@ import type {
 } from '../integrations/openai-quiz.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import type { UserLevelService } from './user-levels.js';
 
 export interface StemQuizConfig {
   enabled: boolean;
@@ -64,6 +65,7 @@ interface StemQuizServiceDependencies {
   publisher: StemQuizPublisher;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  userLevels?: UserLevelService;
   clock?: () => Date;
   random?: () => number;
   idFactory?: () => string;
@@ -205,6 +207,7 @@ export class PersistentStemQuizService implements StemQuizService {
     writeStemQuizState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
+    await this.recordGameParticipation(message);
 
     const leadIn = [
       `🎉 <@${message.authorId}> got it! **${question.answer}** was correct.`,
@@ -347,6 +350,22 @@ export class PersistentStemQuizService implements StemQuizService {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id, emoji },
         'STEM quiz reaction could not be added',
+      );
+    }
+  }
+
+  private async recordGameParticipation(message: StemQuizMessage): Promise<void> {
+    try {
+      await this.dependencies.userLevels?.recordGameParticipation(message.authorId);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        {
+          err: error,
+          channelId: message.channelId,
+          messageId: message.id,
+          userId: message.authorId,
+        },
+        'STEM quiz game XP could not be recorded',
       );
     }
   }

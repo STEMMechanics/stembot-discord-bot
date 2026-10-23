@@ -4,6 +4,7 @@ import { BlockList } from 'node:net';
 import type { NumberImage, NumberRecognizer } from '../integrations/openai.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import type { UserLevelService } from './user-levels.js';
 
 export interface CountingChainConfig {
   enabled: boolean;
@@ -92,6 +93,7 @@ export interface CountingChainServiceDependencies {
   recognizer: NumberRecognizer;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  userLevels?: UserLevelService;
   fetchImplementation?: typeof fetch;
   lookupImplementation?: CountingChainRemoteAddressLookup;
   clock?: () => Date;
@@ -695,6 +697,7 @@ export class PersistentCountingChainService implements CountingChainService {
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
       await this.react(message, PASS_REACTION);
+      await this.recordGameParticipation(message);
       return;
     }
 
@@ -936,6 +939,7 @@ export class PersistentCountingChainService implements CountingChainService {
       await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
       await this.clearReactions(message);
       await this.react(message, PASS_REACTION, true);
+      await this.recordGameParticipation(message);
       this.dependencies.logger.info(
         {
           channelId: message.channelId,
@@ -981,6 +985,22 @@ export class PersistentCountingChainService implements CountingChainService {
       'Counting chain moderator rejected a post',
     );
     return true;
+  }
+
+  private async recordGameParticipation(message: CountingChainMessage): Promise<void> {
+    try {
+      await this.dependencies.userLevels?.recordGameParticipation(message.authorId);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        {
+          err: error,
+          channelId: message.channelId,
+          messageId: message.id,
+          userId: message.authorId,
+        },
+        'Counting chain game XP could not be recorded',
+      );
+    }
   }
 
   private isReviewEnabled(): boolean {

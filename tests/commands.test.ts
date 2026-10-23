@@ -5,6 +5,8 @@ import {
   formatMinecraftStatus,
   formatPlayers,
   formatWorkshopList,
+  formatUserLeaderboard,
+  formatUserLevel,
   getRandomRobotJoke,
   getCommandDefinitions,
   getUpcomingWorkshops,
@@ -17,6 +19,7 @@ import {
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
+import type { UserLevelProfile } from '../src/services/user-levels.js';
 
 function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
   return {
@@ -39,6 +42,8 @@ describe('Discord commands', () => {
       'ping',
       'workshops',
       'joke',
+      'level',
+      'leaderboard',
       'review',
       'minecraft',
       'players',
@@ -163,6 +168,23 @@ describe('Discord commands', () => {
 
     const players: readonly MinecraftPlayer[] = [{ username: 'Alex' }, { username: 'Builder' }];
     expect(formatPlayers(players)).toBe('Online Minecraft players:\n• Alex\n• Builder');
+  });
+
+  it('formats user levels and the leaderboard without pinging members', () => {
+    const profile: UserLevelProfile = {
+      userId: 'user-1',
+      xp: 120,
+      level: 2,
+      messageCount: 10,
+      reactionCount: 5,
+      gameCount: 2,
+      lastMessageXpAt: null,
+      lastReactionXpAt: null,
+    };
+
+    expect(formatUserLevel(profile)).toContain('**Level 2** — 120 XP');
+    expect(formatUserLevel(profile)).toContain('Messages: 10 · Reactions: 5 · Games: 2');
+    expect(formatUserLeaderboard([profile])).toContain('1. <@user-1> — Level 2 (120 XP)');
   });
 
   it('makes /players available without a permission check', async () => {

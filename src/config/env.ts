@@ -128,6 +128,24 @@ const environmentSchema = z.object({
       'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
     ),
   STEM_QUIZ_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_SCRAMBLE_ENABLED: booleanFromEnvironment(false),
+  STEM_SCRAMBLE_CHANNEL_ID: optionalDiscordId,
+  STEM_SCRAMBLE_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_SCRAMBLE_TARGET_AGE_MIN: positiveInteger(8, 18),
+  STEM_SCRAMBLE_TARGET_AGE_MAX: positiveInteger(14, 18),
+  STEM_SCRAMBLE_TOPIC: z
+    .string()
+    .trim()
+    .min(1)
+    .default(
+      'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+    ),
+  STEM_LEVELS_ENABLED: booleanFromEnvironment(false),
+  STEM_LEVELS_MESSAGE_XP: positiveInteger(5, 100),
+  STEM_LEVELS_REACTION_XP: positiveInteger(2, 100),
+  STEM_LEVELS_GAME_XP: positiveInteger(15, 500),
+  STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS: positiveInteger(60, 86400),
+  STEM_LEVELS_REACTION_COOLDOWN_SECONDS: positiveInteger(30, 86400),
 });
 
 export type AppEnvironment = (typeof ENVIRONMENTS)[number];
@@ -175,6 +193,22 @@ export interface AppConfig {
     olderPlayerRate: number;
     topic: string;
     retryIntervalMs: number;
+  };
+  scramble: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+    topic: string;
+    targetAgeMin: number;
+    targetAgeMax: number;
+  };
+  levels: {
+    enabled: boolean;
+    messageXp: number;
+    reactionXp: number;
+    gameXp: number;
+    messageCooldownMs: number;
+    reactionCooldownMs: number;
   };
   workshops: {
     timeZone: string;
@@ -250,6 +284,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('STEM_QUIZ_TARGET_AGE_MAX cannot be greater than STEM_QUIZ_OLDER_AGE_MAX');
   }
 
+  if (values.STEM_SCRAMBLE_ENABLED && !values.STEM_SCRAMBLE_CHANNEL_ID) {
+    throw new Error('STEM_SCRAMBLE_CHANNEL_ID is required when STEM_SCRAMBLE_ENABLED is true');
+  }
+
+  if (values.STEM_SCRAMBLE_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_SCRAMBLE_ENABLED is true');
+  }
+
+  if (values.STEM_SCRAMBLE_TARGET_AGE_MIN > values.STEM_SCRAMBLE_TARGET_AGE_MAX) {
+    throw new Error(
+      'STEM_SCRAMBLE_TARGET_AGE_MIN cannot be greater than STEM_SCRAMBLE_TARGET_AGE_MAX',
+    );
+  }
+
   try {
     new Intl.DateTimeFormat('en-AU', { timeZone: values.WORKSHOP_TIME_ZONE }).format();
   } catch (error: unknown) {
@@ -306,6 +354,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       olderPlayerRate: values.STEM_QUIZ_OLDER_PLAYER_RATE,
       topic: values.STEM_QUIZ_TOPIC,
       retryIntervalMs: values.STEM_QUIZ_RETRY_INTERVAL_MS,
+    },
+    scramble: {
+      enabled: values.STEM_SCRAMBLE_ENABLED,
+      ...(values.STEM_SCRAMBLE_CHANNEL_ID ? { channelId: values.STEM_SCRAMBLE_CHANNEL_ID } : {}),
+      retryIntervalMs: values.STEM_SCRAMBLE_RETRY_INTERVAL_MS,
+      topic: values.STEM_SCRAMBLE_TOPIC,
+      targetAgeMin: values.STEM_SCRAMBLE_TARGET_AGE_MIN,
+      targetAgeMax: values.STEM_SCRAMBLE_TARGET_AGE_MAX,
+    },
+    levels: {
+      enabled: values.STEM_LEVELS_ENABLED,
+      messageXp: values.STEM_LEVELS_MESSAGE_XP,
+      reactionXp: values.STEM_LEVELS_REACTION_XP,
+      gameXp: values.STEM_LEVELS_GAME_XP,
+      messageCooldownMs: values.STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS * 1000,
+      reactionCooldownMs: values.STEM_LEVELS_REACTION_COOLDOWN_SECONDS * 1000,
     },
     workshops: {
       timeZone: values.WORKSHOP_TIME_ZONE,

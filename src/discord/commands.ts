@@ -17,6 +17,11 @@ import {
   type WebsiteIntegration,
   type WorkshopRecord,
 } from '../integrations/website.js';
+import {
+  getXpForNextLevel,
+  type UserLevelProfile,
+  type UserLevelService,
+} from '../services/user-levels.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -25,6 +30,7 @@ export interface CommandContext {
   timeZone?: string;
   getCurrentTime?: () => Date;
   requestCountingChainReview?: (channelId: string) => Promise<boolean>;
+  userLevels?: UserLevelService;
 }
 
 export interface DiscordCommand {
@@ -222,6 +228,51 @@ export const jokeCommand: DiscordCommand = {
   },
 };
 
+export const levelCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('level')
+    .setDescription('Show your STEMBot level and XP.'),
+
+  async execute(interaction, context): Promise<void> {
+    const userLevels = context.userLevels;
+    if (!userLevels) {
+      await interaction.reply({
+        content: 'The level system is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const profile = await userLevels.getProfile(interaction.user.id);
+    await interaction.editReply({ content: formatUserLevel(profile) });
+  },
+};
+
+export const leaderboardCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('Show the STEMBot XP leaderboard.'),
+
+  async execute(interaction, context): Promise<void> {
+    const userLevels = context.userLevels;
+    if (!userLevels) {
+      await interaction.reply({
+        content: 'The level system is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply();
+    const leaderboard = await userLevels.getLeaderboard(10);
+    await interaction.editReply({
+      content: formatUserLeaderboard(leaderboard),
+      allowedMentions: { parse: [] },
+    });
+  },
+};
+
 export const reviewCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('review')
@@ -297,6 +348,8 @@ export const commands: readonly DiscordCommand[] = [
   pingCommand,
   workshopsCommand,
   jokeCommand,
+  levelCommand,
+  leaderboardCommand,
   reviewCommand,
   minecraftCommand,
   playersCommand,
@@ -360,6 +413,30 @@ export function formatPlayers(players: readonly MinecraftPlayer[]): string {
   }
 
   return `Online Minecraft players:\n${players.map((player) => `• ${player.username}`).join('\n')}`;
+}
+
+export function formatUserLevel(profile: UserLevelProfile): string {
+  const nextLevelXp = getXpForNextLevel(profile.level);
+  const remainingXp = Math.max(0, nextLevelXp - profile.xp);
+  return [
+    `**Level ${profile.level}** — ${profile.xp} XP`,
+    `${remainingXp} XP to level ${profile.level + 1}.`,
+    `Messages: ${profile.messageCount} · Reactions: ${profile.reactionCount} · Games: ${profile.gameCount}`,
+  ].join('\n');
+}
+
+export function formatUserLeaderboard(profiles: readonly UserLevelProfile[]): string {
+  if (profiles.length === 0) {
+    return 'No XP has been recorded yet.';
+  }
+
+  return [
+    '🏆 **STEMBot leaderboard**',
+    ...profiles.map(
+      (profile, index) =>
+        `${index + 1}. <@${profile.userId}> — Level ${profile.level} (${profile.xp} XP)`,
+    ),
+  ].join('\n');
 }
 
 function formatDateRange(workshop: WorkshopRecord, timeZone: string): string {

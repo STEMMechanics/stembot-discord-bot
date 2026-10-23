@@ -48,6 +48,22 @@ describe('loadConfig', () => {
           'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
         retryIntervalMs: 300000,
       },
+      scramble: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        targetAgeMin: 8,
+        targetAgeMax: 14,
+        topic:
+          'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+      },
+      levels: {
+        enabled: false,
+        messageXp: 5,
+        reactionXp: 2,
+        gameXp: 15,
+        messageCooldownMs: 60000,
+        reactionCooldownMs: 30000,
+      },
       workshops: {
         announcementsEnabled: true,
         announcementWindowMs: 2419200000,
@@ -261,6 +277,63 @@ describe('loadConfig', () => {
       olderPlayerRate: 0.2,
       topic: 'space science',
       retryIntervalMs: 60000,
+    });
+  });
+
+  it('requires scramble credentials and parses level settings', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_SCRAMBLE_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_SCRAMBLE_CHANNEL_ID/);
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_SCRAMBLE_ENABLED: 'true',
+        STEM_SCRAMBLE_CHANNEL_ID: '8234567890',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_SCRAMBLE_ENABLED: 'true',
+      STEM_SCRAMBLE_CHANNEL_ID: '8234567890',
+      STEM_SCRAMBLE_RETRY_INTERVAL_MS: '60000',
+      STEM_SCRAMBLE_TOPIC: 'space science',
+      STEM_SCRAMBLE_TARGET_AGE_MIN: '8',
+      STEM_SCRAMBLE_TARGET_AGE_MAX: '16',
+      STEM_LEVELS_ENABLED: 'true',
+      STEM_LEVELS_MESSAGE_XP: '7',
+      STEM_LEVELS_REACTION_XP: '3',
+      STEM_LEVELS_GAME_XP: '20',
+      STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS: '90',
+      STEM_LEVELS_REACTION_COOLDOWN_SECONDS: '45',
+    });
+
+    expect(config.scramble).toEqual({
+      enabled: true,
+      channelId: '8234567890',
+      retryIntervalMs: 60000,
+      topic: 'space science',
+      targetAgeMin: 8,
+      targetAgeMax: 16,
+    });
+    expect(config.levels).toEqual({
+      enabled: true,
+      messageXp: 7,
+      reactionXp: 3,
+      gameXp: 20,
+      messageCooldownMs: 90000,
+      reactionCooldownMs: 45000,
     });
   });
 });

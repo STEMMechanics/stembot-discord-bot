@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, and an optional AI-generated STEM question chain. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, an optional AI-generated STEM question chain, an optional AI word-scramble minigame, and a persistent participation XP and level system. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -45,6 +45,8 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
+- `/level` — your persisted XP, level and activity counts.
+- `/leaderboard` — the top ten members by XP.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
@@ -155,6 +157,34 @@ space, nature, robotics and computing. If an existing deployment still has
 `STEM_QUIZ_TOPIC=mixed STEM, Minecraft and engineering`, update that environment
 value to the broader mix when deploying this version.
 
+### STEM word scramble
+
+When `STEM_SCRAMBLE_ENABLED=true`, STEMBot asks the shared OpenAI model for one
+age-appropriate STEM word and a short hint, then scrambles the letters locally.
+The answer is kept in persistent state; OpenAI never receives member guesses.
+The first correct member receives `✅`, earns minigame XP and starts the next
+round. Incorrect guesses receive `❌` and leave the round open. The last 50
+words are retained and sent as exclusions so the generator does not quickly
+repeat a word; exact duplicates are also rejected locally and regenerated.
+
+Set `STEM_SCRAMBLE_CHANNEL_ID` to the channel where the game should run. The
+bot needs the Message Content intent and permission to add reactions there.
+
+### Participation XP and levels
+
+When `STEM_LEVELS_ENABLED=true`, human messages earn XP with the configured
+per-user cooldown, reactions earn XP with a separate cooldown, and accepted
+counting-chain moves, quiz answers and scramble answers earn minigame XP.
+Bot messages are ignored. XP and activity counts are stored in the shared JSON
+state file. Levels use increasing thresholds: level 2 starts at 100 XP, level 3
+at 400 XP, and so on. `/level` shows an individual profile and
+`/leaderboard` shows the top ten members without pinging them.
+
+The level listener requires the Discord Message Content and Guild Message
+Reactions intents. STEMBot requests these automatically when the feature is
+enabled, but the privileged Message Content intent must also be enabled in the
+Discord Developer Portal.
+
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single information embed
 with the current number, high score and last round. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
@@ -183,7 +213,7 @@ manually editing the game fields.
 
 ### Discord command synchronization
 
-`npm run sync:commands` performs a complete Discord replacement with the six
+`npm run sync:commands` performs a complete Discord replacement with the eight
 supported commands in the configured guild scope. It first removes existing
 global command registrations for this application, then bulk-replaces the
 global set with an empty list and the target guild set with the supported
@@ -284,6 +314,18 @@ npm run validate
 | `STEM_QUIZ_OLDER_PLAYER_RATE`               | No                  | Fraction of generated questions that are harder; defaults to `0.15`.                         |
 | `STEM_QUIZ_TOPIC`                           | No                  | Topic guidance for question generation.                                                      |
 | `STEM_QUIZ_RETRY_INTERVAL_MS`               | No                  | Retry interval when a question cannot be generated or posted; defaults to 5 minutes.         |
+| `STEM_SCRAMBLE_ENABLED`                     | No                  | Enable the AI word-scramble minigame; defaults to `false`.                                   |
+| `STEM_SCRAMBLE_CHANNEL_ID`                  | When enabled        | Discord channel where the scramble runs.                                                     |
+| `STEM_SCRAMBLE_RETRY_INTERVAL_MS`           | No                  | Retry interval when a scramble cannot be generated or posted; defaults to 5 minutes.         |
+| `STEM_SCRAMBLE_TARGET_AGE_MIN`              | No                  | Lower end of the scramble age range; defaults to `8`.                                        |
+| `STEM_SCRAMBLE_TARGET_AGE_MAX`              | No                  | Upper end of the scramble age range; defaults to `14`.                                       |
+| `STEM_SCRAMBLE_TOPIC`                       | No                  | Topic guidance for scramble word generation.                                                 |
+| `STEM_LEVELS_ENABLED`                       | No                  | Enable message, reaction and minigame XP; defaults to `false`.                               |
+| `STEM_LEVELS_MESSAGE_XP`                    | No                  | XP for a message after cooldown; defaults to `5`.                                            |
+| `STEM_LEVELS_REACTION_XP`                   | No                  | XP for a reaction after cooldown; defaults to `2`.                                           |
+| `STEM_LEVELS_GAME_XP`                       | No                  | XP for an accepted minigame move; defaults to `15`.                                          |
+| `STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS`      | No                  | Per-user message XP cooldown; defaults to `60`.                                              |
+| `STEM_LEVELS_REACTION_COOLDOWN_SECONDS`     | No                  | Per-user reaction XP cooldown; defaults to `30`.                                             |
 | `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.        |
 | `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                                |
 | `WORKSHOP_ANNOUNCEMENTS_ENABLED`            | No                  | Enable new/update/cancellation announcements; defaults to `true`.                            |
@@ -311,7 +353,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, and AI quiz state. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state and user-level profiles. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:
@@ -461,7 +503,7 @@ in CI.
 
 ## Security and privacy
 
-The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame or AI quiz additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
+The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame, AI quiz, scramble or user levels additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review or user levels also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
 The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
 

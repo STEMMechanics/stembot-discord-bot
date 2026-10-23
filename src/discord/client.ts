@@ -26,7 +26,9 @@ import type {
   CountingChainReplyOptions,
   CountingChainService,
 } from '../services/counting-chain.js';
+import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
 import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
+import type { UserLevelService } from '../services/user-levels.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -53,6 +55,8 @@ export interface DiscordCommandDependencies {
   timeZone: string;
   countingChain?: CountingChainService;
   quiz?: StemQuizService;
+  scramble?: StemScrambleService;
+  userLevels?: UserLevelService;
 }
 
 export function createDiscordGateway(
@@ -63,19 +67,23 @@ export function createDiscordGateway(
   configureNetworkDefaults();
 
   const intents = [GatewayIntentBits.Guilds];
-  const messageGameEnabled =
+  const messageTrackingEnabled =
     (config.countingChain.enabled && dependencies.countingChain) ||
-    (config.quiz.enabled && dependencies.quiz);
-  if (messageGameEnabled) {
+    (config.quiz.enabled && dependencies.quiz) ||
+    (config.scramble.enabled && dependencies.scramble) ||
+    (config.levels.enabled && dependencies.userLevels);
+  const reactionTrackingEnabled =
+    (config.countingChain.enabled && config.countingChain.reviewEnabled) || config.levels.enabled;
+  if (messageTrackingEnabled) {
     intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
-    if (config.countingChain.reviewEnabled) {
-      intents.push(GatewayIntentBits.GuildMessageReactions);
-    }
+  }
+  if (reactionTrackingEnabled) {
+    intents.push(GatewayIntentBits.GuildMessageReactions);
   }
 
   const clientOptions = {
     intents,
-    ...(config.countingChain.enabled && config.countingChain.reviewEnabled
+    ...(reactionTrackingEnabled
       ? {
           partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
         }
@@ -152,6 +160,17 @@ export function createDiscordGateway(
       );
     }
 
+    if (dependencies.scramble && config.scramble.enabled && config.scramble.channelId) {
+      initializationTasks.push(
+        dependencies.scramble.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.scramble.channelId },
+            'STEM scramble startup initialization failed',
+          );
+        }),
+      );
+    }
+
     void Promise.all(initializationTasks).finally(() => {
       resolveClientReady();
     });
@@ -185,6 +204,7 @@ export function createDiscordGateway(
       website: dependencies.website,
       stemcraft: dependencies.stemcraft,
       timeZone: dependencies.timeZone,
+      ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });
   });
@@ -324,6 +344,58 @@ export function createDiscordGateway(
           { err: error, channelId: message.channelId, messageId: message.id },
           'STEM quiz message could not be processed',
         );
+      });
+    });
+  }
+
+  if (dependencies.scramble && config.scramble.enabled && config.scramble.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (message.channelId !== config.scramble.channelId || message.author.bot) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'STEM scramble Discord message received',
+      );
+
+      void dependencies
+        .scramble!.handleMessage(toStemScrambleMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM scramble message could not be processed',
+          );
+        });
+    });
+  }
+
+  if (dependencies.userLevels && config.levels.enabled) {
+    client.on(Events.MessageCreate, (message) => {
+      if (message.author.bot) {
+        return;
+      }
+
+      void dependencies.userLevels!.recordMessage(message.author.id).catch((error: unknown) => {
+        logger.warn(
+          { err: error, userId: message.author.id, messageId: message.id },
+          'User message XP could not be recorded',
+        );
+      });
+    });
+
+    client.on(Events.MessageReactionAdd, (_reaction, user) => {
+      if (user.bot) {
+        return;
+      }
+
+      void dependencies.userLevels!.recordReaction(user.id).catch((error: unknown) => {
+        logger.warn({ err: error, userId: user.id }, 'User reaction XP could not be recorded');
       });
     });
   }
@@ -470,6 +542,19 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
 }
 
 function toStemQuizMessage(message: Message): StemQuizMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
+    },
+  };
+}
+
+function toStemScrambleMessage(message: Message): StemScrambleMessage {
   return {
     id: message.id,
     channelId: message.channelId,
