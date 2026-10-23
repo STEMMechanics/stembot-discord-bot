@@ -69,6 +69,8 @@ interface StemQuizServiceDependencies {
 const STATE_KEY = 'stemQuiz';
 const PASS_REACTION = '✅';
 const WRONG_REACTION = '❌';
+const UNCLEAR_REACTION = '🤔';
+const EVALUATION_FAILURE_REACTION = '⚠️';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 
 export class PersistentStemQuizService implements StemQuizService {
@@ -119,16 +121,45 @@ export class PersistentStemQuizService implements StemQuizService {
     const rootState = await this.dependencies.state.load();
     const state = readStemQuizState(rootState[STATE_KEY]);
     const question = state.question;
-    if (!question || state.processedMessageIds.includes(message.id)) {
+    if (!question) {
+      this.dependencies.logger.debug(
+        { channelId: message.channelId, messageId: message.id },
+        'STEM quiz message ignored because no question is active',
+      );
       return;
     }
 
-    const result = await this.evaluateAnswer(question, message.content);
+    if (state.processedMessageIds.includes(message.id)) {
+      this.dependencies.logger.debug(
+        { channelId: message.channelId, messageId: message.id, questionId: question.id },
+        'STEM quiz message ignored because it was already processed',
+      );
+      return;
+    }
+
+    let result: StemQuizAnswerResult;
+    try {
+      result = await this.evaluateAnswer(question, message.content);
+    } catch (error: unknown) {
+      await this.react(message, EVALUATION_FAILURE_REACTION);
+      this.dependencies.logger.warn(
+        {
+          err: error,
+          channelId: message.channelId,
+          messageId: message.id,
+          questionId: question.id,
+        },
+        'STEM quiz answer could not be evaluated; no attempt was counted',
+      );
+      return;
+    }
+
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
 
     if (result === 'unclear') {
       writeStemQuizState(rootState, state);
       await this.dependencies.state.save(rootState);
+      await this.react(message, UNCLEAR_REACTION);
       this.dependencies.logger.info(
         { channelId: message.channelId, messageId: message.id, questionId: question.id },
         'STEM quiz answer was unclear; question remains open',

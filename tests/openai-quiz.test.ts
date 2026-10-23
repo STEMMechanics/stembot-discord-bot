@@ -69,6 +69,8 @@ describe('OpenAI STEM quiz engine', () => {
       name: 'stem_quiz_question',
     });
     expect(body.input[0]?.content[0]?.text).toContain('aged 8-14');
+    expect(body.input[0]?.content[0]?.text).toContain('redstone ticks');
+    expect(body.input[0]?.content[0]?.text).toContain('metres');
   });
 
   it('evaluates a member answer with a structured result', async () => {

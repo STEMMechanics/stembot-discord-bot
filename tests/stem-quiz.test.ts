@@ -230,7 +230,25 @@ describe('STEM quiz service', () => {
     await service.initialize();
     await service.handleMessage(answer);
 
-    expect(answer.react).not.toHaveBeenCalled();
+    expect(answer.react).toHaveBeenCalledWith('🤔');
+    expect(state.state).toMatchObject({
+      stemQuiz: { question: { answer: 'water', wrongAttempts: 0 } },
+    });
+  });
+
+  it('acknowledges an evaluator failure without consuming an attempt', async () => {
+    const state = new MemoryStateStore();
+    const engine: StemQuizEngine = {
+      generateQuestion: vi.fn().mockResolvedValue(question('water')),
+      evaluateAnswer: vi.fn().mockRejectedValue(new Error('OpenAI unavailable')),
+    };
+    const service = createService(state, engine);
+    const answer = createMessage('user-1', 'failed-evaluation-1', 'Water, I think');
+
+    await service.initialize();
+    await service.handleMessage(answer);
+
+    expect(answer.react).toHaveBeenCalledWith('⚠️');
     expect(state.state).toMatchObject({
       stemQuiz: { question: { answer: 'water', wrongAttempts: 0 } },
     });

@@ -128,8 +128,14 @@ an optional harder-question rate for players up to age 18. Members answer with
 ordinary Discord messages. The first accepted answer earns one point, receives
 `✅`, and advances the game. Incorrect answers receive `❌`; after the configured
 number of wrong answers, STEMBot reveals the answer and explanation before
-posting the next question. Unclear answers leave the question open without
-using an attempt.
+posting the next question. Unclear answers receive `🤔` and leave the question
+open without using an attempt. If answer evaluation fails temporarily, the
+message receives `⚠️` and no attempt is counted, so the member can try again.
+
+Generated questions are checked for accurate terminology and matching units.
+Minecraft questions distinguish blocks, metres, seconds, game ticks and
+redstone ticks; the generator is instructed to avoid uncertain or ambiguous
+questions in favour of a clearer question.
 
 The active question, wrong-attempt count, scores, question sequence and recent
 message IDs are persisted in the shared JSON state file. A restart keeps an

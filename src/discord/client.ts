@@ -299,9 +299,23 @@ export function createDiscordGateway(
 
   if (dependencies.quiz && config.quiz.enabled && config.quiz.channelId) {
     client.on(Events.MessageCreate, (message) => {
-      if (message.channelId !== config.quiz.channelId || message.author.bot) {
+      if (message.channelId !== config.quiz.channelId) {
         return;
       }
+
+      if (message.author.bot) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'STEM quiz Discord message received',
+      );
 
       void dependencies.quiz!.handleMessage(toStemQuizMessage(message)).catch((error: unknown) => {
         logger.warn(
