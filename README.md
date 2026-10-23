@@ -180,6 +180,12 @@ state file. Levels use increasing thresholds: level 2 starts at 100 XP, level 3
 at 400 XP, and so on. `/level` shows an individual profile and
 `/leaderboard` shows the top ten members without pinging them.
 
+Set `STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID` to post a public level-up message in
+the specified channel. The message mentions the member who reached the new
+level. Leave it unset to keep level-ups available through the commands without
+public announcements. Announcement failures are logged without discarding the
+XP award.
+
 The level listener requires the Discord Message Content and Guild Message
 Reactions intents. STEMBot requests these automatically when the feature is
 enabled, but the privileged Message Content intent must also be enabled in the
@@ -321,6 +327,7 @@ npm run validate
 | `STEM_SCRAMBLE_TARGET_AGE_MAX`              | No                  | Upper end of the scramble age range; defaults to `14`.                                       |
 | `STEM_SCRAMBLE_TOPIC`                       | No                  | Topic guidance for scramble word generation.                                                 |
 | `STEM_LEVELS_ENABLED`                       | No                  | Enable message, reaction and minigame XP; defaults to `false`.                               |
+| `STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID`       | No                  | Channel for public level-up announcements; unset disables them.                              |
 | `STEM_LEVELS_MESSAGE_XP`                    | No                  | XP for a message after cooldown; defaults to `5`.                                            |
 | `STEM_LEVELS_REACTION_XP`                   | No                  | XP for a reaction after cooldown; defaults to `2`.                                           |
 | `STEM_LEVELS_GAME_XP`                       | No                  | XP for an accepted minigame move; defaults to `15`.                                          |

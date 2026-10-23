@@ -18,7 +18,11 @@ import {
 } from './services/workshop-notifications.js';
 import { createStemScrambleService, type StemScrambleService } from './services/scramble.js';
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
-import { createUserLevelService, type UserLevelService } from './services/user-levels.js';
+import {
+  createUserLevelService,
+  type UserLevelAnnouncement,
+  type UserLevelService,
+} from './services/user-levels.js';
 import { createJsonFileStateStore } from './state/json-file-state-store.js';
 import type { JsonState, StateStore } from './state/state-store.js';
 
@@ -61,6 +65,7 @@ export function createApplication(
       ...(config.stemcraft.token ? { token: config.stemcraft.token } : {}),
     });
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
+  const discordGatewayRef: { current?: DiscordGateway } = {};
   const userLevels =
     dependencies?.userLevels ??
     (config.levels.enabled
@@ -68,6 +73,24 @@ export function createApplication(
           config: config.levels,
           state,
           logger,
+          ...(config.levels.announcementChannelId
+            ? {
+                announcementPublisher: {
+                  send: async (announcement: UserLevelAnnouncement): Promise<void> => {
+                    if (!discordGatewayRef.current) {
+                      throw new Error('Discord gateway is not ready for level-up announcements');
+                    }
+
+                    await discordGatewayRef.current.sendChannelMessage(announcement.channelId, {
+                      content: announcement.content,
+                      ...(announcement.allowedUserIds && announcement.allowedUserIds.length > 0
+                        ? { allowedMentions: { users: [...announcement.allowedUserIds] } }
+                        : {}),
+                    });
+                  },
+                },
+              }
+            : {}),
         })
       : undefined);
   const countingChain =
@@ -87,7 +110,6 @@ export function createApplication(
           ...(userLevels ? { userLevels } : {}),
         })
       : undefined);
-  const discordGatewayRef: { current?: DiscordGateway } = {};
   const quiz =
     dependencies?.quiz ??
     (config.quiz.enabled

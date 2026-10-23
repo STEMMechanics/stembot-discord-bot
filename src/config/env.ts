@@ -141,6 +141,7 @@ const environmentSchema = z.object({
       'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
     ),
   STEM_LEVELS_ENABLED: booleanFromEnvironment(false),
+  STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID: optionalDiscordId,
   STEM_LEVELS_MESSAGE_XP: positiveInteger(5, 100),
   STEM_LEVELS_REACTION_XP: positiveInteger(2, 100),
   STEM_LEVELS_GAME_XP: positiveInteger(15, 500),
@@ -204,6 +205,7 @@ export interface AppConfig {
   };
   levels: {
     enabled: boolean;
+    announcementChannelId?: string;
     messageXp: number;
     reactionXp: number;
     gameXp: number;
@@ -365,6 +367,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     levels: {
       enabled: values.STEM_LEVELS_ENABLED,
+      ...(values.STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID
+        ? { announcementChannelId: values.STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID }
+        : {}),
       messageXp: values.STEM_LEVELS_MESSAGE_XP,
       reactionXp: values.STEM_LEVELS_REACTION_XP,
       gameXp: values.STEM_LEVELS_GAME_XP,

@@ -8,6 +8,7 @@ export interface UserLevelConfig {
   gameXp: number;
   messageCooldownMs: number;
   reactionCooldownMs: number;
+  announcementChannelId?: string;
 }
 
 export interface UserLevelProfile {
@@ -25,6 +26,16 @@ export interface UserLevelAward {
   profile: UserLevelProfile;
   xpGained: number;
   levelUp: boolean;
+}
+
+export interface UserLevelAnnouncement {
+  channelId: string;
+  content: string;
+  allowedUserIds?: readonly string[];
+}
+
+export interface UserLevelAnnouncementPublisher {
+  send(announcement: UserLevelAnnouncement): Promise<void>;
 }
 
 export interface UserLevelService {
@@ -63,6 +74,7 @@ export class PersistentUserLevelService implements UserLevelService {
       config: UserLevelConfig;
       state: StateStore<JsonState>;
       logger: AppLogger;
+      announcementPublisher?: UserLevelAnnouncementPublisher;
       clock?: () => Date;
     },
   ) {}
@@ -181,8 +193,32 @@ export class PersistentUserLevelService implements UserLevelService {
         },
         'User activity XP awarded',
       );
+      if (award.levelUp) {
+        await this.announceLevelUp(award.profile);
+      }
       return award;
     });
+  }
+
+  private async announceLevelUp(profile: UserLevelProfile): Promise<void> {
+    const channelId = this.dependencies.config.announcementChannelId;
+    const publisher = this.dependencies.announcementPublisher;
+    if (!channelId || !publisher) {
+      return;
+    }
+
+    try {
+      await publisher.send({
+        channelId,
+        content: `🎉 <@${profile.userId}> reached **level ${profile.level}**!`,
+        allowedUserIds: [profile.userId],
+      });
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId, userId: profile.userId, level: profile.level },
+        'User level-up announcement could not be sent',
+      );
+    }
   }
 
   private currentTime(): Date {
@@ -203,6 +239,7 @@ export function createUserLevelService(dependencies: {
   config: UserLevelConfig;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  announcementPublisher?: UserLevelAnnouncementPublisher;
   clock?: () => Date;
 }): UserLevelService {
   return new PersistentUserLevelService(dependencies);

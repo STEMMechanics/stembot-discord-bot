@@ -6,6 +6,7 @@ import {
   PermissionsBitField,
   type APIEmbed,
   type Message,
+  type MessageMentionOptions,
   type MessageReaction,
   type PartialMessageReaction,
   type PartialUser,
@@ -43,6 +44,7 @@ export interface DiscordGateway {
 export interface DiscordChannelMessage {
   content?: string;
   embeds?: APIEmbed[];
+  allowedMentions?: MessageMentionOptions;
   /** Internal image URL that is downloaded and attached to the message. */
   heroImageUrl?: string;
   /** Publish the sent message to followers when this is an announcement-channel message. */
@@ -442,7 +444,7 @@ export function createDiscordGateway(
         return sentMessage.id;
       }
 
-      const { heroImageUrl, crosspost, ...messagePayload } = message;
+      const { heroImageUrl, crosspost, allowedMentions, ...messagePayload } = message;
       const heroImage = heroImageUrl ? await downloadHeroImage(heroImageUrl, logger) : undefined;
       const embeds = heroImage
         ? messagePayload.embeds?.map((embed) =>
@@ -459,7 +461,7 @@ export function createDiscordGateway(
               files: [{ attachment: heroImage.data, name: heroImage.filename }],
             }
           : {}),
-        allowedMentions: { parse: [] },
+        allowedMentions: allowedMentions ?? { parse: [] },
       };
       const sentMessage = await channel.send(payload);
       if (crosspost) {

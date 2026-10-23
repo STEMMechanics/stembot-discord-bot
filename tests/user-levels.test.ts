@@ -1,5 +1,5 @@
 import pino from 'pino';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   getLevelForXp,
@@ -74,6 +74,29 @@ describe('persistent user levels', () => {
     expect(getLevelForXp(0)).toBe(1);
     expect(getLevelForXp(100)).toBe(2);
     expect(getXpForNextLevel(2)).toBe(400);
+  });
+
+  it('announces a level-up in the configured channel without losing the XP award on failure', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockRejectedValue(new Error('Discord unavailable'));
+    const service = new PersistentUserLevelService({
+      config: { ...config, announcementChannelId: 'announcement-channel' },
+      state,
+      logger,
+      announcementPublisher: { send },
+    });
+
+    for (let index = 0; index < 7; index += 1) {
+      await service.recordGameParticipation('user-1');
+    }
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith({
+      channelId: 'announcement-channel',
+      content: '🎉 <@user-1> reached **level 2**!',
+      allowedUserIds: ['user-1'],
+    });
+    await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 105, level: 2 });
   });
 
   it('sorts the leaderboard by XP and limits the result', async () => {

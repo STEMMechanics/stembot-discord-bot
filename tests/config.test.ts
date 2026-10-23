@@ -312,6 +312,7 @@ describe('loadConfig', () => {
       STEM_SCRAMBLE_TARGET_AGE_MIN: '8',
       STEM_SCRAMBLE_TARGET_AGE_MAX: '16',
       STEM_LEVELS_ENABLED: 'true',
+      STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID: '9234567890',
       STEM_LEVELS_MESSAGE_XP: '7',
       STEM_LEVELS_REACTION_XP: '3',
       STEM_LEVELS_GAME_XP: '20',
@@ -329,6 +330,7 @@ describe('loadConfig', () => {
     });
     expect(config.levels).toEqual({
       enabled: true,
+      announcementChannelId: '9234567890',
       messageXp: 7,
       reactionXp: 3,
       gameXp: 20,
