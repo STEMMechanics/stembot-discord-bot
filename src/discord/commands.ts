@@ -1,9 +1,11 @@
 import {
   MessageFlags,
   SlashCommandBuilder,
+  type APIEmbed,
   type ChatInputCommandInteraction,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
   type SlashCommandOptionsOnlyBuilder,
+  type User,
 } from 'discord.js';
 
 import {
@@ -22,6 +24,7 @@ import {
   type UserLevelProfile,
   type UserLevelService,
 } from '../services/user-levels.js';
+import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/uptime-kuma.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -31,6 +34,7 @@ export interface CommandContext {
   getCurrentTime?: () => Date;
   requestCountingChainReview?: (channelId: string) => Promise<boolean>;
   userLevels?: UserLevelService;
+  uptime?: UptimeKumaIntegration;
 }
 
 export interface DiscordCommand {
@@ -231,7 +235,10 @@ export const jokeCommand: DiscordCommand = {
 export const levelCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('level')
-    .setDescription('Show your STEMBot level and XP.'),
+    .setDescription("Show your or another member's STEMBot level and XP.")
+    .addUserOption((option) =>
+      option.setName('user').setDescription('The member whose level to show.').setRequired(false),
+    ),
 
   async execute(interaction, context): Promise<void> {
     const userLevels = context.userLevels;
@@ -243,9 +250,37 @@ export const levelCommand: DiscordCommand = {
       return;
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const profile = await userLevels.getProfile(interaction.user.id);
-    await interaction.editReply({ content: formatUserLevel(profile) });
+    await interaction.deferReply();
+    const targetUser = interaction.options.getUser('user') ?? interaction.user;
+    const profile = await userLevels.getProfile(targetUser.id);
+    await interaction.editReply({
+      embeds: [buildUserLevelEmbed(profile, targetUser)],
+      allowedMentions: { parse: [] },
+    });
+  },
+};
+
+export const statusCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('status')
+    .setDescription('Show the current STEMMechanics service status.'),
+
+  async execute(interaction, context): Promise<void> {
+    const uptime = context.uptime;
+    if (!uptime) {
+      await interaction.reply({
+        content: 'Uptime Kuma status is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply();
+    const status = await uptime.getStatus();
+    await interaction.editReply({
+      embeds: [buildUptimeStatusEmbed(status)],
+      allowedMentions: { parse: [] },
+    });
   },
 };
 
@@ -349,6 +384,7 @@ export const commands: readonly DiscordCommand[] = [
   workshopsCommand,
   jokeCommand,
   levelCommand,
+  statusCommand,
   leaderboardCommand,
   reviewCommand,
   minecraftCommand,
@@ -425,6 +461,108 @@ export function formatUserLevel(profile: UserLevelProfile): string {
   ].join('\n');
 }
 
+export function buildUserLevelEmbed(profile: UserLevelProfile, user: User): APIEmbed {
+  const progress = getUserLevelProgress(profile);
+  const displayName = user.globalName ?? user.username;
+  const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 128 });
+
+  return {
+    color: 0x5865f2,
+    author: {
+      name: `${displayName}'s STEMBot level`,
+      icon_url: avatarUrl,
+    },
+    thumbnail: { url: avatarUrl },
+    description: [
+      `## Level ${profile.level}`,
+      `${formatProgressBar(progress.percent)} **${profile.xp} XP**`,
+      `**${progress.currentXp} / ${progress.requiredXp} XP** to level ${profile.level + 1}`,
+    ].join('\n'),
+    fields: [
+      {
+        name: 'Activity',
+        value: [
+          `Messages: **${profile.messageCount}**`,
+          `Reactions: **${profile.reactionCount}**`,
+          `Games: **${profile.gameCount}**`,
+        ].join('\n'),
+        inline: true,
+      },
+      {
+        name: 'Next level',
+        value: `${progress.percent}% complete`,
+        inline: true,
+      },
+    ],
+    footer: { text: 'STEMBot levels' },
+  };
+}
+
+export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
+  const isOperational = status.overall === 'up';
+  const dot = isOperational ? '🟢' : '🔴';
+  const serviceLines = status.monitors.map((monitor) => {
+    const monitorDot = monitor.state === 'up' ? '🟢' : '🔴';
+    const uptime =
+      monitor.uptime24h === undefined ? '' : ` · ${(monitor.uptime24h * 100).toFixed(2)}% 24h`;
+    const message = monitor.message ? ` · ${escapeEmbedText(monitor.message)}` : '';
+    return `${monitorDot} **${escapeEmbedText(monitor.name)}** — ${formatMonitorState(monitor.state)}${message}${uptime}`;
+  });
+
+  if (serviceLines.length === 0 && !status.sourceError) {
+    serviceLines.push('🔴 No public monitors are configured.');
+  }
+
+  const description = status.sourceError
+    ? `**Monitoring unavailable.** ${status.sourceError}`
+    : isOperational
+      ? 'All monitored services are operational.'
+      : 'One or more monitored services require attention.';
+
+  return {
+    title: `${dot} ${status.title}`,
+    url: status.statusPageUrl,
+    color: isOperational ? 0x2ecc71 : 0xe74c3c,
+    description,
+    fields: [
+      {
+        name: 'Services',
+        value: truncateEmbedField(serviceLines.join('\n') || 'No status data available.'),
+      },
+      ...(status.incident
+        ? [
+            {
+              name: 'Incident',
+              value: truncateEmbedField(
+                [
+                  `**${escapeEmbedText(status.incident.title)}**`,
+                  status.incident.content ? escapeEmbedText(status.incident.content) : undefined,
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              ),
+            },
+          ]
+        : []),
+    ],
+    timestamp: status.checkedAt.toISOString(),
+    footer: { text: 'Powered by Uptime Kuma · Last checked' },
+  };
+}
+
+export function getUserLevelProgress(profile: UserLevelProfile): {
+  currentXp: number;
+  requiredXp: number;
+  percent: number;
+} {
+  const previousLevelXp = profile.level <= 1 ? 0 : getXpForNextLevel(profile.level - 1);
+  const nextLevelXp = getXpForNextLevel(profile.level);
+  const requiredXp = Math.max(1, nextLevelXp - previousLevelXp);
+  const currentXp = Math.max(0, profile.xp - previousLevelXp);
+  const percent = Math.min(100, Math.floor((currentXp / requiredXp) * 100));
+  return { currentXp, requiredXp, percent };
+}
+
 export function formatUserLeaderboard(profiles: readonly UserLevelProfile[]): string {
   if (profiles.length === 0) {
     return 'No XP has been recorded yet.';
@@ -494,4 +632,32 @@ function requireStemCraft(context: CommandContext): StemCraftIntegration {
   }
 
   return context.stemcraft;
+}
+
+function formatProgressBar(percent: number): string {
+  const segments = 10;
+  const filled = Math.round((Math.max(0, Math.min(100, percent)) / 100) * segments);
+  return `${'█'.repeat(filled)}${'░'.repeat(segments - filled)}`;
+}
+
+function formatMonitorState(state: UptimeKumaStatus['monitors'][number]['state']): string {
+  return (
+    {
+      up: 'Operational',
+      down: 'Offline',
+      pending: 'Pending',
+      maintenance: 'Maintenance',
+    }[state] ?? 'Unknown'
+  );
+}
+
+function escapeEmbedText(value: string): string {
+  return value.replace(/[\\`*_~|]/g, '\\$&').replace(/\r?\n/g, ' ');
+}
+
+function truncateEmbedField(value: string): string {
+  const maximumLength = 1024;
+  return value.length <= maximumLength
+    ? value
+    : `${value.slice(0, maximumLength - 20).trimEnd()}\n…more services`;
 }

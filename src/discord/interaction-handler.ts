@@ -2,6 +2,7 @@ import { MessageFlags, type Interaction } from 'discord.js';
 import { hostname } from 'node:os';
 
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
+import type { UptimeKumaIntegration } from '../integrations/uptime-kuma.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import { commands, type CommandContext } from './commands.js';
@@ -13,6 +14,7 @@ export interface InteractionHandlerContext extends CommandContext {
   logger: AppLogger;
   website?: WebsiteIntegration;
   stemcraft?: StemCraftIntegration;
+  uptime?: UptimeKumaIntegration;
   timeZone?: string;
 }
 
@@ -51,6 +53,7 @@ export async function handleInteraction(
     getGatewayPing: context.getGatewayPing,
     ...(context.website ? { website: context.website } : {}),
     ...(context.stemcraft ? { stemcraft: context.stemcraft } : {}),
+    ...(context.uptime ? { uptime: context.uptime } : {}),
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
     ...(context.userLevels ? { userLevels: context.userLevels } : {}),
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),

@@ -16,6 +16,7 @@ import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
+import type { UptimeKumaIntegration } from '../integrations/uptime-kuma.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
@@ -39,6 +40,11 @@ export interface DiscordGateway {
   stop(): Promise<void>;
   getGatewayPing(): number;
   sendChannelMessage(channelId: string, message: DiscordChannelMessage | string): Promise<string>;
+  editChannelMessage(
+    channelId: string,
+    messageId: string,
+    message: DiscordChannelMessage | string,
+  ): Promise<boolean>;
 }
 
 export interface DiscordChannelMessage {
@@ -59,6 +65,7 @@ export interface DiscordCommandDependencies {
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
   userLevels?: UserLevelService;
+  uptime?: UptimeKumaIntegration;
 }
 
 export function createDiscordGateway(
@@ -205,6 +212,7 @@ export function createDiscordGateway(
       logger,
       website: dependencies.website,
       stemcraft: dependencies.stemcraft,
+      ...(dependencies.uptime ? { uptime: dependencies.uptime } : {}),
       timeZone: dependencies.timeZone,
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
@@ -469,7 +477,45 @@ export function createDiscordGateway(
       }
       return sentMessage.id;
     },
+
+    async editChannelMessage(
+      channelId: string,
+      messageId: string,
+      message: DiscordChannelMessage | string,
+    ): Promise<boolean> {
+      const channel = await client.channels.fetch(channelId);
+      if (!channel || !channel.isTextBased() || !('messages' in channel)) {
+        throw new Error(`Discord channel is not a readable text channel: ${channelId}`);
+      }
+
+      let targetMessage: Message;
+      try {
+        targetMessage = await channel.messages.fetch(messageId);
+      } catch (error: unknown) {
+        if (isDiscordMessageNotFound(error)) {
+          return false;
+        }
+
+        throw error;
+      }
+
+      if (typeof message === 'string') {
+        await targetMessage.edit({ content: message, allowedMentions: { parse: [] } });
+        return true;
+      }
+
+      await targetMessage.edit({
+        ...(message.content !== undefined ? { content: message.content } : {}),
+        ...(message.embeds !== undefined ? { embeds: message.embeds } : {}),
+        allowedMentions: message.allowedMentions ?? { parse: [] },
+      });
+      return true;
+    },
   };
+}
+
+function isDiscordMessageNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 10008;
 }
 
 async function crosspostMessage(

@@ -15,6 +15,11 @@ const optionalSecret = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().url().optional(),
+);
+
 function booleanFromEnvironment(defaultValue: boolean) {
   return z.preprocess((value) => {
     if (value === undefined || value === '') {
@@ -86,6 +91,11 @@ const environmentSchema = z.object({
   STEMCRAFT_STATUS_URL: z.string().trim().url().default('http://play.stemcraft.com.au:8950/status'),
   STEMCRAFT_STATUS_TOKEN: optionalSecret,
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
+  UPTIME_KUMA_ENABLED: booleanFromEnvironment(false),
+  UPTIME_KUMA_STATUS_PAGE_URL: optionalUrl,
+  UPTIME_KUMA_POLL_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
+  UPTIME_KUMA_REQUEST_TIMEOUT_MS: positiveMilliseconds(10000, 120000),
+  DISCORD_UPTIME_STATUS_CHANNEL_ID: optionalDiscordId,
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: z.string().trim().min(1).default('gpt-6-luna'),
   OPENAI_REASONING_EFFORT: z.string().trim().min(1).default('low'),
@@ -168,6 +178,13 @@ export interface AppConfig {
     statusUrl: string;
     requestTimeoutMs: number;
     token?: string;
+  };
+  uptime: {
+    enabled: boolean;
+    statusPageUrl?: string;
+    pollIntervalMs: number;
+    requestTimeoutMs: number;
+    statusChannelId?: string;
   };
   openai: {
     apiKey?: string;
@@ -270,6 +287,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  if (values.UPTIME_KUMA_ENABLED && !values.UPTIME_KUMA_STATUS_PAGE_URL) {
+    throw new Error('UPTIME_KUMA_STATUS_PAGE_URL is required when UPTIME_KUMA_ENABLED is true');
+  }
+
+  if (values.UPTIME_KUMA_ENABLED && !values.DISCORD_UPTIME_STATUS_CHANNEL_ID) {
+    throw new Error(
+      'DISCORD_UPTIME_STATUS_CHANNEL_ID is required when UPTIME_KUMA_ENABLED is true',
+    );
+  }
+
   if (values.STEM_QUIZ_ENABLED && !values.STEM_QUIZ_CHANNEL_ID) {
     throw new Error('STEM_QUIZ_CHANNEL_ID is required when STEM_QUIZ_ENABLED is true');
   }
@@ -324,6 +351,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       statusUrl: values.STEMCRAFT_STATUS_URL,
       requestTimeoutMs: values.STEMCRAFT_REQUEST_TIMEOUT_MS,
       ...(values.STEMCRAFT_STATUS_TOKEN ? { token: values.STEMCRAFT_STATUS_TOKEN } : {}),
+    },
+    uptime: {
+      enabled: values.UPTIME_KUMA_ENABLED,
+      ...(values.UPTIME_KUMA_STATUS_PAGE_URL
+        ? { statusPageUrl: values.UPTIME_KUMA_STATUS_PAGE_URL }
+        : {}),
+      pollIntervalMs: values.UPTIME_KUMA_POLL_INTERVAL_MS,
+      requestTimeoutMs: values.UPTIME_KUMA_REQUEST_TIMEOUT_MS,
+      ...(values.DISCORD_UPTIME_STATUS_CHANNEL_ID
+        ? { statusChannelId: values.DISCORD_UPTIME_STATUS_CHANNEL_ID }
+        : {}),
     },
     openai: {
       ...(values.OPENAI_API_KEY ? { apiKey: values.OPENAI_API_KEY } : {}),

@@ -4,6 +4,10 @@ import { createOpenAINumberRecognizer } from './integrations/openai.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
 import { createOpenAIScrambleWordGenerator } from './integrations/openai-scramble.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
+import {
+  createUptimeKumaIntegration,
+  type UptimeKumaIntegration,
+} from './integrations/uptime-kuma.js';
 import { createWebsiteIntegration, type WebsiteIntegration } from './integrations/website.js';
 import { IntervalJobScheduler, type JobScheduler } from './jobs/scheduler.js';
 import type { AppLogger } from './logging/logger.js';
@@ -18,6 +22,7 @@ import {
 } from './services/workshop-notifications.js';
 import { createStemScrambleService, type StemScrambleService } from './services/scramble.js';
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
+import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
 import {
   createUserLevelService,
   type UserLevelAnnouncement,
@@ -37,6 +42,8 @@ export interface ApplicationDependencies {
   state: StateStore<JsonState>;
   website: WebsiteIntegration;
   stemcraft: StemCraftIntegration;
+  uptime?: UptimeKumaIntegration;
+  uptimeStatus?: UptimeStatusService;
   countingChain?: CountingChainService;
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
@@ -64,6 +71,14 @@ export function createApplication(
       logger,
       ...(config.stemcraft.token ? { token: config.stemcraft.token } : {}),
     });
+  const uptime =
+    dependencies?.uptime ??
+    (config.uptime.enabled && config.uptime.statusPageUrl
+      ? createUptimeKumaIntegration({
+          statusPageUrl: config.uptime.statusPageUrl,
+          requestTimeoutMs: config.uptime.requestTimeoutMs,
+        })
+      : undefined);
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
   const discordGatewayRef: { current?: DiscordGateway } = {};
   const userLevels =
@@ -172,9 +187,24 @@ export function createApplication(
       ...(quiz ? { quiz } : {}),
       ...(scramble ? { scramble } : {}),
       ...(userLevels ? { userLevels } : {}),
+      ...(uptime ? { uptime } : {}),
     });
   discordGatewayRef.current = discord;
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
+  const uptimeStatus =
+    dependencies?.uptimeStatus ??
+    (uptime && config.uptime.enabled && config.uptime.statusChannelId && config.uptime.statusPageUrl
+      ? createUptimeStatusService({
+          uptime,
+          discord,
+          state,
+          logger,
+          config: {
+            statusPageUrl: config.uptime.statusPageUrl,
+            statusChannelId: config.uptime.statusChannelId,
+          },
+        })
+      : undefined);
   const workshopNotifications =
     dependencies?.workshopNotifications ??
     createWorkshopNotificationService({
@@ -207,6 +237,14 @@ export function createApplication(
     });
   }
 
+  if (uptimeStatus && config.uptime.enabled) {
+    scheduler.register({
+      name: 'uptime-status-synchronization',
+      intervalMs: config.uptime.pollIntervalMs,
+      run: () => uptimeStatus.synchronize(),
+    });
+  }
+
   let started = false;
   let stopped = false;
 
@@ -227,6 +265,11 @@ export function createApplication(
         void workshopNotifications.synchronizeWorkshops().catch((error: unknown) => {
           logger.error({ err: error }, 'Initial workshop synchronization failed');
         });
+        if (uptimeStatus && config.uptime.enabled) {
+          void uptimeStatus.synchronize().catch((error: unknown) => {
+            logger.error({ err: error }, 'Initial uptime status synchronization failed');
+          });
+        }
       } catch (error: unknown) {
         scheduler.stop();
         throw error;

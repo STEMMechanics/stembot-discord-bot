@@ -45,8 +45,9 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
-- `/level` — your persisted XP, level and activity counts.
+- `/level` — your persisted XP, level and activity counts, or the public level card for another member.
 - `/leaderboard` — the top ten members by XP.
+- `/status` — the current public Uptime Kuma service status, when enabled.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
@@ -300,6 +301,11 @@ npm run validate
 | `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.                |
 | `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                       |
 | `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No                  | Status request timeout; defaults to 5 seconds.                                               |
+| `UPTIME_KUMA_ENABLED`                       | No                  | Enable the persistent Uptime Kuma Discord status card; defaults to `false`.                  |
+| `UPTIME_KUMA_STATUS_PAGE_URL`               | When enabled        | Published Uptime Kuma URL such as `https://uptime.example.com/status/stemmechanics`.         |
+| `UPTIME_KUMA_POLL_INTERVAL_MS`              | No                  | Status polling interval; defaults to 60 seconds.                                             |
+| `UPTIME_KUMA_REQUEST_TIMEOUT_MS`            | No                  | Uptime Kuma request timeout; defaults to 10 seconds.                                         |
+| `DISCORD_UPTIME_STATUS_CHANNEL_ID`          | When enabled        | Channel where the bot creates and continually edits the status card.                         |
 | `OPENAI_API_KEY`                            | When enabled        | OpenAI API key; keep it in the deployment secret store.                                      |
 | `OPENAI_MODEL`                              | No                  | Shared OpenAI model for counting-chain recognition and quiz calls; defaults to `gpt-6-luna`. |
 | `OPENAI_REASONING_EFFORT`                   | No                  | Shared reasoning setting; defaults to `low` for routine image and quiz calls.                |
@@ -360,7 +366,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state and user-level profiles. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, user-level profiles and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:

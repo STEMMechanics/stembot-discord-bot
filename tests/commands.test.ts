@@ -7,15 +7,18 @@ import {
   formatWorkshopList,
   formatUserLeaderboard,
   formatUserLevel,
+  getUserLevelProgress,
   getRandomRobotJoke,
   getCommandDefinitions,
   getUpcomingWorkshops,
   minecraftCommand,
   jokeCommand,
+  levelCommand,
   pingCommand,
   playersCommand,
   reviewCommand,
   robotJokes,
+  statusCommand,
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
@@ -43,6 +46,7 @@ describe('Discord commands', () => {
       'workshops',
       'joke',
       'level',
+      'status',
       'leaderboard',
       'review',
       'minecraft',
@@ -185,6 +189,85 @@ describe('Discord commands', () => {
     expect(formatUserLevel(profile)).toContain('**Level 2** — 120 XP');
     expect(formatUserLevel(profile)).toContain('Messages: 10 · Reactions: 5 · Games: 2');
     expect(formatUserLeaderboard([profile])).toContain('1. <@user-1> — Level 2 (120 XP)');
+    expect(getUserLevelProgress(profile)).toEqual({
+      currentXp: 20,
+      requiredXp: 300,
+      percent: 6,
+    });
+  });
+
+  it('shows a public level card for the requested user', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const targetUser = {
+      id: 'user-2',
+      username: 'Builder',
+      globalName: 'Builder',
+      displayAvatarURL: vi.fn().mockReturnValue('https://cdn.example.test/builder.png'),
+    };
+    const interaction = {
+      user: targetUser,
+      options: { getUser: vi.fn().mockReturnValue(targetUser) },
+      deferReply,
+      editReply,
+    } as unknown as ChatInputCommandInteraction;
+    const getProfile = vi.fn().mockResolvedValue({
+      userId: 'user-2',
+      xp: 120,
+      level: 2,
+      messageCount: 10,
+      reactionCount: 5,
+      gameCount: 2,
+      lastMessageXpAt: null,
+      lastReactionXpAt: null,
+    });
+
+    await levelCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      userLevels: {
+        getProfile,
+        getLeaderboard: vi.fn(),
+        recordMessage: vi.fn(),
+        recordReaction: vi.fn(),
+        recordGameParticipation: vi.fn(),
+      },
+    });
+
+    expect(getProfile).toHaveBeenCalledWith('user-2');
+    expect(deferReply).toHaveBeenCalledWith();
+    expect(editReply).toHaveBeenCalledWith({
+      embeds: [
+        expect.objectContaining({
+          author: expect.objectContaining({ name: "Builder's STEMBot level" }),
+          description: expect.stringContaining('## Level 2'),
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it('shows a public uptime status embed', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
+    const getStatus = vi.fn().mockResolvedValue({
+      overall: 'up',
+      title: 'STEMMechanics Status',
+      statusPageUrl: 'https://uptime.example.test/status/stem',
+      checkedAt: new Date('2026-10-23T00:00:00.000Z'),
+      monitors: [{ id: '1', name: 'Website', state: 'up' }],
+    });
+
+    await statusCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      uptime: { getStatus },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith();
+    expect(editReply).toHaveBeenCalledWith({
+      embeds: [expect.objectContaining({ color: 0x2ecc71 })],
+      allowedMentions: { parse: [] },
+    });
   });
 
   it('makes /players available without a permission check', async () => {

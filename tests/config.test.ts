@@ -27,6 +27,11 @@ describe('loadConfig', () => {
         requestTimeoutMs: 5000,
         statusUrl: 'http://play.stemcraft.com.au:8950/status',
       },
+      uptime: {
+        enabled: false,
+        pollIntervalMs: 60000,
+        requestTimeoutMs: 10000,
+      },
       openai: {
         model: 'gpt-6-luna',
         reasoningEffort: 'low',
@@ -121,6 +126,46 @@ describe('loadConfig', () => {
       reminderChannelId: '223456789012345678',
     });
     expect(config.stemcraft.token).toBe('status-token');
+  });
+
+  it('requires the public status page and Discord channel when uptime status is enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        UPTIME_KUMA_ENABLED: 'true',
+      }),
+    ).toThrow(/UPTIME_KUMA_STATUS_PAGE_URL/);
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        UPTIME_KUMA_ENABLED: 'true',
+        UPTIME_KUMA_STATUS_PAGE_URL: 'https://uptime.example.test/status/stem',
+      }),
+    ).toThrow(/DISCORD_UPTIME_STATUS_CHANNEL_ID/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      UPTIME_KUMA_ENABLED: 'true',
+      UPTIME_KUMA_STATUS_PAGE_URL: 'https://uptime.example.test/status/stem',
+      UPTIME_KUMA_POLL_INTERVAL_MS: '120000',
+      UPTIME_KUMA_REQUEST_TIMEOUT_MS: '15000',
+      DISCORD_UPTIME_STATUS_CHANNEL_ID: '3234567890',
+    });
+
+    expect(config.uptime).toEqual({
+      enabled: true,
+      statusPageUrl: 'https://uptime.example.test/status/stem',
+      pollIntervalMs: 120000,
+      requestTimeoutMs: 15000,
+      statusChannelId: '3234567890',
+    });
   });
 
   it('uses announcement delay minutes, including zero for immediate testing', () => {
