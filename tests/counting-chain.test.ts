@@ -135,6 +135,23 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('processes numbered GIFs from variant Tenor CDN hosts', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-tenor-variant', {
+      content: 'https://media1.tenor.com/example/number.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(message.react).toHaveBeenCalledWith('👍');
+  });
+
   it('processes a GIF when Discord adds the embed after the message event', async () => {
     const state = new MemoryStateStore();
     const recognizer = {

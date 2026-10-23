@@ -381,10 +381,25 @@ export class PersistentCountingChainService implements CountingChainService {
   ): Promise<void> {
     const imageSource = selectImageSource(message);
     if (!imageSource) {
-      this.dependencies.logger.debug(
-        { channelId: message.channelId, messageId: message.id },
-        'Counting chain message had no supported image source',
-      );
+      const contentUrlCount = extractImageUrls(message.content).length;
+      const embedImageUrlCount = message.imageUrls?.length ?? 0;
+      const logContext = {
+        channelId: message.channelId,
+        messageId: message.id,
+        contentUrlCount,
+        embedImageUrlCount,
+      };
+      if (contentUrlCount > 0 || embedImageUrlCount > 0) {
+        this.dependencies.logger.info(
+          logContext,
+          'Counting chain message had no approved image source',
+        );
+      } else {
+        this.dependencies.logger.debug(
+          logContext,
+          'Counting chain message had no supported image source',
+        );
+      }
       return;
     }
 
@@ -408,6 +423,7 @@ export class PersistentCountingChainService implements CountingChainService {
       {
         channelId: message.channelId,
         messageId: message.id,
+        imageSourceHost: getUrlHostname(imageSource.url),
         contentType: imageSource.contentType,
         size: imageSource.size,
       },
@@ -918,19 +934,23 @@ function isLikelyImageUrl(url: URL): boolean {
 function isAllowedImageHost(hostname: string): boolean {
   const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
   return (
-    ALLOWED_IMAGE_HOSTS.has(normalizedHostname) || /^media\d+\.giphy\.com$/.test(normalizedHostname)
+    ALLOWED_IMAGE_HOSTS.has(normalizedHostname) ||
+    /^media\d+\.(?:giphy|tenor)\.com$/.test(normalizedHostname) ||
+    /^images-ext-\d+\.discordapp\.net$/.test(normalizedHostname)
   );
 }
 
 function isKnownImageHost(hostname: string): boolean {
   const normalizedHostname = hostname.toLowerCase().replace(/\.$/, '');
-  return (
-    normalizedHostname.endsWith('.tenor.com') ||
-    normalizedHostname.endsWith('.giphy.com') ||
-    normalizedHostname === 'i.imgur.com' ||
-    normalizedHostname.endsWith('.discordapp.com') ||
-    normalizedHostname.endsWith('.discordapp.net')
-  );
+  return isAllowedImageHost(normalizedHostname);
+}
+
+function getUrlHostname(value: string): string | undefined {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeContentType(value: string | null | undefined): string | undefined {

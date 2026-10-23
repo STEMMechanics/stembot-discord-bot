@@ -142,6 +142,7 @@ export function createDiscordGateway(
             messageId: message.id,
             attachmentCount: message.attachments.size,
             imageUrlCount: getCountingChainImageUrls(message).length,
+            imageUrlHosts: getCountingChainImageHosts(message),
             authorIsBot: message.author.bot,
             eventType,
           },
@@ -277,6 +278,16 @@ function getCountingChainImageUrls(message: Message): string[] {
       (url): url is string => typeof url === 'string' && url.length > 0,
     ),
   );
+}
+
+function getCountingChainImageHosts(message: Message): string[] {
+  return getCountingChainImageUrls(message).flatMap((url) => {
+    try {
+      return [new URL(url).hostname];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function getBotReactionEmojis(message: Message): string[] {

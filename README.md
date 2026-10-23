@@ -77,8 +77,11 @@ confirms that the gateway delivered a message from the configured channel. Its
 `attachmentCount` should be greater than zero for an uploaded image. A GIF
 picker post may instead have `attachmentCount: 0` and `imageUrlCount: 1`; a
 direct approved image URL may have both counts at zero and is still processed
-from the message content. If the entry is absent, check `COUNTING_CHAIN_CHANNEL_ID`, the bot's channel access,
-and the Message Content intent. If it is present but the image cannot be read,
+from the message content. The receipt entry includes the resolved image host;
+if a candidate is rejected, `Counting chain message had no approved image
+source` is logged at info level with the candidate counts. If the entry is
+absent, check `COUNTING_CHAIN_CHANNEL_ID`, the bot's channel access, and the
+Message Content intent. If it is present but the image cannot be read,
 the following warning identifies whether the Discord CDN download, image
 conversion, or OpenAI response failed. OpenAI responses that are incomplete or
 refused are reported with a safe response summary rather than the image or
