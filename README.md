@@ -60,19 +60,20 @@ A wrong number or two consecutive images from the same member receives `❌`,
 posts a short game-over message, and resets the channel to `1`. With review
 disabled, an unreadable, unsupported or temporarily unavailable image receives
 `⚠️` and a retry message; it does not change the game state. With review
-enabled, an unreadable image from another member receives `🔎`, STEMBot mentions
-the moderator role and pauses the chain until a moderator decides. A second
-consecutive image from the same member always ends the round immediately because
-that rule is unambiguous. Bot messages and messages outside the configured channel
-are ignored.
+enabled, an unreadable image from another member receives `🔎`, `✅` and `❌`,
+STEMBot mentions the moderator role and pauses the chain until a moderator
+decides. A second consecutive image from the same member always ends the round
+immediately because that rule is unambiguous. Bot messages and messages outside
+the configured channel are ignored.
 
 Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
 `COUNTING_CHAIN_REVIEW_ROLE_ID` to pause wrong-number or unreadable posts from
 another member for moderator review instead of resetting or asking the member to
-retry. STEMBot
-mentions that role and adds `🔎`. A moderator with that role, `Manage Messages`,
-or `Administrator` can react with `✅` to approve the proposed number or `❌`
-to confirm the reset. If review is enabled after a normal reset, any member can
+retry. STEMBot mentions that role and adds the three review reactions to the
+target post. A moderator with that role, `Manage Messages`, or `Administrator`
+can click `✅` to approve the proposed number or `❌` to confirm the reset. After
+a decision, STEMBot removes the review reactions and leaves only the final `👍`
+or `❌` result. If review is enabled after a normal reset, any member can
 use `/review`; STEMBot resolves the persisted image that ended the game, so the
 member does not need to know a Discord message ID. While a review is pending,
 later posts are held until a moderator approves or rejects the pending post.
@@ -95,8 +96,8 @@ fed to the counting service in Discord message-ID order, and duplicate or older
 events are ignored. This prevents a later GIF embed update from being judged
 before an earlier post.
 Enable the Message Content intent in the Discord Developer Portal and grant the
-bot permission to view message history, add reactions and send messages in the
-counting channel.
+bot permission to view message history, add reactions, manage messages and send
+messages in the counting channel.
 
 For troubleshooting, the log entry `Counting chain Discord message received`
 confirms that the gateway delivered a message from the configured channel. Its

@@ -368,11 +368,16 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
     reply: async (content: string, options?: CountingChainReplyOptions): Promise<string> => {
       const reply = await message.reply({
         content,
-        allowedMentions: options?.mentionRoleId
-          ? { roles: [options.mentionRoleId] }
-          : { parse: [] },
+        allowedMentions: {
+          parse: [],
+          ...(options?.mentionRoleId ? { roles: [options.mentionRoleId] } : {}),
+          ...(options?.mentionUserId ? { users: [options.mentionUserId] } : {}),
+        },
       });
       return reply.id;
+    },
+    clearReactions: async (): Promise<void> => {
+      await message.reactions.removeAll();
     },
     deleteMessage: async (messageId: string): Promise<void> => {
       const channel = message.channel;

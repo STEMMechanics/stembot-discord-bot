@@ -51,6 +51,7 @@ function createMessage(
     ],
     react: vi.fn().mockResolvedValue(undefined),
     reply: vi.fn().mockResolvedValue('review-reply-message'),
+    clearReactions: vi.fn().mockResolvedValue(undefined),
     deleteMessage: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -317,7 +318,7 @@ describe('counting-chain service', () => {
 
     expect(wrong.react).toHaveBeenCalledWith('❌');
     expect(wrong.reply).toHaveBeenCalledWith(
-      'Counting chain over — the next number was not accepted. Starting again at 1.',
+      'Nope — the next number was meant to be **2**, not **4**. Starting the chain again at 1.',
     );
     expect(state.state).toMatchObject({
       countingChain: {
@@ -352,6 +353,10 @@ describe('counting-chain service', () => {
 
     expect(second.react).toHaveBeenCalledWith('❌');
     expect(second.reply).toHaveBeenCalledOnce();
+    expect(second.reply).toHaveBeenCalledWith(
+      "Hey <@same-user>, you can't post twice in a row! Starting the chain again at 1.",
+      { mentionUserId: 'same-user' },
+    );
     expect(state.state).toMatchObject({
       countingChain: {
         expectedNumber: 1,
@@ -377,7 +382,8 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('❌');
     expect(second.react).not.toHaveBeenCalledWith('⚠️');
     expect(second.reply).toHaveBeenCalledWith(
-      'Counting chain over — the next number was not accepted. Starting again at 1.',
+      "Hey <@same-user>, you can't post twice in a row! Starting the chain again at 1.",
+      { mentionUserId: 'same-user' },
     );
     expect(state.state).toMatchObject({
       countingChain: {
@@ -412,7 +418,8 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('❌');
     expect(second.react).not.toHaveBeenCalledWith('🔎');
     expect(second.reply).toHaveBeenCalledWith(
-      'Counting chain over — the next number was not accepted. Starting again at 1.',
+      "Hey <@same-user>, you can't post twice in a row! Starting the chain again at 1.",
+      { mentionUserId: 'same-user' },
     );
     expect(state.state).toMatchObject({
       countingChain: {
@@ -448,6 +455,8 @@ describe('counting-chain service', () => {
     await service.handleMessage(later);
 
     expect(second.react).toHaveBeenCalledWith('🔎');
+    expect(second.react).toHaveBeenCalledWith('✅');
+    expect(second.react).toHaveBeenCalledWith('❌');
     expect(second.react).not.toHaveBeenCalledWith('⚠️');
     expect(second.reply).toHaveBeenCalledWith(expect.stringContaining('<@&moderator-role>'), {
       mentionRoleId: 'moderator-role',
@@ -487,7 +496,8 @@ describe('counting-chain service', () => {
     expect(second.react).toHaveBeenCalledWith('❌');
     expect(second.react).not.toHaveBeenCalledWith('🔎');
     expect(second.reply).toHaveBeenCalledWith(
-      'Counting chain over — the next number was not accepted. Starting again at 1.',
+      "Hey <@same-user>, you can't post twice in a row! Starting the chain again at 1.",
+      { mentionUserId: 'same-user' },
     );
     expect(state.state.countingChain).not.toHaveProperty('pendingReview');
   });
@@ -510,6 +520,8 @@ describe('counting-chain service', () => {
     await service.handleMessage(wrong);
 
     expect(wrong.react).toHaveBeenCalledWith('🔎');
+    expect(wrong.react).toHaveBeenCalledWith('✅');
+    expect(wrong.react).toHaveBeenCalledWith('❌');
     expect(wrong.reply).toHaveBeenCalledWith(expect.stringContaining('<@&moderator-role>'), {
       mentionRoleId: 'moderator-role',
     });
@@ -528,6 +540,7 @@ describe('counting-chain service', () => {
     expect(await service.getReviewTargetMessageId()).toBe('review-message-2');
     expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
     expect(wrong.react).toHaveBeenCalledWith('👍');
+    expect(wrong.clearReactions).toHaveBeenCalledOnce();
     expect(wrong.deleteMessage).toHaveBeenCalledWith('review-reply-message');
     expect(state.state).toMatchObject({
       countingChain: {
@@ -597,6 +610,7 @@ describe('counting-chain service', () => {
     expect(await service.reviewMessage(message, 'reject', 'moderator-1')).toBe(true);
 
     expect(message.react).toHaveBeenCalledWith('❌');
+    expect(message.clearReactions).toHaveBeenCalledOnce();
     expect(message.deleteMessage).toHaveBeenCalledWith('review-reply-message');
     expect(message.reply).toHaveBeenCalledWith(
       'The moderator checked it — this round starts again at 1. Give it another go!',

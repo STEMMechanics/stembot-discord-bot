@@ -31,11 +31,13 @@ export interface CountingChainMessage {
   botReactionEmojis?: readonly string[];
   react(emoji: string): Promise<void>;
   reply(content: string, options?: CountingChainReplyOptions): Promise<string | undefined>;
+  clearReactions?(): Promise<void>;
   deleteMessage?(messageId: string): Promise<void>;
 }
 
 export interface CountingChainReplyOptions {
   mentionRoleId?: string;
+  mentionUserId?: string;
 }
 
 export interface CountingChainHistoryMessage extends CountingChainMessage {
@@ -757,9 +759,16 @@ export class PersistentCountingChainService implements CountingChainService {
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
     await this.react(message, RULE_FAILURE_REACTION);
+    const failureMessage =
+      reason === 'same-user'
+        ? `Hey <@${message.authorId}>, you can't post twice in a row! Starting the chain again at 1.`
+        : proposedNumber === null
+          ? 'Nope — I could not confirm the next number. Starting the chain again at 1.'
+          : `Nope — the next number was meant to be **${game.expectedNumber}**, not **${proposedNumber}**. Starting the chain again at 1.`;
     await this.reply(
       message,
-      'Counting chain over — the next number was not accepted. Starting again at 1.',
+      failureMessage,
+      reason === 'same-user' ? { mentionUserId: message.authorId } : undefined,
     );
   }
 
@@ -851,13 +860,15 @@ export class PersistentCountingChainService implements CountingChainService {
     await this.dependencies.state.save(rootState);
 
     await this.react(message, REVIEW_REQUEST_REACTION);
+    await this.react(message, REVIEW_APPROVE_REACTION);
+    await this.react(message, REVIEW_REJECT_REACTION);
     const roleId = this.dependencies.config.reviewRoleId;
     const roleMention = roleId ? `<@&${roleId}> ` : '';
     const proposedText =
       normalizedProposedNumber === null ? 'not determined' : String(normalizedProposedNumber);
     const reviewMessageId = await this.reply(
       message,
-      `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve this post or ${REVIEW_REJECT_REACTION} to reset the chain.`,
+      `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. Use ${REVIEW_APPROVE_REACTION} on this post to approve it or ${REVIEW_REJECT_REACTION} to reset the chain.`,
       roleId ? { mentionRoleId: roleId } : undefined,
     );
     if (reviewMessageId && state.pendingReview) {
@@ -926,7 +937,8 @@ export class PersistentCountingChainService implements CountingChainService {
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
       await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
-      await this.react(message, PASS_REACTION);
+      await this.clearReactions(message);
+      await this.react(message, PASS_REACTION, true);
       this.dependencies.logger.info(
         {
           channelId: message.channelId,
@@ -956,7 +968,8 @@ export class PersistentCountingChainService implements CountingChainService {
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
     await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
-    await this.react(message, RULE_FAILURE_REACTION);
+    await this.clearReactions(message);
+    await this.react(message, RULE_FAILURE_REACTION, true);
     await this.reply(
       message,
       'The moderator checked it — this round starts again at 1. Give it another go!',
@@ -1038,8 +1051,8 @@ export class PersistentCountingChainService implements CountingChainService {
     return { data, contentType };
   }
 
-  private async react(message: CountingChainMessage, emoji: string): Promise<void> {
-    if (message.botReactionEmojis?.includes(emoji)) {
+  private async react(message: CountingChainMessage, emoji: string, force = false): Promise<void> {
+    if (!force && message.botReactionEmojis?.includes(emoji)) {
       return;
     }
 
@@ -1049,6 +1062,25 @@ export class PersistentCountingChainService implements CountingChainService {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id, emoji },
         'Counting chain reaction could not be added',
+      );
+    }
+  }
+
+  private async clearReactions(message: CountingChainMessage): Promise<void> {
+    if (!message.clearReactions) {
+      this.dependencies.logger.warn(
+        { channelId: message.channelId, messageId: message.id },
+        'Counting chain could not clear review reactions because the message adapter does not support it',
+      );
+      return;
+    }
+
+    try {
+      await message.clearReactions();
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'Counting chain review reactions could not be cleared',
       );
     }
   }
