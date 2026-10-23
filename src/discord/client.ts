@@ -376,6 +376,7 @@ export function createDiscordGateway(
         }
 
         void handleCountingChainReviewReaction(
+          client,
           reaction,
           user,
           config,
@@ -917,6 +918,7 @@ async function requestCountingChainReviewFromDiscord(
 }
 
 async function handleCountingChainReviewReaction(
+  client: Client,
   reaction: MessageReaction | PartialMessageReaction,
   user: User | PartialUser,
   config: AppConfig,
@@ -955,10 +957,52 @@ async function handleCountingChainReviewReaction(
       return;
     }
 
+    const targetMessageId = await service.getReviewTargetMessageId();
+    const reviewRequestMessageId = await service.getReviewRequestMessageId();
+    if (
+      !targetMessageId ||
+      (message.id !== targetMessageId && message.id !== reviewRequestMessageId)
+    ) {
+      return;
+    }
+
+    let targetMessage = message;
+    if (message.id !== targetMessageId) {
+      const channel = await client.channels.fetch(config.countingChain.channelId);
+      if (!channel || !channel.isTextBased() || !('messages' in channel)) {
+        return;
+      }
+
+      try {
+        targetMessage = await channel.messages.fetch(targetMessageId);
+      } catch (error: unknown) {
+        logger.warn(
+          { err: error, channelId: message.channelId, messageId: targetMessageId },
+          'Counting chain review target could not be fetched for review prompt reaction',
+        );
+        return;
+      }
+    }
+
+    if (targetMessage.author.bot) {
+      return;
+    }
+
     const decision = emoji === '✅' ? 'approve' : 'reject';
-    const applied = await service.reviewMessage(toCountingChainMessage(message), decision, user.id);
+    const applied = await service.reviewMessage(
+      toCountingChainMessage(targetMessage),
+      decision,
+      user.id,
+    );
     logger.info(
-      { channelId: message.channelId, messageId: message.id, userId: user.id, decision, applied },
+      {
+        channelId: message.channelId,
+        messageId: targetMessage.id,
+        reactionMessageId: message.id,
+        userId: user.id,
+        decision,
+        applied,
+      },
       'Counting chain review reaction processed',
     );
     if (applied) {

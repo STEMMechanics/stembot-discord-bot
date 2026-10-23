@@ -75,9 +75,10 @@ Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
 another member for moderator review instead of resetting or asking the member to
 retry. STEMBot mentions that role and adds the three review reactions to the
 target post. A moderator with that role, `Manage Messages`, or `Administrator`
-can click `✅` to approve the proposed number or `❌` to confirm the reset. After
-a decision, STEMBot removes the review reactions and leaves only the final `👍`
-or `❌` result. If review is enabled after a normal reset, any member can
+can click `✅` to approve the proposed number or `❌` to confirm the reset on
+either the original image post or the review request message. After a decision,
+STEMBot removes the review reactions and leaves only the final `👍` or `❌`
+result. If review is enabled after a normal reset, any member can
 use `/review`; STEMBot resolves the persisted image that ended the game, so the
 member does not need to know a Discord message ID. While a review is pending,
 later posts are held until a moderator approves or rejects the pending post.

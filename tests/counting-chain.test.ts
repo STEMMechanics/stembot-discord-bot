@@ -635,6 +635,7 @@ describe('counting-chain service', () => {
     });
 
     expect(await service.getReviewTargetMessageId()).toBe('review-message-2');
+    expect(await service.getReviewRequestMessageId()).toBe('review-reply-message');
     expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
     expect(wrong.react).toHaveBeenCalledWith('👍');
     expect(wrong.clearReactions).toHaveBeenCalledOnce();
@@ -647,6 +648,7 @@ describe('counting-chain service', () => {
     });
     expect(state.state.countingChain).not.toHaveProperty('pendingReview');
     expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
+    expect(await service.getReviewRequestMessageId()).toBeUndefined();
   });
 
   it('catches up messages posted while a moderator review was pending', async () => {

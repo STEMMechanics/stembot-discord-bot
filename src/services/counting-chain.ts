@@ -86,6 +86,7 @@ export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
   getReviewTargetMessageId(): Promise<string | undefined>;
+  getReviewRequestMessageId(): Promise<string | undefined>;
   requestReview(message: CountingChainMessage): Promise<boolean>;
   reviewMessage(
     message: CountingChainMessage,
@@ -301,6 +302,24 @@ export class PersistentCountingChainService implements CountingChainService {
         this.dependencies.config.channelId,
       );
       return state.pendingReview?.messageId ?? state.lastGameEnding?.messageId;
+    });
+  }
+
+  public getReviewRequestMessageId(): Promise<string | undefined> {
+    if (
+      !this.dependencies.config.enabled ||
+      !this.dependencies.config.reviewEnabled ||
+      !this.dependencies.config.channelId
+    ) {
+      return Promise.resolve(undefined);
+    }
+
+    return this.dependencies.state.load().then((rootState) => {
+      const state = readCountingChainState(
+        rootState[STATE_KEY],
+        this.dependencies.config.channelId,
+      );
+      return state.pendingReview?.reviewMessageId ?? undefined;
     });
   }
 
@@ -938,7 +957,7 @@ export class PersistentCountingChainService implements CountingChainService {
       normalizedProposedNumber === null ? 'not determined' : String(normalizedProposedNumber);
     const reviewMessageId = await this.reply(
       message,
-      `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. Use ${REVIEW_APPROVE_REACTION} on this post to approve it or ${REVIEW_REJECT_REACTION} to reset the chain.`,
+      `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve or ${REVIEW_REJECT_REACTION} to reset the chain. You can react to this message or the original image post.`,
       roleId ? { mentionRoleId: roleId } : undefined,
     );
     if (reviewMessageId && state.pendingReview) {
