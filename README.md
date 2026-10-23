@@ -198,9 +198,11 @@ that mentions STEMBot is excluded from counting, quiz, scramble and word-chain
 answer processing so the bot can answer it safely anywhere.
 The service allows one request per user every 30 seconds, ten requests per user
 per UTC day, and 100 requests across the bot per UTC day by default. Requests
-that reach a limit are ignored without calling OpenAI. The counters and recent
-Discord message IDs are stored in the shared JSON state file so a restart does
-not reset the limits.
+that reach a limit receive a short playful cooldown or quota response without
+calling OpenAI. Override these values with `STEM_ASK_USER_COOLDOWN_SECONDS`,
+`STEM_ASK_USER_DAILY_LIMIT`, and `STEM_ASK_GLOBAL_DAILY_LIMIT`. The counters
+and recent Discord message IDs are stored in the shared JSON state file so a
+restart does not reset the limits.
 
 ### Participation XP and levels
 

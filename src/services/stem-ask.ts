@@ -38,18 +38,27 @@ interface StemAskServiceDependencies {
   state: StateStore<JsonState>;
   logger: AppLogger;
   clock?: () => Date;
+  random?: () => number;
 }
 
 const STATE_KEY = 'stemAsk';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_DISCORD_MESSAGE_LENGTH = 1900;
+const RATE_LIMIT_RESPONSES = [
+  'Hey, slow down — I’m not paid to work this hard. Try again in a bit.',
+  'My tiny science brain needs a breather. Give it a moment, then try again.',
+  'The lab is at capacity right now. Let the electrons settle and try again later.',
+  'Quota reached. Even robots need a coffee break.',
+] as const;
 
 export class PersistentStemAskService implements StemAskService {
   private readonly currentTime: () => Date;
+  private readonly random: () => number;
   private eventQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: StemAskServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
+    this.random = dependencies.random ?? Math.random;
   }
 
   public async handleMessage(message: StemAskMessage): Promise<void> {
@@ -90,12 +99,12 @@ export class PersistentStemAskService implements StemAskService {
 
     const userRequestCount = state.userRequests[message.authorId] ?? 0;
     if (state.totalRequests >= this.dependencies.config.globalDailyLimit) {
-      this.logRateLimit(message, 'global daily limit');
+      await this.respondToRateLimit(message, 'global daily limit');
       return;
     }
 
     if (userRequestCount >= this.dependencies.config.userDailyLimit) {
-      this.logRateLimit(message, 'user daily limit');
+      await this.respondToRateLimit(message, 'user daily limit');
       return;
     }
 
@@ -105,7 +114,7 @@ export class PersistentStemAskService implements StemAskService {
       Number.isFinite(Date.parse(lastAskedAt)) &&
       now.getTime() - Date.parse(lastAskedAt) < this.dependencies.config.userCooldownMs
     ) {
-      this.logRateLimit(message, 'user cooldown');
+      await this.respondToRateLimit(message, 'user cooldown');
       return;
     }
 
@@ -152,11 +161,21 @@ export class PersistentStemAskService implements StemAskService {
     }
   }
 
-  private logRateLimit(message: StemAskMessage, limit: string): void {
+  private async respondToRateLimit(message: StemAskMessage, limit: string): Promise<void> {
     this.dependencies.logger.info(
       { channelId: message.channelId, messageId: message.id, userId: message.authorId, limit },
       'STEM ask question was rate limited',
     );
+    const randomValue = this.random();
+    const responseIndex = Math.min(
+      RATE_LIMIT_RESPONSES.length - 1,
+      Math.max(
+        0,
+        Math.floor((Number.isFinite(randomValue) ? randomValue : 0) * RATE_LIMIT_RESPONSES.length),
+      ),
+    );
+    const response = RATE_LIMIT_RESPONSES[responseIndex] ?? 'Please try again later.';
+    await this.replySafely(message, response);
   }
 
   private isEnabled(): boolean {

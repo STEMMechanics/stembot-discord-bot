@@ -86,6 +86,28 @@ describe('STEM ask service', () => {
     });
   });
 
+  it('replies playfully when a user is on cooldown without calling OpenAI', async () => {
+    const state = new MemoryStateStore();
+    const answer = vi.fn<StemAskAnswerer['answer']>().mockResolvedValue('answer');
+    const service = new PersistentStemAskService({
+      config,
+      answerer: { answer },
+      state,
+      logger,
+      random: () => 0,
+    });
+    const first = createMessage('user-1', 'message-1', 'First question?');
+    const blocked = createMessage('user-1', 'message-2', 'Second question?');
+
+    await service.handleMessage(first);
+    await service.handleMessage(blocked);
+
+    expect(answer).toHaveBeenCalledOnce();
+    expect(blocked.reply).toHaveBeenCalledWith(
+      'Hey, slow down — I’m not paid to work this hard. Try again in a bit.',
+    );
+  });
+
   it('enforces the global daily limit across users and resets it on a new UTC day', async () => {
     const state = new MemoryStateStore();
     const answer = vi
@@ -99,6 +121,7 @@ describe('STEM ask service', () => {
       state,
       logger,
       clock: () => now,
+      random: () => 0.99,
     });
 
     await service.handleMessage(createMessage('user-1', 'message-1', 'Question one?'));
@@ -110,7 +133,7 @@ describe('STEM ask service', () => {
     await service.handleMessage(nextDay);
 
     expect(answer).toHaveBeenCalledTimes(2);
-    expect(blocked.reply).not.toHaveBeenCalled();
+    expect(blocked.reply).toHaveBeenCalledWith(expect.stringContaining('Quota reached'));
     expect(nextDay.reply).toHaveBeenCalledWith('Next day answer.');
   });
 
