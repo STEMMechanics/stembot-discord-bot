@@ -42,7 +42,9 @@ describe('OpenAI number recognizer', () => {
     const body = JSON.parse(String(request?.body)) as {
       model: string;
       reasoning: { effort: string };
-      input: Array<{ content: Array<{ type: string; image_url?: string }> }>;
+      input: Array<{
+        content: Array<{ type: string; image_url?: string; text?: string }>;
+      }>;
       text: { format: { type: string; name: string } };
     };
     expect(body.model).toBe('test-model');
@@ -57,6 +59,10 @@ describe('OpenAI number recognizer', () => {
         }),
       ]),
     );
+    const prompt = body.input[0]?.content.find((content) => content.type === 'input_text');
+    expect(prompt).toMatchObject({
+      text: expect.stringContaining('not one, but two'),
+    });
     expect(body.text.format).toMatchObject({
       type: 'json_schema',
       name: 'counting_chain_number',

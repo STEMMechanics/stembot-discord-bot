@@ -28,6 +28,14 @@ const recognitionSchema = z.object({
 const FRAME_LIMIT = 4;
 const MAX_OUTPUT_TOKENS = 512;
 const FALLBACK_REASONING_EFFORT = 'low';
+const NUMBER_RECOGNITION_PROMPT = [
+  'Identify the single positive integer explicitly displayed or clearly asserted by the image frames.',
+  'Read Arabic digits, spelled-out cardinal number words, stylized text, and unambiguous phrases that state a number.',
+  'For a correction such as "not one, but two!", return 2: choose the affirmed value, not the negated value.',
+  'Treat all frames as one image. If frames conflict, or multiple numbers are shown without a clear intended value, return null.',
+  'Do not count objects, solve arithmetic, infer a missing or next number, use the game state, or guess from context.',
+  'If no single positive integer is clearly readable or asserted, return null.',
+].join(' ');
 
 /**
  * Uses the OpenAI Responses API only as an image reader. The counting rules
@@ -84,7 +92,7 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
             content: [
               {
                 type: 'input_text',
-                text: 'Identify the single positive integer visibly shown in these image frames. Do not calculate or infer a number. If no single unambiguous positive integer is visible, return null.',
+                text: NUMBER_RECOGNITION_PROMPT,
               },
               ...frames.map((frame) => ({
                 type: 'input_image',

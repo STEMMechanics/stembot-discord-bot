@@ -67,7 +67,9 @@ those frames to the configured OpenAI model. It does not require a provider
 allowlist. Remote URLs must use HTTPS, resolve only to public addresses, stay on
 the default HTTPS port, and pass redirect, image-type, timeout, and size checks.
 It stores the current number, score history and Discord IDs, but does not store
-the image.
+the image. Recognition accepts digits, spelled-out number words, and clear
+corrective phrases such as `not one, but two!`; ambiguous or inferred values
+return no number.
 Discord GIF-picker embeds can arrive after the initial message event, so the
 bot also checks message updates and ignores duplicate update events.
 Enable the Message Content intent in the Discord Developer Portal and grant the
