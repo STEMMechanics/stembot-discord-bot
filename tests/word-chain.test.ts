@@ -109,6 +109,22 @@ describe('STEM word chain service', () => {
     });
   });
 
+  it('tracks each member’s best correct-guess streak within a round', async () => {
+    const state = new MemoryStateStore();
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    const service = createService(state, publisher);
+
+    await service.initialize();
+    await service.handleMessage(createMessage('one', 'moon', { authorId: 'nomad' }));
+    await service.handleMessage(createMessage('two', 'nebula', { authorId: 'other' }));
+    await service.handleMessage(createMessage('three', 'asteroid', { authorId: 'nomad' }));
+
+    await expect(service.getLeaderboard(3)).resolves.toEqual([
+      { userId: 'nomad', score: 2 },
+      { userId: 'other', score: 1 },
+    ]);
+  });
+
   it('formats the theme and chain rules in the opening message', () => {
     expect(formatStemWordChainRound(STEM_WORD_CHAIN_THEMES[0]!, 3)).toBe(
       '🔗 **Word Chain 3**\n\nTheme: **Space**\n\nStart with any word that fits the theme. Each next word must start with the last letter of the previous word.\n\nA word outside the theme or the wrong starting letter ends the round and changes the theme.',

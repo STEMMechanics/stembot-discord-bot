@@ -111,6 +111,7 @@ describe('STEM scramble service', () => {
     expect(publisher.send).toHaveBeenCalledTimes(2);
     expect(publisher.send.mock.calls[1]?.[1]).not.toContain('solved it');
     expect(publisher.send.mock.calls[1]?.[1]).not.toContain('A clue for circuit.');
+    await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
     expect(state.state).toMatchObject({
       stemScramble: {
         nextRoundNumber: 3,

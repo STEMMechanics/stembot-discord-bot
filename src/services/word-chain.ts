@@ -1,5 +1,10 @@
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import {
+  readMinigameScores,
+  toMinigameLeaderboard,
+  type MinigameLeaderboardEntry,
+} from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
 
 export interface StemWordChainConfig {
@@ -25,6 +30,7 @@ export interface StemWordChainService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
   handleMessage(message: StemWordChainMessage): Promise<void>;
+  getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
 
 export interface StemWordChainTheme {
@@ -182,6 +188,8 @@ interface StemWordChainState {
   lastMessageId: string | null;
   streak: number;
   bestStreak: number;
+  roundStreaks: Record<string, number>;
+  bestStreaks: Record<string, number>;
   processedMessageIds: string[];
 }
 
@@ -223,6 +231,18 @@ export class PersistentStemWordChainService implements StemWordChainService {
     });
   }
 
+  public async getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]> {
+    if (!this.dependencies.config.enabled) {
+      return [];
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemWordChainState(rootState[STATE_KEY]);
+      return toMinigameLeaderboard(state.bestStreaks, limit);
+    });
+  }
+
   public async handleMessage(message: StemWordChainMessage): Promise<void> {
     if (!this.isEnabled() || message.channelId !== this.dependencies.config.channelId) {
       return;
@@ -257,6 +277,12 @@ export class PersistentStemWordChainService implements StemWordChainService {
       state.lastMessageId = message.id;
       state.streak += 1;
       state.bestStreak = Math.max(state.bestStreak, state.streak);
+      const playerStreak = (state.roundStreaks[message.authorId] ?? 0) + 1;
+      state.roundStreaks[message.authorId] = playerStreak;
+      state.bestStreaks[message.authorId] = Math.max(
+        state.bestStreaks[message.authorId] ?? 0,
+        playerStreak,
+      );
       writeStemWordChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, PASS_REACTION);
@@ -285,6 +311,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     state.lastAuthorId = null;
     state.lastMessageId = null;
     state.streak = 0;
+    state.roundStreaks = {};
     writeStemWordChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, FAILURE_REACTION);
@@ -362,13 +389,13 @@ export class PersistentStemWordChainService implements StemWordChainService {
     return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
   }
 
-  private async enqueue(work: () => Promise<void>): Promise<void> {
+  private async enqueue<T>(work: () => Promise<T>): Promise<T> {
     const next = this.eventQueue.catch(() => undefined).then(work);
     this.eventQueue = next.then(
       () => undefined,
       () => undefined,
     );
-    await next;
+    return await next;
   }
 }
 
@@ -424,6 +451,8 @@ function readStemWordChainState(value: unknown): StemWordChainState {
   const lastMessageId = typeof value.lastMessageId === 'string' ? value.lastMessageId : null;
   const streak = readNonNegativeInteger(value.streak);
   const bestStreak = readNonNegativeInteger(value.bestStreak);
+  const roundStreaks = readMinigameScores(value.roundStreaks);
+  const bestStreaks = readMinigameScores(value.bestStreaks);
   const processedMessageIds = Array.isArray(value.processedMessageIds)
     ? value.processedMessageIds
         .filter((id): id is string => typeof id === 'string')
@@ -440,6 +469,8 @@ function readStemWordChainState(value: unknown): StemWordChainState {
     lastMessageId,
     streak,
     bestStreak: Math.max(streak, bestStreak),
+    roundStreaks,
+    bestStreaks,
     processedMessageIds,
   };
 }
@@ -455,6 +486,8 @@ function createInitialState(): StemWordChainState {
     lastMessageId: null,
     streak: 0,
     bestStreak: 0,
+    roundStreaks: {},
+    bestStreaks: {},
     processedMessageIds: [],
   };
 }

@@ -207,10 +207,10 @@ at 400 XP, and so on. `/level` shows an individual profile and
 `/leaderboard` shows the top ten members without pinging them.
 
 Set `STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID` to post a public level-up message in
-the specified channel. The message mentions the member who reached the new
-level. Leave it unset to keep level-ups available through the commands without
-public announcements. Announcement failures are logged without discarding the
-XP award.
+the specified channel. The announcement uses an embed with the new level, XP
+progress and the member mention. Leave it unset to keep level-ups available
+through the commands without public announcements. Announcement failures are
+logged without discarding the XP award.
 
 The level listener requires the Discord Message Content and Guild Message
 Reactions intents. STEMBot requests these automatically when the feature is
@@ -218,8 +218,11 @@ enabled, but the privileged Message Content intent must also be enabled in the
 Discord Developer Portal.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single STEMBot minigame
-dashboard embed with the counting streak, best counting streak, shared
-leaderboard and last counting round. Set
+dashboard embed with the counting streak, best counting streak, a separate
+top-three record leaderboard for counting, quiz, scramble and word chain, and
+the last counting round. The counting record is each member's highest number,
+quiz records correct answers, scramble records solved rounds, and word chain
+records a member's best correct-guess streak in one round. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
 edited. If the message ID is omitted, STEMBot searches the most recent 100
 messages for its `STEMBot Minigames` embed (and can reuse the old counting
@@ -412,6 +415,9 @@ when editing it offline:
   "countingChain": {
     "version": 1,
     "infoMessageId": "DISCORD_INFO_MESSAGE_ID",
+    "playerHighScores": {
+      "DISCORD_USER_ID": 66
+    },
     "historyRecoveryPending": false,
     "expectedNumber": 67,
     "lastAuthorId": "DISCORD_USER_ID",

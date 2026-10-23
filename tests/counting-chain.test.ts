@@ -126,6 +126,10 @@ describe('counting-chain service', () => {
         lastMessageId: 'message-2',
       },
     });
+    await expect(service.getLeaderboard(3)).resolves.toEqual([
+      { userId: 'user-2', score: 2 },
+      { userId: 'user-1', score: 1 },
+    ]);
   });
 
   it('processes a direct approved GIF URL in message content', async () => {

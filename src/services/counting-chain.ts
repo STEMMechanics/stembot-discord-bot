@@ -4,6 +4,11 @@ import { BlockList } from 'node:net';
 import type { NumberImage, NumberRecognizer } from '../integrations/openai.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import {
+  readMinigameScores,
+  toMinigameLeaderboard,
+  type MinigameLeaderboardEntry,
+} from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
 
 export interface CountingChainConfig {
@@ -75,6 +80,7 @@ export type CountingChainRemoteAddressLookup = (
 
 export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
+  getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
   getReviewTargetMessageId(): Promise<string | undefined>;
   requestReview(message: CountingChainMessage): Promise<boolean>;
   reviewMessage(
@@ -122,6 +128,7 @@ interface CountingChainPendingReview extends CountingChainGameEnding {
 interface CountingChainState {
   version: 1;
   game: CountingChainGameState | null;
+  playerHighScores: Record<string, number>;
   infoMessageId: string | null;
   historyRecoveryPending: boolean;
   lastGameEnding: CountingChainGameEnding | null;
@@ -255,6 +262,19 @@ export class PersistentCountingChainService implements CountingChainService {
           'Counting chain message processing failed',
         );
       }
+    });
+  }
+
+  public getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]> {
+    const channelId = this.dependencies.config.channelId;
+    if (!this.dependencies.config.enabled || !channelId) {
+      return Promise.resolve([]);
+    }
+
+    return this.enqueue(channelId, async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readCountingChainState(rootState[STATE_KEY], channelId);
+      return toMinigameLeaderboard(state.playerHighScores, limit);
     });
   }
 
@@ -449,6 +469,10 @@ export class PersistentCountingChainService implements CountingChainService {
         throw new Error('Counting chain history image could not be read');
       }
 
+      state.playerHighScores[latestMessage.authorId] = Math.max(
+        state.playerHighScores[latestMessage.authorId] ?? 0,
+        recognizedNumber,
+      );
       state.game = {
         expectedNumber: recognizedNumber + 1,
         lastAuthorId: latestMessage.authorId,
@@ -680,6 +704,10 @@ export class PersistentCountingChainService implements CountingChainService {
     if (passes) {
       const now = this.currentTime();
       const highScore = Math.max(game.highScore, recognizedNumber);
+      state.playerHighScores[message.authorId] = Math.max(
+        state.playerHighScores[message.authorId] ?? 0,
+        recognizedNumber,
+      );
       state.game = {
         expectedNumber: recognizedNumber + 1,
         lastAuthorId: message.authorId,
@@ -919,6 +947,10 @@ export class PersistentCountingChainService implements CountingChainService {
     if (decision === 'approve') {
       const approvedNumber = pendingReview.proposedNumber ?? pendingReview.expectedNumber;
       const highScore = Math.max(game.highScore, approvedNumber);
+      state.playerHighScores[message.authorId] = Math.max(
+        state.playerHighScores[message.authorId] ?? 0,
+        approvedNumber,
+      );
       state.game = {
         expectedNumber: approvedNumber + 1,
         lastAuthorId: message.authorId,
@@ -1261,6 +1293,7 @@ function writeCountingChainState(rootState: JsonState, state: CountingChainState
   rootState[STATE_KEY] = {
     version: state.version,
     infoMessageId: state.infoMessageId,
+    playerHighScores: state.playerHighScores,
     ...(state.historyRecoveryPending ? { historyRecoveryPending: true } : {}),
     ...(state.lastGameEnding ? { lastGameEnding: state.lastGameEnding } : {}),
     ...(state.pendingReview ? { pendingReview: state.pendingReview } : {}),
@@ -1375,6 +1408,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     return {
       version: 1,
       game: null,
+      playerHighScores: {},
       infoMessageId: null,
       historyRecoveryPending: false,
       lastGameEnding: null,
@@ -1396,6 +1430,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
   return {
     version: 1,
     game: currentGame ?? nestedGame ?? legacyGame ?? null,
+    playerHighScores: readMinigameScores(value.playerHighScores),
     infoMessageId: readNullableString(value.infoMessageId),
     historyRecoveryPending: value.historyRecoveryPending === true,
     lastGameEnding: readGameEnding(value.lastGameEnding),

@@ -215,6 +215,7 @@ describe('STEM quiz service', () => {
         scores: { 'user-1': 1 },
       },
     });
+    await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
   });
 
   it('passes recent questions to the generator and regenerates an exact duplicate', async () => {

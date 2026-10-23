@@ -31,7 +31,11 @@ import type {
 import type { StemAskMessage, StemAskService } from '../services/stem-ask.js';
 import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
 import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
-import type { UserLevelProfile, UserLevelService } from '../services/user-levels.js';
+import type {
+  MinigameLeaderboardEntry,
+  MinigameLeaderboardProvider,
+} from '../services/minigame-leaderboards.js';
+import type { UserLevelService } from '../services/user-levels.js';
 import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
 import { handleInteraction } from './interaction-handler.js';
 
@@ -157,7 +161,10 @@ export function createDiscordGateway(
             config.countingChain.infoChannelId,
             config.countingChain.infoMessageId,
             config.workshops.timeZone,
-            dependencies.userLevels,
+            dependencies.countingChain,
+            dependencies.quiz,
+            dependencies.scramble,
+            dependencies.wordChain,
           )
         : undefined;
       refreshMinigameDashboard = infoPublisher?.refresh;
@@ -952,7 +959,10 @@ function createCountingChainInfoPublisher(
   channelId: string,
   configuredMessageId: string | undefined,
   timeZone: string,
-  userLevels: UserLevelService | undefined,
+  countingChain: CountingChainService | undefined,
+  quiz: StemQuizService | undefined,
+  scramble: StemScrambleService | undefined,
+  wordChain: StemWordChainService | undefined,
 ): CountingChainInfoPublisher & { refresh(): Promise<void> } {
   let messageId = configuredMessageId;
   let latestStatus: CountingChainGameStatus | undefined;
@@ -991,15 +1001,19 @@ function createCountingChainInfoPublisher(
       );
     }
 
-    let leaderboard: readonly UserLevelProfile[] = [];
-    if (userLevels) {
-      try {
-        leaderboard = await userLevels.getLeaderboard(25);
-      } catch {
-        leaderboard = [];
-      }
-    }
-    const embed = buildMinigameInfoEmbed(status, timeZone, leaderboard);
+    const [countingLeaderboard, quizLeaderboard, scrambleLeaderboard, wordChainLeaderboard] =
+      await Promise.all([
+        readMinigameLeaderboard(countingChain),
+        readMinigameLeaderboard(quiz),
+        readMinigameLeaderboard(scramble),
+        readMinigameLeaderboard(wordChain),
+      ]);
+    const embed = buildMinigameInfoEmbed(status, timeZone, {
+      counting: countingChain ? countingLeaderboard : undefined,
+      quiz: quiz ? quizLeaderboard : undefined,
+      scramble: scramble ? scrambleLeaderboard : undefined,
+      wordChain: wordChain ? wordChainLeaderboard : undefined,
+    });
     if (infoMessage) {
       await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
       messageId = infoMessage.id;
@@ -1024,10 +1038,10 @@ function createCountingChainInfoPublisher(
   };
 }
 
-function buildMinigameInfoEmbed(
+export function buildMinigameInfoEmbed(
   status: CountingChainGameStatus,
   timeZone: string,
-  leaderboard: readonly UserLevelProfile[],
+  leaderboards: MinigameLeaderboards,
 ): APIEmbed {
   return {
     title: 'STEMBot Minigames',
@@ -1041,7 +1055,7 @@ function buildMinigameInfoEmbed(
       '**Other games**',
       'Answer the STEM quiz, solve the scramble, or keep the themed word chain going.',
       '',
-      'Accepted moves across the minigames count toward the shared activity leaderboard.',
+      'Each game has its own top-three record leaderboard.',
     ].join('\n'),
     fields: [
       {
@@ -1055,8 +1069,39 @@ function buildMinigameInfoEmbed(
         inline: true,
       },
       {
-        name: 'Minigame leaderboard',
-        value: formatMinigameLeaderboard(leaderboard),
+        name: 'Counting · highest number',
+        value: formatMinigameLeaderboard(
+          leaderboards.counting,
+          'highest number reached',
+          'Counting chain is not enabled.',
+        ),
+        inline: false,
+      },
+      {
+        name: 'Quiz · correct answers',
+        value: formatMinigameLeaderboard(
+          leaderboards.quiz,
+          'correct answers',
+          'STEM quiz is not enabled.',
+        ),
+        inline: false,
+      },
+      {
+        name: 'Scramble · solved rounds',
+        value: formatMinigameLeaderboard(
+          leaderboards.scramble,
+          'solved rounds',
+          'STEM scramble is not enabled.',
+        ),
+        inline: false,
+      },
+      {
+        name: 'Word chain · best round streak',
+        value: formatMinigameLeaderboard(
+          leaderboards.wordChain,
+          'correct guesses in one round',
+          'STEM word chain is not enabled.',
+        ),
         inline: false,
       },
       {
@@ -1074,26 +1119,42 @@ function buildMinigameInfoEmbed(
   };
 }
 
-function formatMinigameLeaderboard(profiles: readonly UserLevelProfile[]): string {
-  const activeProfiles = profiles
-    .filter((profile) => profile.gameCount > 0)
-    .sort(
-      (left, right) =>
-        right.gameCount - left.gameCount || right.level - left.level || right.xp - left.xp,
-    );
-  if (profiles.length === 0) {
-    return 'Enable participation levels to show the shared leaderboard.';
-  }
-  if (activeProfiles.length === 0) {
-    return 'No minigame plays recorded yet.';
+interface MinigameLeaderboards {
+  counting: readonly MinigameLeaderboardEntry[] | undefined;
+  quiz: readonly MinigameLeaderboardEntry[] | undefined;
+  scramble: readonly MinigameLeaderboardEntry[] | undefined;
+  wordChain: readonly MinigameLeaderboardEntry[] | undefined;
+}
+
+async function readMinigameLeaderboard(
+  service: MinigameLeaderboardProvider | undefined,
+): Promise<readonly MinigameLeaderboardEntry[]> {
+  if (!service) {
+    return [];
   }
 
-  return activeProfiles
-    .slice(0, 5)
-    .map(
-      (profile, index) =>
-        `**${index + 1}.** <@${profile.userId}> · Level ${profile.level} · ${profile.gameCount} game ${profile.gameCount === 1 ? 'play' : 'plays'}`,
-    )
+  try {
+    return await service.getLeaderboard(3);
+  } catch {
+    return [];
+  }
+}
+
+function formatMinigameLeaderboard(
+  entries: readonly MinigameLeaderboardEntry[] | undefined,
+  unit: string,
+  disabledMessage: string,
+): string {
+  if (entries === undefined) {
+    return disabledMessage;
+  }
+  if (entries.length === 0) {
+    return 'No records yet.';
+  }
+
+  return entries
+    .slice(0, 3)
+    .map((entry, index) => `**${index + 1}.** <@${entry.userId}> · **${entry.score}** ${unit}`)
     .join('\n');
 }
 

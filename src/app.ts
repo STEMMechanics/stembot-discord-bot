@@ -1,5 +1,9 @@
 import type { AppConfig } from './config/env.js';
-import { createDiscordGateway, type DiscordGateway } from './discord/client.js';
+import {
+  createDiscordGateway,
+  type DiscordChannelMessage,
+  type DiscordGateway,
+} from './discord/client.js';
 import { createOpenAINumberRecognizer } from './integrations/openai.js';
 import { createOpenAIStemAskAnswerer } from './integrations/openai-ask.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
@@ -101,12 +105,17 @@ export function createApplication(
                       throw new Error('Discord gateway is not ready for level-up announcements');
                     }
 
-                    await discordGatewayRef.current.sendChannelMessage(announcement.channelId, {
+                    const message: DiscordChannelMessage = {
                       content: announcement.content,
+                      ...(announcement.embeds ? { embeds: announcement.embeds } : {}),
                       ...(announcement.allowedUserIds && announcement.allowedUserIds.length > 0
                         ? { allowedMentions: { users: [...announcement.allowedUserIds] } }
                         : {}),
-                    });
+                    };
+                    await discordGatewayRef.current.sendChannelMessage(
+                      announcement.channelId,
+                      message,
+                    );
                   },
                 },
               }

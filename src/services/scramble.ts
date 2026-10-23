@@ -8,6 +8,11 @@ import type {
 import type { AppLogger } from '../logging/logger.js';
 import type { UserLevelService } from './user-levels.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import {
+  readMinigameScores,
+  toMinigameLeaderboard,
+  type MinigameLeaderboardEntry,
+} from './minigame-leaderboards.js';
 
 export interface StemScrambleConfig {
   enabled: boolean;
@@ -36,6 +41,7 @@ export interface StemScrambleService {
   ensureRound(): Promise<void>;
   resetRound(): Promise<string | undefined>;
   handleMessage(message: StemScrambleMessage): Promise<void>;
+  getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
 
 interface StemScrambleRoundState {
@@ -53,6 +59,7 @@ interface StemScrambleState {
   version: 1;
   nextRoundNumber: number;
   round: StemScrambleRoundState | null;
+  correctGuesses: Record<string, number>;
   recentWords: string[];
   processedMessageIds: string[];
 }
@@ -106,6 +113,18 @@ export class PersistentStemScrambleService implements StemScrambleService {
       }
 
       await this.publishNextRound(rootState, state);
+    });
+  }
+
+  public async getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]> {
+    if (!this.dependencies.config.enabled) {
+      return [];
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemScrambleState(rootState[STATE_KEY]);
+      return toMinigameLeaderboard(state.correctGuesses, limit);
     });
   }
 
@@ -183,6 +202,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
     }
 
     state.round = null;
+    state.correctGuesses[message.authorId] = (state.correctGuesses[message.authorId] ?? 0) + 1;
     writeStemScrambleState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
@@ -382,7 +402,16 @@ function readStemScrambleState(value: unknown): StemScrambleState {
       ? value.nextRoundNumber
       : 1;
 
-  return { version: 1, nextRoundNumber, round, recentWords, processedMessageIds };
+  const correctGuesses = readMinigameScores(value.correctGuesses);
+
+  return {
+    version: 1,
+    nextRoundNumber,
+    round,
+    correctGuesses,
+    recentWords,
+    processedMessageIds,
+  };
 }
 
 function readRoundState(value: unknown): StemScrambleRoundState | null {
@@ -422,6 +451,7 @@ function createInitialState(): StemScrambleState {
     version: 1,
     nextRoundNumber: 1,
     round: null,
+    correctGuesses: {},
     recentWords: [],
     processedMessageIds: [],
   };

@@ -1,3 +1,5 @@
+import type { APIEmbed } from 'discord.js';
+
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
 
@@ -31,6 +33,7 @@ export interface UserLevelAward {
 export interface UserLevelAnnouncement {
   channelId: string;
   content: string;
+  embeds?: APIEmbed[];
   allowedUserIds?: readonly string[];
 }
 
@@ -210,7 +213,8 @@ export class PersistentUserLevelService implements UserLevelService {
     try {
       await publisher.send({
         channelId,
-        content: `🎉 <@${profile.userId}> reached **level ${profile.level}**!`,
+        content: `<@${profile.userId}>`,
+        embeds: [buildLevelUpEmbed(profile)],
         allowedUserIds: [profile.userId],
       });
     } catch (error: unknown) {
@@ -233,6 +237,38 @@ export class PersistentUserLevelService implements UserLevelService {
     );
     return next;
   }
+}
+
+function buildLevelUpEmbed(profile: UserLevelProfile): APIEmbed {
+  const previousLevelXp = profile.level <= 1 ? 0 : getXpForNextLevel(profile.level - 1);
+  const nextLevelXp = getXpForNextLevel(profile.level);
+  const requiredXp = Math.max(1, nextLevelXp - previousLevelXp);
+  const currentXp = Math.max(0, profile.xp - previousLevelXp);
+  const percent = Math.min(100, Math.floor((currentXp / requiredXp) * 100));
+
+  return {
+    title: '🎉 Level up!',
+    color: 0x5865f2,
+    description: [
+      `<@${profile.userId}> reached **level ${profile.level}**!`,
+      `${formatLevelProgressBar(percent)} **${profile.xp} XP**`,
+    ].join('\n'),
+    fields: [
+      { name: 'New level', value: `**${profile.level}**`, inline: true },
+      { name: 'Progress', value: `${percent}% complete`, inline: true },
+      {
+        name: 'Next level',
+        value: `${Math.max(0, nextLevelXp - profile.xp)} XP to level ${profile.level + 1}`,
+        inline: true,
+      },
+    ],
+    footer: { text: 'STEMBot levels' },
+  };
+}
+
+function formatLevelProgressBar(percent: number): string {
+  const filled = Math.round(Math.min(100, Math.max(0, percent)) / 10);
+  return `${'▰'.repeat(filled)}${'▱'.repeat(10 - filled)}`;
 }
 
 export function createUserLevelService(dependencies: {

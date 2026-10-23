@@ -93,7 +93,16 @@ describe('persistent user levels', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith({
       channelId: 'announcement-channel',
-      content: '🎉 <@user-1> reached **level 2**!',
+      content: '<@user-1>',
+      embeds: [
+        expect.objectContaining({
+          title: '🎉 Level up!',
+          description: expect.stringContaining('<@user-1> reached **level 2**!'),
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'New level', value: '**2**' }),
+          ]),
+        }),
+      ],
       allowedUserIds: ['user-1'],
     });
     await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 105, level: 2 });

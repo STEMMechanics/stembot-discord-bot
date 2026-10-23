@@ -10,6 +10,11 @@ import type {
 } from '../integrations/openai-quiz.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import {
+  readMinigameScores,
+  toMinigameLeaderboard,
+  type MinigameLeaderboardEntry,
+} from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
 
 export interface StemQuizConfig {
@@ -41,6 +46,7 @@ export interface StemQuizService {
   initialize(): Promise<void>;
   ensureQuestion(): Promise<void>;
   handleMessage(message: StemQuizMessage): Promise<void>;
+  getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
 
 interface StemQuizQuestionState extends StemQuizQuestion {
@@ -110,6 +116,18 @@ export class PersistentStemQuizService implements StemQuizService {
       }
 
       await this.publishNextQuestion(rootState, state);
+    });
+  }
+
+  public async getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]> {
+    if (!this.dependencies.config.enabled) {
+      return [];
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemQuizState(rootState[STATE_KEY]);
+      return toMinigameLeaderboard(state.scores, limit);
     });
   }
 
@@ -381,13 +399,13 @@ export class PersistentStemQuizService implements StemQuizService {
     return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
   }
 
-  private async enqueue(work: () => Promise<void>): Promise<void> {
+  private async enqueue<T>(work: () => Promise<T>): Promise<T> {
     const next = this.eventQueue.catch(() => undefined).then(work);
     this.eventQueue = next.then(
       () => undefined,
       () => undefined,
     );
-    await next;
+    return await next;
   }
 }
 
@@ -420,14 +438,7 @@ function readStemQuizState(value: unknown): StemQuizState {
   }
 
   const question = readQuestionState(value.question);
-  const scores: Record<string, number> = {};
-  if (isRecord(value.scores)) {
-    for (const [key, score] of Object.entries(value.scores)) {
-      if (key.length > 0 && typeof score === 'number' && Number.isInteger(score) && score >= 0) {
-        scores[key] = score;
-      }
-    }
-  }
+  const scores = readMinigameScores(value.scores);
   const processedMessageIds = Array.isArray(value.processedMessageIds)
     ? value.processedMessageIds
         .filter((id): id is string => typeof id === 'string')
