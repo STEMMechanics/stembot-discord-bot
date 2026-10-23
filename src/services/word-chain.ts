@@ -443,7 +443,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       await this.react(message, VALIDATION_UNAVAILABLE_REACTION);
       await this.replySafely(
         message,
-        '⏳ I’m not sure I can check that word right now. The round is still open — please try another word in a moment.',
+        '⏳ I couldn’t verify that word just now — the round is still open, so try another word in a moment.',
       );
       return;
     }

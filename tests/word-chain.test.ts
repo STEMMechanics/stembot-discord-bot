@@ -459,7 +459,7 @@ describe('STEM word chain service', () => {
 
     expect(candidate.react).toHaveBeenCalledWith('⏳');
     expect(candidate.reply).toHaveBeenCalledWith(
-      '⏳ I’m not sure I can check that word right now. The round is still open — please try another word in a moment.',
+      '⏳ I couldn’t verify that word just now — the round is still open, so try another word in a moment.',
     );
     expect(state.state).toMatchObject({
       stemWordChain: {
