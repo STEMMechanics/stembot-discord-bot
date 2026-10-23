@@ -178,7 +178,12 @@ describe('counting-chain service', () => {
 
     expect(message.react).toHaveBeenCalledWith('⚠️');
     expect(message.reply).toHaveBeenCalledWith('I could not read that image. Please try again.');
-    expect(state.state).toEqual({});
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastProcessedMessageId: 'message-1',
+      },
+    });
   });
 
   it('does not change the game when the recognizer fails', async () => {
@@ -195,7 +200,12 @@ describe('counting-chain service', () => {
 
     expect(message.react).toHaveBeenCalledWith('⚠️');
     expect(message.reply).toHaveBeenCalledWith('I could not read that image. Please try again.');
-    expect(state.state).toEqual({});
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastProcessedMessageId: 'message-1',
+      },
+    });
   });
 
   it('serializes simultaneous messages in arrival order', async () => {
@@ -238,6 +248,98 @@ describe('counting-chain service', () => {
     expect(state.state).toMatchObject({
       countingChain: {
         expectedNumber: 3,
+      },
+    });
+  });
+
+  it('reconciles image messages posted while the bot was offline and does not replay them', async () => {
+    const state = new MemoryStateStore();
+    const firstService = createService(state, {
+      recognizeNumber: vi.fn().mockResolvedValue(1),
+    });
+    const checkpointMessageId = '1562802766370447380';
+    await firstService.handleMessage(createMessage('user-1', checkpointMessageId));
+
+    const offlineFirst = createHistoryMessage('user-2', '1562802766370447381');
+    const offlineSecond = createHistoryMessage('user-3', '1562802766370447382');
+    const checkpoint = createHistoryMessage('user-1', checkpointMessageId, {
+      botReactionEmojis: ['👍'],
+    });
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(3),
+    };
+    const service = createService(state, recognizer);
+    const historyProvider = vi
+      .fn<() => Promise<readonly CountingChainHistoryMessage[]>>()
+      .mockResolvedValue([offlineSecond, checkpoint, offlineFirst]);
+
+    await service.initialize(historyProvider);
+
+    expect(historyProvider).toHaveBeenCalledOnce();
+    expect(recognizer.recognizeNumber).toHaveBeenCalledTimes(2);
+    expect(offlineFirst.react).toHaveBeenCalledWith('👍');
+    expect(offlineSecond.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 4,
+        lastAuthorId: 'user-3',
+        lastMessageId: '1562802766370447382',
+        lastProcessedMessageId: '1562802766370447382',
+      },
+    });
+
+    const restartedRecognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>(),
+    };
+    const restartedService = createService(state, restartedRecognizer);
+    await restartedService.initialize(() =>
+      Promise.resolve([offlineSecond, checkpoint, offlineFirst]),
+    );
+
+    expect(restartedRecognizer.recognizeNumber).not.toHaveBeenCalled();
+    expect(offlineFirst.react).toHaveBeenCalledTimes(1);
+    expect(offlineSecond.react).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles an offline failure before continuing the reset chain', async () => {
+    const state = new MemoryStateStore();
+    const firstService = createService(state, {
+      recognizeNumber: vi.fn().mockResolvedValue(1),
+    });
+    const checkpointMessageId = '1562802766370447390';
+    await firstService.handleMessage(createMessage('user-1', checkpointMessageId));
+
+    const failedMessage = createHistoryMessage('user-2', '1562802766370447391');
+    const acceptedAfterReset = createHistoryMessage('user-3', '1562802766370447392');
+    const checkpoint = createHistoryMessage('user-1', checkpointMessageId, {
+      botReactionEmojis: ['👍'],
+    });
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(9)
+        .mockResolvedValueOnce(1),
+    };
+    const service = createService(state, recognizer);
+
+    await service.initialize(() =>
+      Promise.resolve([acceptedAfterReset, failedMessage, checkpoint]),
+    );
+
+    expect(failedMessage.react).toHaveBeenCalledWith('❌');
+    expect(failedMessage.reply).toHaveBeenCalledOnce();
+    expect(acceptedAfterReset.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 2,
+        lastAuthorId: 'user-3',
+        lastMessageId: '1562802766370447392',
+        lastProcessedMessageId: '1562802766370447392',
+        lastRound: 1,
+        lastRoundReason: 'wrong-number',
       },
     });
   });

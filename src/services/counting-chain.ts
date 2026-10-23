@@ -21,6 +21,7 @@ export interface CountingChainMessage {
   authorId: string;
   authorIsBot: boolean;
   attachments: readonly CountingChainAttachment[];
+  botReactionEmojis?: readonly string[];
   react(emoji: string): Promise<void>;
   reply(content: string): Promise<void>;
 }
@@ -65,7 +66,9 @@ export interface CountingChainServiceDependencies {
   clock?: () => Date;
 }
 
-type CountingChainGameState = CountingChainGameStatus;
+type CountingChainGameState = CountingChainGameStatus & {
+  lastProcessedMessageId: string | null;
+};
 
 interface CountingChainState {
   version: 1;
@@ -106,7 +109,7 @@ export class PersistentCountingChainService implements CountingChainService {
         } catch (error: unknown) {
           this.dependencies.logger.warn(
             { err: error, channelId: this.dependencies.config.channelId },
-            'Counting chain history recovery failed; starting from the default state',
+            'Counting chain startup reconciliation failed; retrying on next startup',
           );
         }
 
@@ -157,24 +160,14 @@ export class PersistentCountingChainService implements CountingChainService {
     const rootState = await this.dependencies.state.load();
     const rawCountingChainState = rootState[STATE_KEY];
     const state = readCountingChainState(rawCountingChainState, channelId);
-    if (state.game && !state.historyRecoveryPending) {
-      if (!hasFlatGameState(rawCountingChainState)) {
-        writeCountingChainState(rootState, state);
-        await this.dependencies.state.save(rootState);
-      }
-      this.dependencies.logger.info(
-        {
-          channelId,
-          stateSource: hasFlatGameState(rawCountingChainState) ? 'current' : 'legacy',
-        },
-        'Counting chain state already exists; skipping history recovery',
-      );
-      return;
-    }
 
     this.dependencies.logger.info(
-      { channelId },
-      'Counting chain startup recovery checking recent Discord history',
+      {
+        channelId,
+        hasPersistedGame: state.game !== null,
+        historyRecoveryPending: state.historyRecoveryPending,
+      },
+      'Counting chain startup reconciliation checking Discord history',
     );
     let history: readonly CountingChainHistoryMessage[];
     try {
@@ -182,9 +175,14 @@ export class PersistentCountingChainService implements CountingChainService {
     } catch (error: unknown) {
       this.dependencies.logger.warn(
         { err: error, channelId },
-        'Counting chain Discord history could not be read; silently resetting',
+        'Counting chain Discord history could not be read; retaining state for retry',
       );
-      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state, true);
+      await saveHistoryRecoveryPending(
+        rootState,
+        state,
+        this.currentTime(),
+        this.dependencies.state,
+      );
       return;
     }
 
@@ -194,16 +192,26 @@ export class PersistentCountingChainService implements CountingChainService {
     );
     const orderedHistory = sortHistoryNewestFirst(history);
     const newestMessage = orderedHistory[0];
-    const latestMessage = findLatestRelevantHistoryMessage(orderedHistory);
     this.dependencies.logger.info(
       {
         channelId,
         newestMessageId: newestMessage?.id,
         newestMessageAuthorIsBot: newestMessage?.authorIsBot,
         newestMessageAttachmentCount: newestMessage?.attachments.length,
-        selectedMessageId: latestMessage?.id,
       },
-      'Counting chain history candidate selected',
+      'Counting chain history newest message identified',
+    );
+
+    const checkpointMessageId = state.game?.lastProcessedMessageId ?? state.game?.lastMessageId;
+    if (checkpointMessageId && isDiscordSnowflake(checkpointMessageId)) {
+      await this.reconcileHistoryAfterCheckpoint(orderedHistory, checkpointMessageId);
+      return;
+    }
+
+    const latestMessage = findLatestRelevantHistoryMessage(orderedHistory);
+    this.dependencies.logger.info(
+      { channelId, selectedMessageId: latestMessage?.id },
+      'Counting chain history candidate selected for initial recovery',
     );
     if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
       this.dependencies.logger.info(
@@ -242,6 +250,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRound: recognizedNumber,
         lastRoundAt: this.currentTime().toISOString(),
         lastRoundReason: null,
+        lastProcessedMessageId: latestMessage.id,
       };
       state.historyRecoveryPending = false;
       writeCountingChainState(rootState, state);
@@ -262,6 +271,61 @@ export class PersistentCountingChainService implements CountingChainService {
         'Counting chain history image could not be read; silently resetting',
       );
       await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
+    }
+  }
+
+  private async reconcileHistoryAfterCheckpoint(
+    history: readonly CountingChainHistoryMessage[],
+    checkpointMessageId: string,
+  ): Promise<void> {
+    const pendingMessages = sortHistoryOldestFirst(history).filter(
+      (message) =>
+        !message.authorIsBot &&
+        isDiscordMessageAfter(message.id, checkpointMessageId) &&
+        selectImageAttachment(message.attachments) !== undefined,
+    );
+
+    this.dependencies.logger.info(
+      {
+        channelId: this.dependencies.config.channelId,
+        checkpointMessageId,
+        pendingImageCount: pendingMessages.length,
+        newestPendingMessageId: pendingMessages.at(-1)?.id,
+      },
+      'Counting chain startup reconciliation found pending images',
+    );
+
+    try {
+      for (const message of pendingMessages) {
+        await this.processMessage(message);
+      }
+
+      const latestRootState = await this.dependencies.state.load();
+      const latestState = readCountingChainState(
+        latestRootState[STATE_KEY],
+        this.dependencies.config.channelId,
+      );
+      latestState.historyRecoveryPending = false;
+      writeCountingChainState(latestRootState, latestState);
+      await this.dependencies.state.save(latestRootState);
+      this.dependencies.logger.info(
+        {
+          channelId: this.dependencies.config.channelId,
+          checkpointMessageId,
+          processedImageCount: pendingMessages.length,
+        },
+        'Counting chain startup reconciliation completed',
+      );
+    } catch (error: unknown) {
+      const latestRootState = await this.dependencies.state.load();
+      const latestState = readCountingChainState(
+        latestRootState[STATE_KEY],
+        this.dependencies.config.channelId,
+      );
+      latestState.historyRecoveryPending = true;
+      writeCountingChainState(latestRootState, latestState);
+      await this.dependencies.state.save(latestRootState);
+      throw error;
     }
   }
 
@@ -299,6 +363,7 @@ export class PersistentCountingChainService implements CountingChainService {
         RECOGNITION_FAILURE_REACTION,
         'I could not read that image. Please try again.',
       );
+      await this.markMessageProcessed(message);
       return;
     }
 
@@ -308,6 +373,7 @@ export class PersistentCountingChainService implements CountingChainService {
         RECOGNITION_FAILURE_REACTION,
         'I could not read that image. Please try again.',
       );
+      await this.markMessageProcessed(message);
       return;
     }
 
@@ -330,6 +396,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRound: game.lastRound,
         lastRoundAt: game.lastRoundAt,
         lastRoundReason: game.lastRoundReason,
+        lastProcessedMessageId: message.id,
       };
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
@@ -347,6 +414,7 @@ export class PersistentCountingChainService implements CountingChainService {
       lastRound: roundScore,
       lastRoundAt: now.toISOString(),
       lastRoundReason: message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number',
+      lastProcessedMessageId: message.id,
     });
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
@@ -395,6 +463,10 @@ export class PersistentCountingChainService implements CountingChainService {
   }
 
   private async react(message: CountingChainMessage, emoji: string): Promise<void> {
+    if (message.botReactionEmojis?.includes(emoji)) {
+      return;
+    }
+
     try {
       await message.react(emoji);
     } catch (error: unknown) {
@@ -403,6 +475,17 @@ export class PersistentCountingChainService implements CountingChainService {
         'Counting chain reaction could not be added',
       );
     }
+  }
+
+  private async markMessageProcessed(message: CountingChainMessage): Promise<void> {
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY], message.channelId);
+    const game = state.game ?? createInitialGameState(this.currentTime());
+    game.lastProcessedMessageId = message.id;
+    game.updatedAt = this.currentTime().toISOString();
+    state.game = game;
+    writeCountingChainState(rootState, state);
+    await this.dependencies.state.save(rootState);
   }
 
   private async publishInfo(): Promise<void> {
@@ -473,6 +556,20 @@ async function saveInitialState(
   await stateStore.save(rootState);
 }
 
+async function saveHistoryRecoveryPending(
+  rootState: JsonState,
+  state: CountingChainState,
+  now: Date,
+  stateStore: StateStore<JsonState>,
+): Promise<void> {
+  if (!state.game) {
+    state.game = createInitialGameState(now);
+  }
+  state.historyRecoveryPending = true;
+  writeCountingChainState(rootState, state);
+  await stateStore.save(rootState);
+}
+
 function writeCountingChainState(rootState: JsonState, state: CountingChainState): void {
   rootState[STATE_KEY] = {
     version: state.version,
@@ -507,6 +604,12 @@ function sortHistoryNewestFirst(
   return [...history].sort(compareDiscordMessageIdsNewestFirst);
 }
 
+function sortHistoryOldestFirst(
+  history: readonly CountingChainHistoryMessage[],
+): CountingChainHistoryMessage[] {
+  return sortHistoryNewestFirst(history).reverse();
+}
+
 function compareDiscordMessageIdsNewestFirst(
   left: CountingChainMessage,
   right: CountingChainMessage,
@@ -524,6 +627,18 @@ function compareSnowflakeIdsNewestFirst(left: string, right: string): number {
   }
 
   return 0;
+}
+
+function isDiscordSnowflake(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+function isDiscordMessageAfter(messageId: string, checkpointMessageId: string): boolean {
+  if (!isDiscordSnowflake(messageId) || !isDiscordSnowflake(checkpointMessageId)) {
+    return false;
+  }
+
+  return BigInt(messageId) > BigInt(checkpointMessageId);
 }
 
 function isCountingChainFailureMessage(message: CountingChainHistoryMessage): boolean {
@@ -563,15 +678,6 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
   };
 }
 
-function hasFlatGameState(value: unknown): boolean {
-  return (
-    readCountingChainState(value).game !== null &&
-    isRecord(value) &&
-    !Object.prototype.hasOwnProperty.call(value, 'game') &&
-    !Object.prototype.hasOwnProperty.call(value, 'games')
-  );
-}
-
 function readGameState(value: unknown): CountingChainGameState | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -581,6 +687,12 @@ function readGameState(value: unknown): CountingChainGameState | undefined {
   const lastAuthorId = value.lastAuthorId;
   const lastMessageId = value.lastMessageId;
   const updatedAt = value.updatedAt;
+  const lastProcessedMessageId = Object.prototype.hasOwnProperty.call(
+    value,
+    'lastProcessedMessageId',
+  )
+    ? readNullableString(value.lastProcessedMessageId)
+    : readNullableString(lastMessageId);
   const legacyScore =
     typeof expectedNumber === 'number' && Number.isSafeInteger(expectedNumber)
       ? Math.max(0, expectedNumber - 1)
@@ -611,6 +723,7 @@ function readGameState(value: unknown): CountingChainGameState | undefined {
     lastRound,
     lastRoundAt,
     lastRoundReason,
+    lastProcessedMessageId,
   };
 }
 
@@ -628,6 +741,7 @@ function createInitialGameState(
     lastRound: 0,
     lastRoundAt: null,
     lastRoundReason: null,
+    lastProcessedMessageId: null,
     ...overrides,
   };
 }

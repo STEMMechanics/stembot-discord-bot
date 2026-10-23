@@ -236,6 +236,7 @@ when editing it offline:
     "expectedNumber": 67,
     "lastAuthorId": "DISCORD_USER_ID",
     "lastMessageId": "DISCORD_MESSAGE_ID",
+    "lastProcessedMessageId": "DISCORD_MESSAGE_ID",
     "updatedAt": "2026-10-23T00:00:00.000Z",
     "highScore": 66,
     "highScoreAt": "2026-10-22T23:55:00.000Z",
@@ -249,12 +250,21 @@ when editing it offline:
 `expectedNumber` is the next number accepted, `highScore` is the highest
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
-display note. The bot accepts older records without the score fields and fills
-them in on the next state write. It also accepts the previous nested `game` and
+display note. `lastProcessedMessageId` is the Discord history checkpoint used
+for startup reconciliation; it advances for accepted, reset, and unreadable
+image messages so a restart does not process the same message again. The bot
+accepts older records without the score fields or checkpoint and fills them in
+on the next state write. It also accepts the previous nested `game` and
 channel-keyed `games` shapes and rewrites them to this flat shape at startup.
-`historyRecoveryPending` is written only when Discord history could not be
-read; it causes the next startup to retry recovery rather than accepting the
-temporary reset as the authoritative chain state.
+
+On every startup, STEMBot reads the configured counting channel history and
+processes image messages newer than `lastProcessedMessageId` in chronological
+Discord message-ID order. This catches images posted while the container was
+offline and preserves the normal reactions, resets, score updates, and info
+message updates. The history reader paginates the channel rather than limiting
+recovery to the most recent 50 messages. `historyRecoveryPending` is written
+when Discord history or reconciliation cannot complete; it causes the next
+startup to retry while retaining the last durable game state.
 
 Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 
