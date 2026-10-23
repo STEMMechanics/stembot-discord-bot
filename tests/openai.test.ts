@@ -84,7 +84,40 @@ describe('OpenAI number recognizer', () => {
     await expect(recognizer.recognizeNumber(image)).resolves.toBeNull();
   });
 
-  it('reports an incomplete response when the model returns no structured output', async () => {
+  it('retries an incomplete high-effort response with low reasoning effort', async () => {
+    const incompleteResponse = new Response(
+      JSON.stringify({
+        id: 'response-incomplete',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        output: [{ type: 'reasoning', content: [] }],
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(incompleteResponse)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ output_text: '{"number": 17}' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const recognizer = new OpenAINumberRecognizer({
+      apiKey: 'test-key',
+      model: 'test-model',
+      reasoningEffort: 'max',
+      timeoutMs: 1000,
+      logger,
+      fetchImplementation,
+    });
+
+    await expect(recognizer.recognizeNumber(image)).resolves.toBe(17);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    const retryRequest = fetchImplementation.mock.calls[1]?.[1];
+    expect(JSON.parse(String(retryRequest?.body)).reasoning.effort).toBe('low');
+  });
+
+  it('reports an incomplete low-effort response when no structured output is returned', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -99,7 +132,7 @@ describe('OpenAI number recognizer', () => {
     const recognizer = new OpenAINumberRecognizer({
       apiKey: 'test-key',
       model: 'test-model',
-      reasoningEffort: 'max',
+      reasoningEffort: 'low',
       timeoutMs: 1000,
       logger,
       fetchImplementation,

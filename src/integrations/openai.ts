@@ -27,6 +27,7 @@ const recognitionSchema = z.object({
 
 const FRAME_LIMIT = 4;
 const MAX_OUTPUT_TOKENS = 512;
+const FALLBACK_REASONING_EFFORT = 'low';
 
 /**
  * Uses the OpenAI Responses API only as an image reader. The counting rules
@@ -41,6 +42,30 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
 
   public async recognizeNumber(image: NumberImage): Promise<number | null> {
     const frames = await createPngFrames(image);
+    let body = await this.requestRecognition(frames, this.options.reasoningEffort);
+    const diagnostics = summarizeResponse(body, readOutputText(body));
+    if (
+      diagnostics.incompleteReason === 'max_output_tokens' &&
+      this.options.reasoningEffort !== FALLBACK_REASONING_EFFORT
+    ) {
+      this.options.logger.warn(
+        {
+          ...diagnostics,
+          configuredReasoningEffort: this.options.reasoningEffort,
+          retryReasoningEffort: FALLBACK_REASONING_EFFORT,
+        },
+        'OpenAI number recognition exhausted its token budget; retrying with low reasoning effort',
+      );
+      body = await this.requestRecognition(frames, FALLBACK_REASONING_EFFORT);
+    }
+
+    return parseRecognitionResponse(body, this.options.logger);
+  }
+
+  private async requestRecognition(
+    frames: readonly Buffer[],
+    reasoningEffort: string,
+  ): Promise<unknown> {
     const response = await this.fetchImplementation('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
@@ -50,7 +75,7 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
       signal: AbortSignal.timeout(this.options.timeoutMs),
       body: JSON.stringify({
         model: this.options.model,
-        reasoning: { effort: this.options.reasoningEffort },
+        reasoning: { effort: reasoningEffort },
         store: false,
         max_output_tokens: MAX_OUTPUT_TOKENS,
         input: [
@@ -94,35 +119,35 @@ export class OpenAINumberRecognizer implements NumberRecognizer {
       throw new Error(`OpenAI number recognition failed with HTTP ${response.status}`);
     }
 
-    const body: unknown = await response.json();
-    const outputText = readOutputText(body);
-    if (!outputText) {
-      const diagnostics = summarizeResponse(body, outputText);
-      this.options.logger.warn(
-        diagnostics,
-        'OpenAI number recognition returned no structured output',
-      );
-      throw new Error(
-        `OpenAI number recognition returned no structured output (${formatDiagnostics(diagnostics)})`,
-      );
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(outputText);
-    } catch (error: unknown) {
-      throw new Error('OpenAI number recognition returned invalid JSON', { cause: error });
-    }
-
-    const result = recognitionSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error('OpenAI number recognition returned an invalid number result', {
-        cause: result.error,
-      });
-    }
-
-    return result.data.number;
+    return response.json();
   }
+}
+
+function parseRecognitionResponse(body: unknown, logger: AppLogger): number | null {
+  const outputText = readOutputText(body);
+  if (!outputText) {
+    const diagnostics = summarizeResponse(body, outputText);
+    logger.warn(diagnostics, 'OpenAI number recognition returned no structured output');
+    throw new Error(
+      `OpenAI number recognition returned no structured output (${formatDiagnostics(diagnostics)})`,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(outputText);
+  } catch (error: unknown) {
+    throw new Error('OpenAI number recognition returned invalid JSON', { cause: error });
+  }
+
+  const result = recognitionSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error('OpenAI number recognition returned an invalid number result', {
+      cause: result.error,
+    });
+  }
+
+  return result.data.number;
 }
 
 interface ResponseDiagnostics {

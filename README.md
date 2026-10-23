@@ -76,7 +76,9 @@ and the Message Content intent. If it is present but the image cannot be read,
 the following warning identifies whether the Discord CDN download, image
 conversion, or OpenAI response failed. OpenAI responses that are incomplete or
 refused are reported with a safe response summary rather than the image or
-full model payload.
+full model payload. If an existing deployment still uses a higher reasoning
+setting and exhausts its output budget, STEMBot retries that recognition once
+with low reasoning effort.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single information embed
 with the current number, high score and last round. Set
@@ -186,7 +188,7 @@ npm run validate
 | `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No           | Status request timeout; defaults to 5 seconds.                                              |
 | `OPENAI_API_KEY`                            | When enabled | OpenAI API key; keep it in the deployment secret store.                                     |
 | `OPENAI_MODEL`                              | No           | Vision model; defaults to `gpt-6-luna`.                                                     |
-| `OPENAI_REASONING_EFFORT`                   | No           | Model reasoning setting; defaults to `max` and remains model-dependent.                     |
+| `OPENAI_REASONING_EFFORT`                   | No           | Model reasoning setting; defaults to `low` for this simple image-recognition task.          |
 | `OPENAI_TIMEOUT`                            | No           | OpenAI request timeout in seconds; defaults to 180.                                         |
 | `COUNTING_CHAIN_ENABLED`                    | No           | Enable the image-based minigame; defaults to `false`.                                       |
 | `COUNTING_CHAIN_CHANNEL_ID`                 | When enabled | Discord channel watched by the minigame.                                                    |

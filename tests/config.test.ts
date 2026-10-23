@@ -29,7 +29,7 @@ describe('loadConfig', () => {
       },
       openai: {
         model: 'gpt-6-luna',
-        reasoningEffort: 'max',
+        reasoningEffort: 'low',
         timeoutMs: 180000,
       },
       countingChain: {

@@ -88,7 +88,7 @@ const environmentSchema = z.object({
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: z.string().trim().min(1).default('gpt-6-luna'),
-  OPENAI_REASONING_EFFORT: z.string().trim().min(1).default('max'),
+  OPENAI_REASONING_EFFORT: z.string().trim().min(1).default('low'),
   OPENAI_TIMEOUT: positiveInteger(180, 600),
   WORKSHOP_TIME_ZONE: z.string().trim().min(1).default('Australia/Brisbane'),
   WORKSHOP_ANNOUNCEMENTS_ENABLED: booleanFromEnvironment(true),
