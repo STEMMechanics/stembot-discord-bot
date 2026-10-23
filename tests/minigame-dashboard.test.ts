@@ -45,5 +45,8 @@ describe('STEM minigame dashboard', () => {
       ]),
     );
     expect(embed.fields?.some((field) => field.name === 'Minigame leaderboard')).toBe(false);
+    expect(
+      embed.fields?.filter((field) => field.name === '\u200b' && field.value === '\u200b'),
+    ).toHaveLength(3);
   });
 });

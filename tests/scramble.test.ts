@@ -120,6 +120,34 @@ describe('STEM scramble service', () => {
     });
   });
 
+  it('skips an answer that was sent before the replacement scramble was posted', async () => {
+    const state = new MemoryStateStore();
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi
+        .fn()
+        .mockResolvedValueOnce(word('circuit'))
+        .mockResolvedValueOnce(word('robot')),
+    };
+    const publisher = {
+      send: vi.fn().mockResolvedValueOnce('200').mockResolvedValueOnce('400'),
+    };
+    const service = createService(state, generator, publisher);
+    const first = createMessage('user-1', '300', 'circuit');
+    const stale = createMessage('user-2', '350', 'circuit');
+
+    await service.initialize();
+    await service.handleMessage(first);
+    await service.handleMessage(stale);
+
+    expect(first.react).toHaveBeenCalledWith('✅');
+    expect(stale.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        round: { word: 'robot', messageId: '400', wrongAttempts: 0 },
+      },
+    });
+  });
+
   it('passes recent words to the generator and regenerates an exact duplicate', async () => {
     const state = new MemoryStateStore();
     const generateWord = vi

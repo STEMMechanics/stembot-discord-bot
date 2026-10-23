@@ -118,6 +118,32 @@ describe('STEM word chain service', () => {
     });
   });
 
+  it('skips a word sent before the replacement theme prompt was posted', async () => {
+    const state = new MemoryStateStore();
+    const publisher = {
+      send: vi.fn().mockResolvedValueOnce('200').mockResolvedValueOnce('400'),
+    };
+    const service = createService(state, publisher);
+    const invalid = createMessage('300', 'robot', { authorId: 'one' });
+    const stale = createMessage('350', 'robot', { authorId: 'two' });
+
+    await service.initialize();
+    await service.handleMessage(invalid);
+    await service.handleMessage(stale);
+
+    expect(invalid.react).toHaveBeenCalledWith('❌');
+    expect(stale.react).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        themeIndex: 1,
+        roundNumber: 2,
+        lastWord: null,
+        streak: 0,
+      },
+    });
+  });
+
   it('tracks each member’s best correct-guess streak within a round', async () => {
     const state = new MemoryStateStore();
     const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };

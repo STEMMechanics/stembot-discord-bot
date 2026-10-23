@@ -1187,6 +1187,7 @@ export function buildMinigameInfoEmbed(
         ),
         inline: false,
       },
+      { name: '\u200b', value: '\u200b', inline: false },
       {
         name: 'Quiz · correct answers',
         value: formatMinigameLeaderboard(
@@ -1196,6 +1197,7 @@ export function buildMinigameInfoEmbed(
         ),
         inline: false,
       },
+      { name: '\u200b', value: '\u200b', inline: false },
       {
         name: 'Scramble · solved rounds',
         value: formatMinigameLeaderboard(
@@ -1205,6 +1207,7 @@ export function buildMinigameInfoEmbed(
         ),
         inline: false,
       },
+      { name: '\u200b', value: '\u200b', inline: false },
       {
         name: 'Word chain · best round streak',
         value: formatMinigameLeaderboard(

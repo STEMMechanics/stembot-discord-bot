@@ -921,6 +921,37 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('waits for a GIF already being recognized before processing the next GIF', async () => {
+    const state = new MemoryStateStore();
+    let releaseFirst!: (number: number) => void;
+    const firstRecognition = new Promise<number>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockReturnValueOnce(firstRecognition)
+        .mockResolvedValueOnce(2),
+    };
+    const service = createService(state, recognizer);
+    const first = createMessage('user-1', 'message-1');
+    const second = createMessage('user-2', 'message-2');
+    const firstProcessing = service.handleMessage(first);
+    const secondProcessing = service.handleMessage(second);
+
+    await vi.waitFor(() => {
+      expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    });
+    expect(second.react).not.toHaveBeenCalled();
+
+    releaseFirst(1);
+    await Promise.all([firstProcessing, secondProcessing]);
+
+    expect(first.react).toHaveBeenCalledWith('👍');
+    expect(second.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({ countingChain: { expectedNumber: 3 } });
+  });
+
   it('continues from persistent state after a service restart', async () => {
     const state = new MemoryStateStore();
     const firstService = createService(state, {

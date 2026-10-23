@@ -16,6 +16,7 @@ import {
   type MinigameLeaderboardEntry,
 } from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
+import { isDiscordMessageBefore } from './message-order.js';
 
 export interface StemQuizConfig {
   enabled: boolean;
@@ -159,6 +160,22 @@ export class PersistentStemQuizService implements StemQuizService {
       this.dependencies.logger.debug(
         { channelId: message.channelId, messageId: message.id, questionId: question.id },
         'STEM quiz message ignored because it was already processed',
+      );
+      return;
+    }
+
+    if (isDiscordMessageBefore(message.id, question.messageId)) {
+      state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+      writeStemQuizState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          questionId: question.id,
+          questionMessageId: question.messageId,
+        },
+        'STEM quiz answer skipped because it was sent before the active question',
       );
       return;
     }

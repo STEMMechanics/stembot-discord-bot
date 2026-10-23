@@ -7,6 +7,7 @@ import type {
 } from '../integrations/openai-scramble.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { UserLevelService } from './user-levels.js';
+import { isDiscordMessageBefore } from './message-order.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
 import {
   readMinigameScores,
@@ -166,6 +167,22 @@ export class PersistentStemScrambleService implements StemScrambleService {
     const state = readStemScrambleState(rootState[STATE_KEY]);
     const round = state.round;
     if (!round || state.processedMessageIds.includes(message.id)) {
+      return;
+    }
+
+    if (isDiscordMessageBefore(message.id, round.messageId)) {
+      state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+      writeStemScrambleState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          roundNumber: round.roundNumber,
+          roundMessageId: round.messageId,
+        },
+        'STEM scramble answer skipped because it was sent before the active round',
+      );
       return;
     }
 

@@ -60,6 +60,9 @@ When `COUNTING_CHAIN_ENABLED=true`, STEMBot watches only
 The first accepted image must contain `1`; each following image must contain the next number and come
 from a different Discord member than the previous accepted image. Accepted
 images receive a `👍` reaction and advance the persisted channel state.
+Counting images are serialized and ordered by their Discord message IDs, so a
+second GIF posted while the first is being recognized waits for the first
+result and is then checked against the next number.
 
 A wrong number or two consecutive images from the same member receives `❌`,
 posts a short game-over message, and resets the channel to `1`. With review
@@ -201,6 +204,11 @@ temporarily unavailable, the round stays open and the move is not counted. The
 word checks and definitions are cached and rate limited per member and globally.
 The
 bundled themes are Space, Biology, Chemistry, Technology and Physics.
+
+Answers for quiz, scramble and word-chain rounds are ordered against the
+prompt message ID. If someone submitted an answer before STEMBot posted the
+replacement prompt, that answer is marked as handled and skipped without a
+wrong-answer penalty or an extra round change.
 
 ### Mention-based STEM answers
 

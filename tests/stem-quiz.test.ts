@@ -218,6 +218,37 @@ describe('STEM quiz service', () => {
     await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
   });
 
+  it('skips an answer that was sent before the replacement question was posted', async () => {
+    const state = new MemoryStateStore();
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(question('water'))
+        .mockResolvedValueOnce(question('gravity')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi.fn().mockResolvedValueOnce('200').mockResolvedValueOnce('400'),
+    };
+    const service = createService(state, engine, publisher);
+    const first = createMessage('user-1', '300', 'water');
+    const stale = createMessage('user-2', '350', 'water');
+
+    await service.initialize();
+    await service.handleMessage(first);
+    await service.handleMessage(stale);
+
+    expect(first.react).toHaveBeenCalledWith('✅');
+    expect(stale.react).not.toHaveBeenCalled();
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemQuiz: {
+        question: { answer: 'gravity', messageId: '400', wrongAttempts: 0 },
+        scores: { 'user-1': 1 },
+      },
+    });
+  });
+
   it('passes recent questions to the generator and regenerates an exact duplicate', async () => {
     const state = new MemoryStateStore();
     const generateQuestion = vi

@@ -6,6 +6,7 @@ import {
   toMinigameLeaderboard,
   type MinigameLeaderboardEntry,
 } from './minigame-leaderboards.js';
+import { isDiscordMessageBefore } from './message-order.js';
 import type { UserLevelService } from './user-levels.js';
 
 export interface StemWordChainConfig {
@@ -283,6 +284,22 @@ export class PersistentStemWordChainService implements StemWordChainService {
     }
 
     const theme = getTheme(state.themeIndex);
+    if (state.promptMessageId && isDiscordMessageBefore(message.id, state.promptMessageId)) {
+      state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+      writeStemWordChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          roundNumber: state.roundNumber,
+          promptMessageId: state.promptMessageId,
+        },
+        'STEM word chain answer skipped because it was sent before the active round',
+      );
+      return;
+    }
+
     const word = normalizeWordChainWord(message.content);
     const expectedLetter = state.lastWord?.slice(-1) ?? undefined;
     const startsWithExpectedLetter =
