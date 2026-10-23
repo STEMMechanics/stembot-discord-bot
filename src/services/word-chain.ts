@@ -224,6 +224,7 @@ const STATE_KEY = 'stemWordChain';
 const PASS_REACTION = '✅';
 const FAILURE_REACTION = '❌';
 const NEAR_MISS_REACTION = '🤔';
+const VALIDATION_UNAVAILABLE_REACTION = '⏳';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_THEME_VALIDATION_CACHE_ENTRIES = 500;
 const THEME_VALIDATION_USER_COOLDOWN_MS = 5_000;
@@ -439,6 +440,11 @@ export class PersistentStemWordChainService implements StemWordChainService {
 
     const fitsTheme = await this.isWordInTheme(theme, word, message.authorId);
     if (fitsTheme === undefined) {
+      await this.react(message, VALIDATION_UNAVAILABLE_REACTION);
+      await this.replySafely(
+        message,
+        '⏳ I’m not sure I can check that word right now. The round is still open — please try another word in a moment.',
+      );
       return;
     }
 
@@ -919,7 +925,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     } catch (error: unknown) {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id },
-        'STEM word chain hint reply could not be sent',
+        'STEM word chain reply could not be sent',
       );
     }
   }

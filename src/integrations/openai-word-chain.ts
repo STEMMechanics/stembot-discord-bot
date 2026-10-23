@@ -41,7 +41,7 @@ const hintSchema = z.object({
 });
 
 const FALLBACK_REASONING_EFFORT = 'low';
-const OUTPUT_TOKENS = 150;
+const OUTPUT_TOKENS = 512;
 
 export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator {
   private readonly fetchImplementation: typeof fetch;
@@ -60,9 +60,8 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
       `Candidate word: <candidate-word>${word}</candidate-word>`,
     ].join('\n');
 
-    let body = await this.request(
+    const body = await this.requestWithFallback(
       prompt,
-      this.options.reasoningEffort,
       'stem_word_chain_validation',
       {
         type: 'object',
@@ -70,26 +69,15 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
         required: ['valid'],
         additionalProperties: false,
       },
+      'validation',
     );
-    if (
-      isIncompleteForTokenBudget(body) &&
-      this.options.reasoningEffort !== FALLBACK_REASONING_EFFORT
-    ) {
-      this.options.logger.warn(
-        { configuredReasoningEffort: this.options.reasoningEffort },
-        'OpenAI STEM word-chain validation exhausted its token budget; retrying with low reasoning effort',
-      );
-      body = await this.request(prompt, FALLBACK_REASONING_EFFORT, 'stem_word_chain_validation', {
-        type: 'object',
-        properties: { valid: { type: 'boolean' } },
-        required: ['valid'],
-        additionalProperties: false,
-      });
-    }
 
     const outputText = readOutputText(body);
     if (!outputText) {
-      throw new Error('OpenAI STEM word-chain validation returned no structured output');
+      const diagnostics = summarizeResponse(body, outputText);
+      throw new Error(
+        `OpenAI STEM word-chain validation returned no structured output (${formatDiagnostics(diagnostics)})`,
+      );
     }
 
     let parsed: unknown;
@@ -120,9 +108,8 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
       `Word: <word>${word}</word>`,
     ].join('\n');
 
-    let body = await this.request(
+    const body = await this.requestWithFallback(
       prompt,
-      this.options.reasoningEffort,
       'stem_word_chain_definition',
       {
         type: 'object',
@@ -130,26 +117,15 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
         required: ['definition'],
         additionalProperties: false,
       },
+      'definition',
     );
-    if (
-      isIncompleteForTokenBudget(body) &&
-      this.options.reasoningEffort !== FALLBACK_REASONING_EFFORT
-    ) {
-      this.options.logger.warn(
-        { configuredReasoningEffort: this.options.reasoningEffort },
-        'OpenAI STEM word-chain definition exhausted its token budget; retrying with low reasoning effort',
-      );
-      body = await this.request(prompt, FALLBACK_REASONING_EFFORT, 'stem_word_chain_definition', {
-        type: 'object',
-        properties: { definition: { type: 'string', minLength: 1, maxLength: 280 } },
-        required: ['definition'],
-        additionalProperties: false,
-      });
-    }
 
     const outputText = readOutputText(body);
     if (!outputText) {
-      throw new Error('OpenAI STEM word-chain definition returned no structured output');
+      const diagnostics = summarizeResponse(body, outputText);
+      throw new Error(
+        `OpenAI STEM word-chain definition returned no structured output (${formatDiagnostics(diagnostics)})`,
+      );
     }
 
     let parsed: unknown;
@@ -188,24 +164,10 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
       '</excluded-words>',
     ].join('\n');
 
-    let body = await this.request(prompt, this.options.reasoningEffort, 'stem_word_chain_hint', {
-      type: 'object',
-      properties: {
-        word: { type: 'string', pattern: '^[A-Za-z]{1,40}$' },
-        hint: { type: 'string', minLength: 5, maxLength: 280 },
-      },
-      required: ['word', 'hint'],
-      additionalProperties: false,
-    });
-    if (
-      isIncompleteForTokenBudget(body) &&
-      this.options.reasoningEffort !== FALLBACK_REASONING_EFFORT
-    ) {
-      this.options.logger.warn(
-        { configuredReasoningEffort: this.options.reasoningEffort },
-        'OpenAI STEM word-chain hint exhausted its token budget; retrying with low reasoning effort',
-      );
-      body = await this.request(prompt, FALLBACK_REASONING_EFFORT, 'stem_word_chain_hint', {
+    const body = await this.requestWithFallback(
+      prompt,
+      'stem_word_chain_hint',
+      {
         type: 'object',
         properties: {
           word: { type: 'string', pattern: '^[A-Za-z]{1,40}$' },
@@ -213,12 +175,16 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
         },
         required: ['word', 'hint'],
         additionalProperties: false,
-      });
-    }
+      },
+      'hint',
+    );
 
     const outputText = readOutputText(body);
     if (!outputText) {
-      throw new Error('OpenAI STEM word-chain hint returned no structured output');
+      const diagnostics = summarizeResponse(body, outputText);
+      throw new Error(
+        `OpenAI STEM word-chain hint returned no structured output (${formatDiagnostics(diagnostics)})`,
+      );
     }
 
     let parsed: unknown;
@@ -275,21 +241,38 @@ export class OpenAIStemWordChainValidator implements StemWordChainThemeValidator
 
     return response.json();
   }
+
+  private async requestWithFallback(
+    prompt: string,
+    formatName: string,
+    schema: Record<string, unknown>,
+    operation: 'validation' | 'definition' | 'hint',
+  ): Promise<unknown> {
+    let body = await this.request(prompt, this.options.reasoningEffort, formatName, schema);
+    const outputText = readOutputText(body);
+    const diagnostics = summarizeResponse(body, outputText);
+
+    if (!outputText && !diagnostics.refusal) {
+      this.options.logger.warn(
+        {
+          ...diagnostics,
+          operation,
+          configuredReasoningEffort: this.options.reasoningEffort,
+          retryReasoningEffort: FALLBACK_REASONING_EFFORT,
+        },
+        'OpenAI STEM word-chain response returned no structured output; retrying with low reasoning effort',
+      );
+      body = await this.request(prompt, FALLBACK_REASONING_EFFORT, formatName, schema);
+    }
+
+    return body;
+  }
 }
 
 export function createOpenAIStemWordChainValidator(
   options: OpenAIStemWordChainValidatorOptions,
 ): StemWordChainThemeValidator {
   return new OpenAIStemWordChainValidator(options);
-}
-
-function isIncompleteForTokenBudget(value: unknown): boolean {
-  if (!isRecord(value) || value.status !== 'incomplete') {
-    return false;
-  }
-
-  const details = isRecord(value.incomplete_details) ? value.incomplete_details : undefined;
-  return details?.reason === 'max_output_tokens';
 }
 
 function readOutputText(value: unknown): string | undefined {
@@ -324,6 +307,87 @@ function readOutputText(value: unknown): string | undefined {
 
   const outputText = textParts.join('').trim();
   return outputText || undefined;
+}
+
+interface ResponseDiagnostics {
+  responseId: string | null;
+  status: string | null;
+  incompleteReason: string | null;
+  outputCount: number;
+  outputTypes: string[];
+  outputTextLength: number;
+  refusal: boolean;
+}
+
+function summarizeResponse(value: unknown, outputText: string | undefined): ResponseDiagnostics {
+  if (!isRecord(value)) {
+    return {
+      responseId: null,
+      status: null,
+      incompleteReason: null,
+      outputCount: 0,
+      outputTypes: [],
+      outputTextLength: outputText?.length ?? 0,
+      refusal: false,
+    };
+  }
+
+  const output = Array.isArray(value.output) ? value.output : [];
+  const outputTypes = new Set<string>();
+  let refusal = false;
+  for (const outputItem of output) {
+    if (!isRecord(outputItem)) {
+      continue;
+    }
+
+    if (typeof outputItem.type === 'string') {
+      outputTypes.add(outputItem.type);
+    }
+
+    if (!Array.isArray(outputItem.content)) {
+      continue;
+    }
+
+    for (const content of outputItem.content) {
+      if (!isRecord(content)) {
+        continue;
+      }
+
+      if (typeof content.type === 'string') {
+        outputTypes.add(content.type);
+      }
+      if (content.type === 'refusal' || typeof content.refusal === 'string') {
+        refusal = true;
+      }
+    }
+  }
+
+  const incompleteDetails = isRecord(value.incomplete_details)
+    ? value.incomplete_details
+    : undefined;
+
+  return {
+    responseId: typeof value.id === 'string' ? value.id : null,
+    status: typeof value.status === 'string' ? value.status : null,
+    incompleteReason:
+      incompleteDetails && typeof incompleteDetails.reason === 'string'
+        ? incompleteDetails.reason
+        : null,
+    outputCount: output.length,
+    outputTypes: [...outputTypes].sort(),
+    outputTextLength: outputText?.length ?? 0,
+    refusal,
+  };
+}
+
+function formatDiagnostics(diagnostics: ResponseDiagnostics): string {
+  return [
+    `status=${diagnostics.status ?? 'unknown'}`,
+    `reason=${diagnostics.incompleteReason ?? 'none'}`,
+    `outputCount=${diagnostics.outputCount}`,
+    `outputTypes=${diagnostics.outputTypes.join('|') || 'none'}`,
+    `refusal=${diagnostics.refusal}`,
+  ].join(', ');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -149,4 +149,26 @@ describe('OpenAI STEM word-chain validator', () => {
     const retryRequest = fetchImplementation.mock.calls[1]?.[1];
     expect(JSON.parse(String(retryRequest?.body)).reasoning.effort).toBe('low');
   });
+
+  it('retries a missing structured result and reports response diagnostics when it persists', async () => {
+    const incompleteResponse = () =>
+      new Response(
+        JSON.stringify({
+          id: 'response-incomplete',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: [{ type: 'reasoning', content: [] }],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => incompleteResponse());
+    const validator = createValidator(fetchImplementation);
+
+    await expect(validator.isWordInTheme('Chemistry', 'yttric')).rejects.toThrow(
+      'status=incomplete, reason=max_output_tokens, outputCount=1, outputTypes=reasoning',
+    );
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
 });

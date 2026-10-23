@@ -457,7 +457,10 @@ describe('STEM word chain service', () => {
     const candidate = createMessage('candidate', 'quasar');
     await service.handleMessage(candidate);
 
-    expect(candidate.react).not.toHaveBeenCalled();
+    expect(candidate.react).toHaveBeenCalledWith('⏳');
+    expect(candidate.reply).toHaveBeenCalledWith(
+      '⏳ I’m not sure I can check that word right now. The round is still open — please try another word in a moment.',
+    );
     expect(state.state).toMatchObject({
       stemWordChain: {
         themeIndex: 0,
