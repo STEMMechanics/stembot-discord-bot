@@ -464,7 +464,14 @@ export class PersistentStemWordChainService implements StemWordChainService {
       await this.dependencies.state.save(rootState);
       await this.react(message, PASS_REACTION);
       await this.recordGameParticipation(message);
-      this.queueWordDefinition(message, theme, word, word.slice(-1), state.usedWords);
+      this.queueWordDefinition(
+        message,
+        theme,
+        word,
+        word.slice(-1),
+        state.usedWords,
+        state.roundNumber,
+      );
       this.dependencies.logger.info(
         {
           channelId: message.channelId,
@@ -596,6 +603,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     word: string | undefined,
   ): Promise<void> {
     const previousStreak = state.streak;
+    const currentHighestStreak = Math.max(state.bestStreak, previousStreak);
     const nextThemeIndex = (state.themeIndex + 1) % STEM_WORD_CHAIN_THEMES.length;
     const nextTheme = getTheme(nextThemeIndex);
     state.themeIndex = nextThemeIndex;
@@ -618,7 +626,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     await this.publishRound(
       rootState,
       state,
-      `💥 **${theme.name}** chain over at **${previousStreak}**! The theme is now **${nextTheme.name}**.`,
+      `💥 **${theme.name}** chain over. Streak this game: **${previousStreak}** · Current highest game streak: **${currentHighestStreak}**. The theme is now **${nextTheme.name}**.`,
     );
     this.dependencies.logger.info(
       {
@@ -680,6 +688,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     word: string,
     nextLetter: string,
     usedWords: readonly string[],
+    roundNumber: number,
   ): void {
     const next = this.definitionQueue
       .catch(() => undefined)
@@ -689,9 +698,11 @@ export class PersistentStemWordChainService implements StemWordChainService {
           return;
         }
 
+        const continuationWords = await this.getContinuationWords(theme, usedWords, roundNumber);
+
         try {
           await message.reply(
-            `📖 ${word} — ${definition}\n\n${formatWordChainContinuation(theme, nextLetter, usedWords)}`,
+            `📖 ${word} — ${definition}\n\n${formatWordChainContinuation(theme, nextLetter, continuationWords)}`,
           );
         } catch (error: unknown) {
           this.dependencies.logger.warn(
@@ -705,6 +716,28 @@ export class PersistentStemWordChainService implements StemWordChainService {
       () => undefined,
     );
     void next;
+  }
+
+  private async getContinuationWords(
+    theme: StemWordChainTheme,
+    acceptedWords: readonly string[],
+    roundNumber: number,
+  ): Promise<readonly string[]> {
+    try {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemWordChainState(rootState[STATE_KEY]);
+      if (state.roundNumber !== roundNumber || getTheme(state.themeIndex).name !== theme.name) {
+        return acceptedWords;
+      }
+
+      return [...new Set([...acceptedWords, ...state.usedWords])].slice(-MAX_USED_WORDS);
+    } catch (error: unknown) {
+      this.dependencies.logger.debug(
+        { err: error, theme: theme.name, roundNumber },
+        'STEM word chain continuation state could not be refreshed',
+      );
+      return acceptedWords;
+    }
   }
 
   private async getWordDefinition(

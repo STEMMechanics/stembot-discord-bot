@@ -109,6 +109,8 @@ describe('STEM word chain service', () => {
     expect(invalid.react).toHaveBeenCalledWith('❌');
     expect(publisher.send).toHaveBeenCalledTimes(2);
     expect(publisher.send.mock.calls[1]?.[1]).toContain('The theme is now **Biology**.');
+    expect(publisher.send.mock.calls[1]?.[1]).toContain('Streak this game: **1**');
+    expect(publisher.send.mock.calls[1]?.[1]).toContain('Current highest game streak: **1**');
     expect(state.state).toMatchObject({
       stemWordChain: {
         themeIndex: 1,
@@ -354,6 +356,44 @@ describe('STEM word chain service', () => {
     });
     expect(state.state).toMatchObject({
       stemWordChain: { lastWord: 'moon', streak: 1 },
+    });
+  });
+
+  it('includes an earlier word when it matches the next starting letter', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 2,
+        roundNumber: 18,
+        promptMessageId: '100',
+        lastWord: 'chemical',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 1,
+        bestStreak: 1,
+        roundStreaks: { 'user-one': 1 },
+        bestStreaks: { 'user-one': 1 },
+        usedWords: ['chemical'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-18') };
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+      getWordDefinition: vi
+        .fn<NonNullable<StemWordChainThemeValidator['getWordDefinition']>>()
+        .mockResolvedValue('A word used in chemistry.'),
+    };
+    const service = createService(state, publisher, themeValidator);
+    const message = createMessage('200', 'lactic');
+
+    await service.handleMessage(message);
+
+    await vi.waitFor(() => {
+      expect(message.reply).toHaveBeenCalledWith(
+        "📖 lactic — A word used in chemistry.\n\nGive me a word starting with **C** on the theme of **Chemistry**. You can't use the words **chemical**.",
+      );
     });
   });
 
