@@ -57,10 +57,12 @@ from a different Discord member than the previous accepted image. Accepted
 images receive a `👍` reaction and advance the persisted channel state.
 
 A wrong number or two consecutive images from the same member receives `❌`,
-posts a short game-over message, and resets the channel to `1`. An unreadable,
-unsupported or temporarily unavailable image receives `⚠️` and a retry message;
-it does not change the game state. Bot messages and messages outside the
-configured channel are ignored.
+posts a short game-over message, and resets the channel to `1`. With review
+disabled, an unreadable, unsupported or temporarily unavailable image receives
+`⚠️` and a retry message; it does not change the game state. With review
+enabled, the same image receives `🔎`, STEMBot mentions the moderator role and
+pauses the chain until a moderator decides. Bot messages and messages outside
+the configured channel are ignored.
 
 Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
 `COUNTING_CHAIN_REVIEW_ROLE_ID` to pause wrong or unreadable posts for
@@ -72,6 +74,8 @@ use `/review`; STEMBot resolves the persisted image that ended the game, so the
 member does not need to know a Discord message ID. While a review is pending,
 later posts are held until a moderator approves or rejects the pending post.
 The pending review is persisted across restarts.
+After the moderator reacts, STEMBot adds its final `👍` or `❌` reaction and
+deletes the temporary review request message.
 
 The bot downloads Discord CDN attachments, direct image URLs, and image URLs
 supplied by Discord embeds, samples animated GIF frames as PNG images, and sends
@@ -291,6 +295,7 @@ when editing it offline:
       "proposedNumber": 67,
       "reason": "wrong-number",
       "endedAt": "2026-10-23T00:00:00.000Z",
+      "reviewMessageId": "DISCORD_REVIEW_REPLY_ID",
       "requestedAt": "2026-10-23T00:00:00.000Z"
     }
   }

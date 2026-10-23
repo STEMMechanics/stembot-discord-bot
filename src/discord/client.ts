@@ -365,13 +365,23 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },
-    reply: async (content: string, options?: CountingChainReplyOptions): Promise<void> => {
-      await message.reply({
+    reply: async (content: string, options?: CountingChainReplyOptions): Promise<string> => {
+      const reply = await message.reply({
         content,
         allowedMentions: options?.mentionRoleId
           ? { roles: [options.mentionRoleId] }
           : { parse: [] },
       });
+      return reply.id;
+    },
+    deleteMessage: async (messageId: string): Promise<void> => {
+      const channel = message.channel;
+      if (!channel.isTextBased() || !('messages' in channel)) {
+        throw new Error(`Counting chain channel cannot delete message: ${message.channelId}`);
+      }
+
+      const reply = await channel.messages.fetch(messageId);
+      await reply.delete();
     },
   };
 }

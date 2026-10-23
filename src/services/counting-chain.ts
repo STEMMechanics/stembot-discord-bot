@@ -30,7 +30,8 @@ export interface CountingChainMessage {
   imageUrls?: readonly string[];
   botReactionEmojis?: readonly string[];
   react(emoji: string): Promise<void>;
-  reply(content: string, options?: CountingChainReplyOptions): Promise<void>;
+  reply(content: string, options?: CountingChainReplyOptions): Promise<string | undefined>;
+  deleteMessage?(messageId: string): Promise<void>;
 }
 
 export interface CountingChainReplyOptions {
@@ -110,6 +111,7 @@ interface CountingChainGameEnding {
 }
 
 interface CountingChainPendingReview extends CountingChainGameEnding {
+  reviewMessageId: string | null;
   requestedAt: string;
 }
 
@@ -614,6 +616,9 @@ export class PersistentCountingChainService implements CountingChainService {
       'Counting chain image received',
     );
 
+    const game = state.game ?? createInitialGameState(this.currentTime());
+    const sameUser = message.authorId === game.lastAuthorId;
+
     let recognizedNumber: number | null;
     try {
       const image = await this.downloadImage(imageSource);
@@ -623,6 +628,14 @@ export class PersistentCountingChainService implements CountingChainService {
         { err: error, channelId: message.channelId, messageId: message.id },
         'Counting chain image could not be read; game state unchanged',
       );
+      if (sameUser && this.isReviewEnabled()) {
+        await this.createReviewRequest(message, undefined, 'same-user');
+        return;
+      }
+      if (sameUser) {
+        await this.resetAfterRuleFailure(rootState, state, game, message, 'same-user', null);
+        return;
+      }
       if (this.isReviewEnabled()) {
         await this.createReviewRequest(message, undefined, 'unreadable');
         return;
@@ -637,6 +650,14 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     if (recognizedNumber === null) {
+      if (sameUser && this.isReviewEnabled()) {
+        await this.createReviewRequest(message, undefined, 'same-user');
+        return;
+      }
+      if (sameUser) {
+        await this.resetAfterRuleFailure(rootState, state, game, message, 'same-user', null);
+        return;
+      }
       if (this.isReviewEnabled()) {
         await this.createReviewRequest(message, undefined, 'unreadable');
         return;
@@ -660,7 +681,6 @@ export class PersistentCountingChainService implements CountingChainService {
       'Counting chain number recognized',
     );
 
-    const game = state.game ?? createInitialGameState(this.currentTime());
     const passes =
       recognizedNumber === game.expectedNumber && message.authorId !== game.lastAuthorId;
 
@@ -694,6 +714,24 @@ export class PersistentCountingChainService implements CountingChainService {
       return;
     }
 
+    await this.resetAfterRuleFailure(
+      rootState,
+      state,
+      game,
+      message,
+      reviewReason,
+      recognizedNumber,
+    );
+  }
+
+  private async resetAfterRuleFailure(
+    rootState: JsonState,
+    state: CountingChainState,
+    game: CountingChainGameState,
+    message: CountingChainMessage,
+    reason: 'same-user' | 'wrong-number',
+    proposedNumber: number | null,
+  ): Promise<void> {
     const now = this.currentTime();
     const roundScore = Math.max(0, game.expectedNumber - 1);
     const highScore = Math.max(game.highScore, roundScore);
@@ -701,8 +739,8 @@ export class PersistentCountingChainService implements CountingChainService {
       messageId: message.id,
       authorId: message.authorId,
       expectedNumber: game.expectedNumber,
-      proposedNumber: normalizeReviewNumber(recognizedNumber),
-      reason: reviewReason,
+      proposedNumber: normalizeReviewNumber(proposedNumber),
+      reason,
       endedAt: now.toISOString(),
     };
     state.game = createInitialGameState(now, {
@@ -710,7 +748,7 @@ export class PersistentCountingChainService implements CountingChainService {
       highScoreAt: roundScore > game.highScore ? now.toISOString() : game.highScoreAt,
       lastRound: roundScore,
       lastRoundAt: now.toISOString(),
-      lastRoundReason: message.authorId === game.lastAuthorId ? 'same-user' : 'wrong-number',
+      lastRoundReason: reason,
       lastProcessedMessageId: message.id,
     });
     writeCountingChainState(rootState, state);
@@ -801,6 +839,7 @@ export class PersistentCountingChainService implements CountingChainService {
       proposedNumber: normalizedProposedNumber,
       reason: effectiveReason,
       endedAt: previousEnding?.endedAt ?? now.toISOString(),
+      reviewMessageId: null,
       requestedAt: now.toISOString(),
     };
     game.lastProcessedMessageId = message.id;
@@ -814,11 +853,19 @@ export class PersistentCountingChainService implements CountingChainService {
     const roleMention = roleId ? `<@&${roleId}> ` : '';
     const proposedText =
       normalizedProposedNumber === null ? 'not determined' : String(normalizedProposedNumber);
-    await this.reply(
+    const reviewMessageId = await this.reply(
       message,
       `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve this post or ${REVIEW_REJECT_REACTION} to reset the chain.`,
       roleId ? { mentionRoleId: roleId } : undefined,
     );
+    if (reviewMessageId && state.pendingReview) {
+      state.pendingReview = {
+        ...state.pendingReview,
+        reviewMessageId,
+      };
+      writeCountingChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+    }
     this.dependencies.logger.info(
       {
         channelId: message.channelId,
@@ -876,6 +923,7 @@ export class PersistentCountingChainService implements CountingChainService {
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
+      await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
       await this.react(message, PASS_REACTION);
       this.dependencies.logger.info(
         {
@@ -905,6 +953,7 @@ export class PersistentCountingChainService implements CountingChainService {
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
+    await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
     await this.react(message, RULE_FAILURE_REACTION);
     await this.reply(message, 'Counting chain review rejected — the chain is starting again at 1.');
     this.dependencies.logger.info(
@@ -1047,17 +1096,35 @@ export class PersistentCountingChainService implements CountingChainService {
     message: CountingChainMessage,
     content: string,
     options?: CountingChainReplyOptions,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     try {
       if (options) {
-        await message.reply(content, options);
-      } else {
-        await message.reply(content);
+        return await message.reply(content, options);
       }
+      return await message.reply(content);
     } catch (error: unknown) {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id },
         'Counting chain feedback message could not be sent',
+      );
+      return undefined;
+    }
+  }
+
+  private async deleteReviewMessage(
+    message: CountingChainMessage,
+    reviewMessageId: string | null,
+  ): Promise<void> {
+    if (!reviewMessageId || !message.deleteMessage) {
+      return;
+    }
+
+    try {
+      await message.deleteMessage(reviewMessageId);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: reviewMessageId },
+        'Counting chain review request message could not be deleted',
       );
     }
   }
@@ -1302,6 +1369,7 @@ function readPendingReview(value: unknown): CountingChainPendingReview | null {
 
   return {
     ...ending,
+    reviewMessageId: readNullableString(value.reviewMessageId),
     requestedAt,
   };
 }
@@ -1315,8 +1383,10 @@ function isCountingChainReviewReason(value: unknown): value is CountingChainRevi
   );
 }
 
-function normalizeReviewNumber(value: number | undefined): number | null {
-  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : null;
+function normalizeReviewNumber(value: number | null | undefined): number | null {
+  return value !== undefined && value !== null && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 function readGameState(value: unknown): CountingChainGameState | undefined {

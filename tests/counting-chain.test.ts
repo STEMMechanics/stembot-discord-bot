@@ -50,7 +50,8 @@ function createMessage(
       },
     ],
     react: vi.fn().mockResolvedValue(undefined),
-    reply: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue('review-reply-message'),
+    deleteMessage: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -358,6 +359,78 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('applies the consecutive-user rule even when the second image is unreadable', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(null),
+    };
+    const service = createService(state, recognizer);
+    const first = createMessage('same-user', 'unreadable-same-user-1');
+    const second = createMessage('same-user', 'unreadable-same-user-2');
+
+    await service.handleMessage(first);
+    await service.handleMessage(second);
+
+    expect(second.react).toHaveBeenCalledWith('❌');
+    expect(second.react).not.toHaveBeenCalledWith('⚠️');
+    expect(second.reply).toHaveBeenCalledWith(
+      'Counting chain over — the next number was not accepted. Starting again at 1.',
+    );
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastRoundReason: 'same-user',
+        lastGameEnding: {
+          messageId: 'unreadable-same-user-2',
+          reason: 'same-user',
+          proposedNumber: null,
+        },
+      },
+    });
+  });
+
+  it('pauses an unreadable consecutive post for moderator review', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(null),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const first = createMessage('same-user', 'review-unreadable-same-user-1');
+    const second = createMessage('same-user', 'review-unreadable-same-user-2');
+    const later = createMessage('different-user', 'review-paused-later');
+
+    await service.handleMessage(first);
+    await service.handleMessage(second);
+    await service.handleMessage(later);
+
+    expect(second.react).toHaveBeenCalledWith('🔎');
+    expect(second.react).not.toHaveBeenCalledWith('⚠️');
+    expect(second.reply).toHaveBeenCalledWith(expect.stringContaining('<@&moderator-role>'), {
+      mentionRoleId: 'moderator-role',
+    });
+    expect(later.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 2,
+        pendingReview: {
+          messageId: 'review-unreadable-same-user-2',
+          reason: 'same-user',
+          proposedNumber: null,
+          reviewMessageId: 'review-reply-message',
+        },
+      },
+    });
+    expect(recognizer.recognizeNumber).toHaveBeenCalledTimes(2);
+  });
+
   it('pauses an incorrect post for moderator review and approves the proposed number', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
@@ -394,6 +467,7 @@ describe('counting-chain service', () => {
     expect(await service.getReviewTargetMessageId()).toBe('review-message-2');
     expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
     expect(wrong.react).toHaveBeenCalledWith('👍');
+    expect(wrong.deleteMessage).toHaveBeenCalledWith('review-reply-message');
     expect(state.state).toMatchObject({
       countingChain: {
         expectedNumber: 5,
@@ -462,6 +536,7 @@ describe('counting-chain service', () => {
     expect(await service.reviewMessage(message, 'reject', 'moderator-1')).toBe(true);
 
     expect(message.react).toHaveBeenCalledWith('❌');
+    expect(message.deleteMessage).toHaveBeenCalledWith('review-reply-message');
     expect(message.reply).toHaveBeenCalledWith(
       'Counting chain review rejected — the chain is starting again at 1.',
     );
@@ -495,6 +570,7 @@ describe('counting-chain service', () => {
           messageId: 'review-unreadable',
           proposedNumber: null,
           reason: 'unreadable',
+          reviewMessageId: 'review-reply-message',
         },
       },
     });
