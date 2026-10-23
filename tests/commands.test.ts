@@ -5,6 +5,7 @@ import {
   formatMinecraftStatus,
   formatPlayers,
   buildUptimeStatusEmbed,
+  countingChainCommand,
   formatWorkshopList,
   formatUserLeaderboard,
   formatUserLevel,
@@ -25,6 +26,7 @@ import {
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
 import type { StemScrambleService } from '../src/services/scramble.js';
+import type { CountingChainService } from '../src/services/counting-chain.js';
 import type { UserLevelProfile } from '../src/services/user-levels.js';
 
 function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
@@ -53,6 +55,7 @@ describe('Discord commands', () => {
       'scramble',
       'leaderboard',
       'review',
+      'counting-chain',
       'minecraft',
       'players',
     ]);
@@ -352,6 +355,35 @@ describe('Discord commands', () => {
     expect(deferReply).toHaveBeenCalledOnce();
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining('Review requested'),
+    });
+  });
+
+  it('lets a moderator set the next counting-chain number', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const setNextNumber = vi.fn().mockResolvedValue(true);
+    const interaction = {
+      channelId: 'counting-channel',
+      user: { id: 'moderator-1' },
+      memberPermissions: {
+        has: vi.fn().mockReturnValue(true),
+      },
+      options: {
+        getInteger: vi.fn().mockReturnValue(16),
+      },
+      deferReply,
+      editReply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await countingChainCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      countingChain: { setNextNumber } as unknown as CountingChainService,
+    });
+
+    expect(setNextNumber).toHaveBeenCalledWith('counting-channel', 16, 'moderator-1');
+    expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Counting chain updated. The next accepted number is **16**.',
     });
   });
 

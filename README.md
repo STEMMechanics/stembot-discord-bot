@@ -43,6 +43,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
+- `/counting-chain number:<number>` — set the next counting-chain number; requires Manage Messages.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 - `/level` — your persisted XP, level and activity counts, or the public level card for another member.
@@ -85,6 +86,11 @@ later posts are held until a moderator approves or rejects the pending post.
 The pending review is persisted across restarts.
 After the moderator reacts, STEMBot adds its final `👍` or `❌` reaction and
 deletes the temporary review request message.
+
+Moderators with `Manage Messages` can use `/counting-chain number:16` to set the
+next number manually. This clears a pending review, refreshes the minigame
+dashboard, and treats messages already in the channel as seen so the next new
+image starts at the chosen number.
 
 The bot downloads Discord CDN attachments, direct image URLs, and image URLs
 supplied by Discord embeds, samples animated GIF frames as PNG images, and sends
@@ -260,7 +266,7 @@ manually editing the game fields.
 
 ### Discord command synchronization
 
-`npm run sync:commands` performs a complete Discord replacement with the eight
+`npm run sync:commands` performs a complete Discord replacement with the
 supported commands in the configured guild scope. It first removes existing
 global command registrations for this application, then bulk-replaces the
 global set with an empty list and the target guild set with the supported

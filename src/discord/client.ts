@@ -266,6 +266,7 @@ export function createDiscordGateway(
       ...(dependencies.scramble ? { scramble: dependencies.scramble } : {}),
       ...(dependencies.uptime ? { uptime: dependencies.uptime } : {}),
       timeZone: dependencies.timeZone,
+      ...(dependencies.countingChain ? { countingChain: dependencies.countingChain } : {}),
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });

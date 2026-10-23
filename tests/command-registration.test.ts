@@ -40,7 +40,7 @@ describe('Discord command synchronization', () => {
 
     expect(results).toEqual([
       { scope: 'global', commandCount: 0 },
-      { scope: 'guild', commandCount: 10 },
+      { scope: 'guild', commandCount: 11 },
     ]);
     expect(put).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenCalledWith(Routes.applicationCommands(clientId));
@@ -62,6 +62,7 @@ describe('Discord command synchronization', () => {
       'scramble',
       'leaderboard',
       'review',
+      'counting-chain',
       'minecraft',
       'players',
     ]);

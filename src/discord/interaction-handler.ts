@@ -59,6 +59,7 @@ export async function handleInteraction(
     ...(context.uptime ? { uptime: context.uptime } : {}),
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
     ...(context.userLevels ? { userLevels: context.userLevels } : {}),
+    ...(context.countingChain ? { countingChain: context.countingChain } : {}),
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),
     ...(context.requestCountingChainReview
       ? { requestCountingChainReview: context.requestCountingChainReview }

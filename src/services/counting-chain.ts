@@ -87,6 +87,7 @@ export interface CountingChainService {
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
   getReviewTargetMessageId(): Promise<string | undefined>;
   getReviewRequestMessageId(): Promise<string | undefined>;
+  setNextNumber(channelId: string, nextNumber: number, moderatorId: string): Promise<boolean>;
   requestReview(message: CountingChainMessage): Promise<boolean>;
   reviewMessage(
     message: CountingChainMessage,
@@ -320,6 +321,65 @@ export class PersistentCountingChainService implements CountingChainService {
         this.dependencies.config.channelId,
       );
       return state.pendingReview?.reviewMessageId ?? undefined;
+    });
+  }
+
+  public setNextNumber(
+    channelId: string,
+    nextNumber: number,
+    moderatorId: string,
+  ): Promise<boolean> {
+    if (
+      !this.dependencies.config.enabled ||
+      !this.dependencies.config.channelId ||
+      channelId !== this.dependencies.config.channelId ||
+      !Number.isSafeInteger(nextNumber) ||
+      nextNumber < 1
+    ) {
+      return Promise.resolve(false);
+    }
+
+    return this.enqueue(channelId, async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readCountingChainState(rootState[STATE_KEY], channelId);
+      const now = this.currentTime();
+      const game = state.game ?? createInitialGameState(now);
+      let lastProcessedMessageId = game.lastProcessedMessageId;
+
+      if (this.historyProvider) {
+        try {
+          const history = await this.historyProvider();
+          const newestMemberMessage = sortHistoryNewestFirst(history).find(
+            (message) => !message.authorIsBot,
+          );
+          if (newestMemberMessage) {
+            lastProcessedMessageId = newestMemberMessage.id;
+          }
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, channelId },
+            'Counting chain manual number update could not read Discord history checkpoint',
+          );
+        }
+      }
+
+      state.game = {
+        ...game,
+        expectedNumber: nextNumber,
+        updatedAt: now.toISOString(),
+        lastProcessedMessageId,
+      };
+      state.lastGameEnding = null;
+      state.pendingReview = null;
+      state.historyRecoveryPending = false;
+      writeCountingChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      await this.publishInfo();
+      this.dependencies.logger.info(
+        { channelId, moderatorId, nextNumber, lastProcessedMessageId },
+        'Counting chain next number manually updated',
+      );
+      return true;
     });
   }
 

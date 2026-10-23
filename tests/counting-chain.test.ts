@@ -695,6 +695,43 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('lets a moderator override the next number and checkpoint existing posts', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(12)
+        .mockResolvedValueOnce(99),
+    };
+    let history: readonly CountingChainHistoryMessage[] = [];
+    const historyProvider = vi.fn<() => Promise<readonly CountingChainHistoryMessage[]>>(
+      async () => history,
+    );
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    await service.initialize(historyProvider);
+
+    const accepted = createMessage('user-1', '100');
+    const pending = createMessage('user-2', '101');
+    const existingPost = createHistoryMessage('user-3', '200');
+    await service.handleMessage(accepted);
+    await service.handleMessage(pending);
+
+    history = [existingPost];
+    expect(await service.setNextNumber('counting-channel', 16, 'moderator-1')).toBe(true);
+
+    expect(existingPost.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 16,
+        lastProcessedMessageId: '200',
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('pendingReview');
+    expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
+  });
+
   it('reopens the last game-ending image after a normal reset', async () => {
     const state = new MemoryStateStore();
     const recognizer = {

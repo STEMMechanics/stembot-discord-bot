@@ -28,6 +28,7 @@ import {
 } from '../services/user-levels.js';
 import type { StemScrambleService } from '../services/scramble.js';
 import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/uptime-kuma.js';
+import type { CountingChainService } from '../services/counting-chain.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -35,6 +36,7 @@ export interface CommandContext {
   stemcraft?: StemCraftIntegration;
   timeZone?: string;
   getCurrentTime?: () => Date;
+  countingChain?: CountingChainService;
   requestCountingChainReview?: (channelId: string) => Promise<boolean>;
   userLevels?: UserLevelService;
   scramble?: StemScrambleService;
@@ -367,8 +369,58 @@ export const reviewCommand: DiscordCommand = {
     const requested = await requestReview(interaction.channelId);
     await interaction.editReply({
       content: requested
-        ? 'Review requested for the last counting-chain post. A moderator can react to the post with ✅ to approve it or ❌ to reset the chain.'
+        ? 'Review requested for the last counting-chain post. A moderator can react to the review request or original post with ✅ to approve it or ❌ to reset the chain.'
         : 'No game-ending counting-chain post is waiting for review.',
+    });
+  },
+};
+
+export const countingChainCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('counting-chain')
+    .setDescription('Set the next number for the counting-chain game.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages.toString())
+    .addIntegerOption((option) =>
+      option
+        .setName('number')
+        .setDescription('The next number the game should accept.')
+        .setMinValue(1)
+        .setMaxValue(1_000_000)
+        .setRequired(true),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const countingChain = context.countingChain;
+    if (!countingChain) {
+      await interaction.reply({
+        content: 'The counting-chain game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const hasModeratorPermission =
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) === true ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
+    if (!hasModeratorPermission) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to update the counting chain.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const nextNumber = interaction.options.getInteger('number', true);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const updated = await countingChain.setNextNumber(
+      interaction.channelId,
+      nextNumber,
+      interaction.user.id,
+    );
+    await interaction.editReply({
+      content: updated
+        ? `Counting chain updated. The next accepted number is **${nextNumber}**.`
+        : 'Use this command in the configured counting-chain channel.',
     });
   },
 };
@@ -428,6 +480,7 @@ export const commands: readonly DiscordCommand[] = [
   scrambleCommand,
   leaderboardCommand,
   reviewCommand,
+  countingChainCommand,
   minecraftCommand,
   playersCommand,
 ];
