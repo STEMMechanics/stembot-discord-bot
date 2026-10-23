@@ -262,6 +262,9 @@ describe('counting-chain service', () => {
 
     const offlineFirst = createHistoryMessage('user-2', '1562802766370447381');
     const offlineSecond = createHistoryMessage('user-3', '1562802766370447382');
+    const latestText = createHistoryMessage('user-4', '1562802766370447383', {
+      attachments: [],
+    });
     const checkpoint = createHistoryMessage('user-1', checkpointMessageId, {
       botReactionEmojis: ['👍'],
     });
@@ -274,7 +277,7 @@ describe('counting-chain service', () => {
     const service = createService(state, recognizer);
     const historyProvider = vi
       .fn<() => Promise<readonly CountingChainHistoryMessage[]>>()
-      .mockResolvedValue([offlineSecond, checkpoint, offlineFirst]);
+      .mockResolvedValue([latestText, offlineSecond, checkpoint, offlineFirst]);
 
     await service.initialize(historyProvider);
 
@@ -287,7 +290,7 @@ describe('counting-chain service', () => {
         expectedNumber: 4,
         lastAuthorId: 'user-3',
         lastMessageId: '1562802766370447382',
-        lastProcessedMessageId: '1562802766370447382',
+        lastProcessedMessageId: '1562802766370447383',
       },
     });
 
@@ -296,7 +299,7 @@ describe('counting-chain service', () => {
     };
     const restartedService = createService(state, restartedRecognizer);
     await restartedService.initialize(() =>
-      Promise.resolve([offlineSecond, checkpoint, offlineFirst]),
+      Promise.resolve([latestText, offlineSecond, checkpoint, offlineFirst]),
     );
 
     expect(restartedRecognizer.recognizeNumber).not.toHaveBeenCalled();

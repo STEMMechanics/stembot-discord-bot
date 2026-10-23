@@ -223,13 +223,27 @@ export class PersistentCountingChainService implements CountingChainService {
         },
         'Counting chain history did not contain an accepted image; starting at one',
       );
-      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
+      await saveInitialState(
+        rootState,
+        state,
+        this.currentTime(),
+        this.dependencies.state,
+        false,
+        newestMessage?.id,
+      );
       return;
     }
 
     const attachment = selectImageAttachment(latestMessage.attachments);
     if (!attachment) {
-      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
+      await saveInitialState(
+        rootState,
+        state,
+        this.currentTime(),
+        this.dependencies.state,
+        false,
+        newestMessage?.id,
+      );
       return;
     }
 
@@ -250,7 +264,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRound: recognizedNumber,
         lastRoundAt: this.currentTime().toISOString(),
         lastRoundReason: null,
-        lastProcessedMessageId: latestMessage.id,
+        lastProcessedMessageId: newestMessage?.id ?? latestMessage.id,
       };
       state.historyRecoveryPending = false;
       writeCountingChainState(rootState, state);
@@ -270,7 +284,14 @@ export class PersistentCountingChainService implements CountingChainService {
         { err: error, channelId, messageId: latestMessage.id },
         'Counting chain history image could not be read; silently resetting',
       );
-      await saveInitialState(rootState, state, this.currentTime(), this.dependencies.state);
+      await saveInitialState(
+        rootState,
+        state,
+        this.currentTime(),
+        this.dependencies.state,
+        false,
+        newestMessage?.id,
+      );
     }
   }
 
@@ -305,6 +326,13 @@ export class PersistentCountingChainService implements CountingChainService {
         latestRootState[STATE_KEY],
         this.dependencies.config.channelId,
       );
+      const newestMessageId = history[0]?.id;
+      if (newestMessageId && isDiscordMessageAfter(newestMessageId, checkpointMessageId)) {
+        const game = latestState.game ?? createInitialGameState(this.currentTime());
+        game.lastProcessedMessageId = newestMessageId;
+        game.updatedAt = this.currentTime().toISOString();
+        latestState.game = game;
+      }
       latestState.historyRecoveryPending = false;
       writeCountingChainState(latestRootState, latestState);
       await this.dependencies.state.save(latestRootState);
@@ -313,6 +341,7 @@ export class PersistentCountingChainService implements CountingChainService {
           channelId: this.dependencies.config.channelId,
           checkpointMessageId,
           processedImageCount: pendingMessages.length,
+          newestMessageId,
         },
         'Counting chain startup reconciliation completed',
       );
@@ -549,8 +578,11 @@ async function saveInitialState(
   now: Date,
   stateStore: StateStore<JsonState>,
   historyRecoveryPending = false,
+  lastProcessedMessageId: string | undefined = undefined,
 ): Promise<void> {
-  state.game = createInitialGameState(now);
+  state.game = createInitialGameState(now, {
+    ...(lastProcessedMessageId ? { lastProcessedMessageId } : {}),
+  });
   state.historyRecoveryPending = historyRecoveryPending;
   writeCountingChainState(rootState, state);
   await stateStore.save(rootState);

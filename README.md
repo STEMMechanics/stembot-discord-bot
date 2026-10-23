@@ -250,11 +250,13 @@ when editing it offline:
 `expectedNumber` is the next number accepted, `highScore` is the highest
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
-display note. `lastProcessedMessageId` is the Discord history checkpoint used
-for startup reconciliation; it advances for accepted, reset, and unreadable
-image messages so a restart does not process the same message again. The bot
-accepts older records without the score fields or checkpoint and fills them in
-on the next state write. It also accepts the previous nested `game` and
+display note. `lastProcessedMessageId` is the Discord history scan checkpoint
+used for startup reconciliation. It advances to the newest scanned message,
+including messages without a supported image; `lastMessageId` remains the last
+accepted counting image. This lets a restart resume from the newest message
+without changing the game state for ordinary chat. The bot accepts older
+records without the score fields or checkpoint and fills them in on the next
+state write. It also accepts the previous nested `game` and
 channel-keyed `games` shapes and rewrites them to this flat shape at startup.
 
 On every startup, STEMBot reads the configured counting channel history and
