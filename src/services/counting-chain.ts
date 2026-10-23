@@ -192,7 +192,19 @@ export class PersistentCountingChainService implements CountingChainService {
       { channelId, historyCount: history.length },
       'Counting chain Discord history fetched for startup recovery',
     );
-    const latestMessage = findLatestRelevantHistoryMessage(history);
+    const orderedHistory = sortHistoryNewestFirst(history);
+    const newestMessage = orderedHistory[0];
+    const latestMessage = findLatestRelevantHistoryMessage(orderedHistory);
+    this.dependencies.logger.info(
+      {
+        channelId,
+        newestMessageId: newestMessage?.id,
+        newestMessageAuthorIsBot: newestMessage?.authorIsBot,
+        newestMessageAttachmentCount: newestMessage?.attachments.length,
+        selectedMessageId: latestMessage?.id,
+      },
+      'Counting chain history candidate selected',
+    );
     if (!latestMessage || isCountingChainFailureMessage(latestMessage)) {
       this.dependencies.logger.info(
         {
@@ -487,6 +499,31 @@ function findLatestRelevantHistoryMessage(
   }
 
   return undefined;
+}
+
+function sortHistoryNewestFirst(
+  history: readonly CountingChainHistoryMessage[],
+): CountingChainHistoryMessage[] {
+  return [...history].sort(compareDiscordMessageIdsNewestFirst);
+}
+
+function compareDiscordMessageIdsNewestFirst(
+  left: CountingChainMessage,
+  right: CountingChainMessage,
+): number {
+  return compareSnowflakeIdsNewestFirst(left.id, right.id);
+}
+
+function compareSnowflakeIdsNewestFirst(left: string, right: string): number {
+  const leftIsSnowflake = /^\d+$/.test(left);
+  const rightIsSnowflake = /^\d+$/.test(right);
+  if (leftIsSnowflake && rightIsSnowflake) {
+    const leftValue = BigInt(left);
+    const rightValue = BigInt(right);
+    return leftValue === rightValue ? 0 : leftValue > rightValue ? -1 : 1;
+  }
+
+  return 0;
 }
 
 function isCountingChainFailureMessage(message: CountingChainHistoryMessage): boolean {

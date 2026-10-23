@@ -306,6 +306,25 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('selects the newest Discord snowflake when history is not already ordered', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(264),
+    };
+    const service = createService(state, recognizer);
+    const olderMessage = createHistoryMessage('user-old', '1085790972702642226');
+    const newerMessage = createHistoryMessage('user-new', '1562802766370447380');
+
+    await service.initialize(() => Promise.resolve([olderMessage, newerMessage]));
+
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 265,
+        lastMessageId: '1562802766370447380',
+      },
+    });
+  });
+
   it('treats an empty legacy game record as missing and writes the single-game shape', async () => {
     const state = new MemoryStateStore();
     state.state = {

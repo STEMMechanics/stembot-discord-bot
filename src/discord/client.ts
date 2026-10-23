@@ -276,7 +276,7 @@ async function fetchCountingChainHistory(
       break;
     }
 
-    const oldestMessage = page.last();
+    const oldestMessage = [...page.values()].sort(compareMessagesNewestFirst).at(-1);
     if (!oldestMessage) {
       break;
     }
@@ -284,9 +284,13 @@ async function fetchCountingChainHistory(
     before = oldestMessage.id;
   }
 
-  return messages
-    .sort((left, right) => right.createdTimestamp - left.createdTimestamp)
-    .map(toCountingChainHistoryMessage);
+  return messages.sort(compareMessagesNewestFirst).map(toCountingChainHistoryMessage);
+}
+
+function compareMessagesNewestFirst(left: Message, right: Message): number {
+  const leftValue = BigInt(left.id);
+  const rightValue = BigInt(right.id);
+  return leftValue === rightValue ? 0 : leftValue > rightValue ? -1 : 1;
 }
 
 function createCountingChainInfoPublisher(
