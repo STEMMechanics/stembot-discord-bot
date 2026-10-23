@@ -93,16 +93,7 @@ describe('persistent user levels', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith({
       channelId: 'announcement-channel',
-      content: '<@user-1>',
-      embeds: [
-        expect.objectContaining({
-          title: '🎉 Level up!',
-          description: expect.stringContaining('<@user-1> reached **level 2**!'),
-          fields: expect.arrayContaining([
-            expect.objectContaining({ name: 'New level', value: '**2**' }),
-          ]),
-        }),
-      ],
+      content: expect.stringMatching(/<@user-1>.*level 2|level 2.*<@user-1>/),
       allowedUserIds: ['user-1'],
     });
     await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 105, level: 2 });
@@ -155,5 +146,8 @@ describe('persistent user levels', () => {
     const leaderboard = await service.getLeaderboard(1);
     expect(leaderboard).toHaveLength(1);
     expect(leaderboard[0]).toMatchObject({ userId: 'user-1', xp: 45 });
+    await expect(service.getRank('user-1')).resolves.toBe(1);
+    await expect(service.getRank('user-2')).resolves.toBe(2);
+    await expect(service.getRank('user-3')).resolves.toBe(3);
   });
 });

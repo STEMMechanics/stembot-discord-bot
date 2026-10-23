@@ -1,4 +1,5 @@
 import {
+  AttachmentBuilder,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -9,6 +10,7 @@ import {
   type SlashCommandSubcommandsOnlyBuilder,
   type User,
 } from 'discord.js';
+import sharp from 'sharp';
 
 import {
   PlayerListUnavailableError,
@@ -243,7 +245,7 @@ export const jokeCommand: DiscordCommand = {
 export const levelCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('level')
-    .setDescription("Show your or another member's STEMBot level and XP.")
+    .setDescription("Show your or another member's STEMBot level, rank, and XP.")
     .addUserOption((option) =>
       option.setName('user').setDescription('The member whose level to show.').setRequired(false),
     ),
@@ -261,8 +263,11 @@ export const levelCommand: DiscordCommand = {
     await interaction.deferReply();
     const targetUser = interaction.options.getUser('user') ?? interaction.user;
     const profile = await userLevels.getProfile(targetUser.id);
+    const rank = await userLevels.getRank(targetUser.id);
+    const card = await buildUserLevelCard(profile, targetUser, rank);
     await interaction.editReply({
-      embeds: [buildUserLevelEmbed(profile, targetUser)],
+      embeds: [buildUserLevelEmbed(profile, targetUser, rank)],
+      files: [new AttachmentBuilder(card, { name: 'stembot-level-card.png' })],
       allowedMentions: { parse: [] },
     });
   },
@@ -621,7 +626,7 @@ export function formatUserLevel(profile: UserLevelProfile): string {
   ].join('\n');
 }
 
-export function buildUserLevelEmbed(profile: UserLevelProfile, user: User): APIEmbed {
+export function buildUserLevelEmbed(profile: UserLevelProfile, user: User, rank = 1): APIEmbed {
   const progress = getUserLevelProgress(profile);
   const displayName = user.globalName ?? user.username;
   const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 128 });
@@ -640,6 +645,11 @@ export function buildUserLevelEmbed(profile: UserLevelProfile, user: User): APIE
     ].join('\n'),
     fields: [
       {
+        name: 'Rank',
+        value: `#${Math.max(1, Math.floor(rank))}`,
+        inline: true,
+      },
+      {
         name: 'Activity',
         value: [
           `Messages: **${profile.messageCount}**`,
@@ -656,6 +666,93 @@ export function buildUserLevelEmbed(profile: UserLevelProfile, user: User): APIE
     ],
     footer: { text: 'STEMBot levels' },
   };
+}
+
+export async function buildUserLevelCard(
+  profile: UserLevelProfile,
+  user: User,
+  rank: number,
+): Promise<Buffer> {
+  const avatarDataUri = await fetchDiscordAvatarDataUri(
+    user.displayAvatarURL({ extension: 'png', size: 128 }),
+  );
+  return sharp(Buffer.from(buildUserLevelCardSvg(profile, user, rank, avatarDataUri)))
+    .png()
+    .toBuffer();
+}
+
+export function buildUserLevelCardSvg(
+  profile: UserLevelProfile,
+  user: User,
+  rank: number,
+  avatarDataUri?: string,
+): string {
+  const progress = getUserLevelProgress(profile);
+  const displayName = user.globalName ?? user.username;
+  const initials = getUserInitials(displayName);
+  const safeName = escapeSvgText(displayName.slice(0, 32));
+  const safeInitials = escapeSvgText(initials);
+  const safeRank = Math.max(1, Math.floor(rank));
+  const barWidth = 650;
+  const filledBarWidth = Math.round((barWidth * progress.percent) / 100);
+  const avatar = avatarDataUri
+    ? `<clipPath id="avatar-clip"><circle cx="104" cy="126" r="70" /></clipPath><image href="${avatarDataUri}" x="34" y="56" width="140" height="140" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatar-clip)" />`
+    : `<circle cx="104" cy="126" r="70" fill="#5865f2" /><text x="104" y="144" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff">${safeInitials}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="280" viewBox="0 0 900 280">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#131a25" />
+      <stop offset="1" stop-color="#202b3d" />
+    </linearGradient>
+    <linearGradient id="progress" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#55d6f5" />
+      <stop offset="1" stop-color="#7e8cff" />
+    </linearGradient>
+  </defs>
+  <rect width="900" height="280" rx="18" fill="url(#card)" />
+  ${avatar}
+  <text x="198" y="82" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#ffffff">${safeName}</text>
+  <text x="198" y="114" font-family="Arial, sans-serif" font-size="17" letter-spacing="2" fill="#9aa8bd">STEMBOT LEVEL</text>
+  <text x="648" y="66" font-family="Arial, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">RANK</text>
+  <text x="648" y="101" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#ffffff">#${safeRank}</text>
+  <text x="770" y="66" font-family="Arial, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">LEVEL</text>
+  <text x="770" y="101" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#55d6f5">${profile.level}</text>
+  <rect x="198" y="164" width="${barWidth}" height="24" rx="12" fill="#3a4553" />
+  <rect x="198" y="164" width="${filledBarWidth}" height="24" rx="12" fill="url(#progress)" />
+  <text x="198" y="226" font-family="Arial, sans-serif" font-size="18" fill="#ffffff">${progress.currentXp} / ${progress.requiredXp} XP</text>
+  <text x="848" y="226" text-anchor="end" font-family="Arial, sans-serif" font-size="18" fill="#9aa8bd">to level ${profile.level + 1}</text>
+</svg>`;
+}
+
+async function fetchDiscordAvatarDataUri(url: string): Promise<string | undefined> {
+  if (
+    !url.startsWith('https://cdn.discordapp.com/') &&
+    !url.startsWith('https://media.discordapp.net/')
+  ) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2_500) });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const contentType = response.headers.get('content-type') ?? 'image/png';
+    if (!contentType.startsWith('image/')) {
+      return undefined;
+    }
+
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length === 0 || data.length > 2_000_000) {
+      return undefined;
+    }
+
+    return `data:${contentType};base64,${data.toString('base64')}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
@@ -811,6 +908,28 @@ function formatMonitorState(state: UptimeKumaStatus['monitors'][number]['state']
 
 function escapeEmbedText(value: string): string {
   return value.replace(/[\\`*_~|]/g, '\\$&').replace(/\r?\n/g, ' ');
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function getUserInitials(displayName: string): string {
+  const words = displayName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return '?';
+  }
+
+  if (words.length === 1) {
+    return words[0]!.slice(0, 2).toUpperCase();
+  }
+
+  return `${words[0]![0] ?? ''}${words.at(-1)?.[0] ?? ''}`.toUpperCase();
 }
 
 function truncateEmbedField(value: string): string {

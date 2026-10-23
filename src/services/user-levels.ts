@@ -46,6 +46,7 @@ export interface UserLevelService {
   recordReaction(userId: string): Promise<UserLevelAward | undefined>;
   recordGameParticipation(userId: string): Promise<UserLevelAward | undefined>;
   getProfile(userId: string): Promise<UserLevelProfile>;
+  getRank(userId: string): Promise<number>;
   getLeaderboard(limit: number): Promise<readonly UserLevelProfile[]>;
 }
 
@@ -80,6 +81,7 @@ export class PersistentUserLevelService implements UserLevelService {
       logger: AppLogger;
       announcementPublisher?: UserLevelAnnouncementPublisher;
       clock?: () => Date;
+      random?: () => number;
     },
   ) {}
 
@@ -117,6 +119,22 @@ export class PersistentUserLevelService implements UserLevelService {
     });
   }
 
+  public async getRank(userId: string): Promise<number> {
+    if (!this.dependencies.config.enabled || userId.trim().length === 0) {
+      return 1;
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readUserLevelState(rootState[STATE_KEY]);
+      const profiles = Object.entries(state.users)
+        .map(([storedUserId, profile]) => toProfile(storedUserId, profile))
+        .sort(compareProfiles);
+      const rank = profiles.findIndex((profile) => profile.userId === userId);
+      return rank >= 0 ? rank + 1 : profiles.length + 1;
+    });
+  }
+
   public async getLeaderboard(limit: number): Promise<readonly UserLevelProfile[]> {
     if (!this.dependencies.config.enabled) {
       return [];
@@ -127,12 +145,7 @@ export class PersistentUserLevelService implements UserLevelService {
       const state = readUserLevelState(rootState[STATE_KEY]);
       return Object.entries(state.users)
         .map(([userId, profile]) => toProfile(userId, profile))
-        .sort(
-          (left, right) =>
-            right.xp - left.xp ||
-            right.level - left.level ||
-            left.userId.localeCompare(right.userId),
-        )
+        .sort(compareProfiles)
         .slice(0, Math.max(1, Math.min(25, Math.floor(limit))));
     });
   }
@@ -224,8 +237,7 @@ export class PersistentUserLevelService implements UserLevelService {
     try {
       await publisher.send({
         channelId,
-        content: `<@${profile.userId}>`,
-        embeds: [buildLevelUpEmbed(profile)],
+        content: getRandomLevelUpMessage(profile, this.dependencies.random),
         allowedUserIds: [profile.userId],
       });
     } catch (error: unknown) {
@@ -250,36 +262,21 @@ export class PersistentUserLevelService implements UserLevelService {
   }
 }
 
-function buildLevelUpEmbed(profile: UserLevelProfile): APIEmbed {
-  const previousLevelXp = profile.level <= 1 ? 0 : getXpForNextLevel(profile.level - 1);
-  const nextLevelXp = getXpForNextLevel(profile.level);
-  const requiredXp = Math.max(1, nextLevelXp - previousLevelXp);
-  const currentXp = Math.max(0, profile.xp - previousLevelXp);
-  const percent = Math.min(100, Math.floor((currentXp / requiredXp) * 100));
+const LEVEL_UP_MESSAGES: readonly ((profile: UserLevelProfile) => string)[] = [
+  (profile) => `GG <@${profile.userId}>, you just advanced to level ${profile.level}! 🎉`,
+  (profile) => `🚀 <@${profile.userId}> reached level ${profile.level}! Keep going!`,
+  (profile) => `✨ Nice work <@${profile.userId}> — level ${profile.level} unlocked!`,
+  (profile) => `🏆 <@${profile.userId}> just levelled up to ${profile.level}!`,
+  (profile) => `🥳 <@${profile.userId}> is now level ${profile.level}!`,
+];
 
-  return {
-    title: '🎉 Level up!',
-    color: 0x5865f2,
-    description: [
-      `<@${profile.userId}> reached **level ${profile.level}**!`,
-      `${formatLevelProgressBar(percent)} **${profile.xp} XP**`,
-    ].join('\n'),
-    fields: [
-      { name: 'New level', value: `**${profile.level}**`, inline: true },
-      { name: 'Progress', value: `${percent}% complete`, inline: true },
-      {
-        name: 'Next level',
-        value: `${Math.max(0, nextLevelXp - profile.xp)} XP to level ${profile.level + 1}`,
-        inline: true,
-      },
-    ],
-    footer: { text: 'STEMBot levels' },
-  };
-}
-
-function formatLevelProgressBar(percent: number): string {
-  const filled = Math.round(Math.min(100, Math.max(0, percent)) / 10);
-  return `${'▰'.repeat(filled)}${'▱'.repeat(10 - filled)}`;
+function getRandomLevelUpMessage(
+  profile: UserLevelProfile,
+  random: (() => number) | undefined,
+): string {
+  const randomValue = Math.max(0, Math.min(0.999999, random?.() ?? Math.random()));
+  const messageIndex = Math.floor(randomValue * LEVEL_UP_MESSAGES.length);
+  return LEVEL_UP_MESSAGES[messageIndex]?.(profile) ?? LEVEL_UP_MESSAGES[0]!(profile);
 }
 
 export function createUserLevelService(dependencies: {
@@ -288,6 +285,7 @@ export function createUserLevelService(dependencies: {
   logger: AppLogger;
   announcementPublisher?: UserLevelAnnouncementPublisher;
   clock?: () => Date;
+  random?: () => number;
 }): UserLevelService {
   return new PersistentUserLevelService(dependencies);
 }
@@ -381,6 +379,10 @@ function toProfile(userId: string, profile: StoredUserLevelProfile): UserLevelPr
     lastMessageXpAt: profile.lastMessageXpAt,
     lastReactionXpAt: profile.lastReactionXpAt,
   };
+}
+
+function compareProfiles(left: UserLevelProfile, right: UserLevelProfile): number {
+  return right.xp - left.xp || right.level - left.level || left.userId.localeCompare(right.userId);
 }
 
 function readNonNegativeInteger(value: unknown): number | undefined {

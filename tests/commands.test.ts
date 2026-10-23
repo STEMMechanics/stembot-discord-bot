@@ -234,6 +234,7 @@ describe('Discord commands', () => {
       getGatewayPing: () => 0,
       userLevels: {
         getProfile,
+        getRank: vi.fn().mockResolvedValue(4),
         getLeaderboard: vi.fn(),
         recordMessage: vi.fn(),
         recordReaction: vi.fn(),
@@ -248,8 +249,10 @@ describe('Discord commands', () => {
         expect.objectContaining({
           author: expect.objectContaining({ name: "Builder's STEMBot level" }),
           description: expect.stringContaining('## Level 2'),
+          fields: expect.arrayContaining([expect.objectContaining({ name: 'Rank', value: '#4' })]),
         }),
       ],
+      files: [expect.objectContaining({ name: 'stembot-level-card.png' })],
       allowedMentions: { parse: [] },
     });
   });
