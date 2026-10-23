@@ -323,6 +323,13 @@ describe('counting-chain service', () => {
         expectedNumber: 1,
         lastAuthorId: null,
         lastMessageId: null,
+        lastGameEnding: {
+          messageId: 'message-2',
+          authorId: 'user-2',
+          expectedNumber: 2,
+          proposedNumber: 4,
+          reason: 'wrong-number',
+        },
       },
     });
   });
@@ -351,7 +358,7 @@ describe('counting-chain service', () => {
     });
   });
 
-  it('pauses an incorrect post for moderator review and approves a corrected number', async () => {
+  it('pauses an incorrect post for moderator review and approves the proposed number', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
       recognizeNumber: vi
@@ -384,16 +391,61 @@ describe('counting-chain service', () => {
       },
     });
 
-    expect(await service.requestReview(wrong, 2)).toBe(true);
+    expect(await service.getReviewTargetMessageId()).toBe('review-message-2');
     expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
     expect(wrong.react).toHaveBeenCalledWith('👍');
     expect(state.state).toMatchObject({
       countingChain: {
-        expectedNumber: 3,
+        expectedNumber: 5,
         lastMessageId: 'review-message-2',
       },
     });
     expect(state.state.countingChain).not.toHaveProperty('pendingReview');
+    expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
+  });
+
+  it('reopens the last game-ending image after a normal reset', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(4),
+    };
+    const normalService = createService(state, recognizer);
+    const first = createMessage('user-1', 'manual-review-message-1');
+    const wrong = createMessage('user-2', 'manual-review-message-2');
+
+    await normalService.handleMessage(first);
+    await normalService.handleMessage(wrong);
+
+    const reviewService = createService(
+      state,
+      { recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>() },
+      { config: { reviewEnabled: true, reviewRoleId: 'moderator-role' } },
+    );
+
+    expect(await reviewService.getReviewTargetMessageId()).toBe('manual-review-message-2');
+    expect(await reviewService.requestReview(wrong)).toBe(true);
+    expect(state.state).toMatchObject({
+      countingChain: {
+        pendingReview: {
+          messageId: 'manual-review-message-2',
+          expectedNumber: 2,
+          proposedNumber: 4,
+          reason: 'wrong-number',
+        },
+      },
+    });
+
+    expect(await reviewService.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 5,
+        lastMessageId: 'manual-review-message-2',
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
   });
 
   it('lets a moderator reject a pending review and reset the chain', async () => {

@@ -24,11 +24,7 @@ export interface CommandContext {
   stemcraft?: StemCraftIntegration;
   timeZone?: string;
   getCurrentTime?: () => Date;
-  requestCountingChainReview?: (
-    channelId: string,
-    messageId?: string,
-    proposedNumber?: number,
-  ) => Promise<boolean>;
+  requestCountingChainReview?: (channelId: string) => Promise<boolean>;
 }
 
 export interface DiscordCommand {
@@ -229,21 +225,7 @@ export const jokeCommand: DiscordCommand = {
 export const reviewCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('review')
-    .setDescription('Ask a moderator to review a counting-chain post.')
-    .addStringOption((option) =>
-      option
-        .setName('message_id')
-        .setDescription('Discord message ID; omit this to review the latest image post.')
-        .setRequired(false),
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('number')
-        .setDescription('The number a moderator should consider approving.')
-        .setMinValue(1)
-        .setMaxValue(1_000_000)
-        .setRequired(false),
-    ),
+    .setDescription('Ask a moderator to review the last counting-chain post that ended the game.'),
 
   async execute(interaction, context): Promise<void> {
     const requestReview = context.requestCountingChainReview;
@@ -256,15 +238,11 @@ export const reviewCommand: DiscordCommand = {
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const requested = await requestReview(
-      interaction.channelId,
-      interaction.options.getString('message_id') ?? undefined,
-      interaction.options.getInteger('number') ?? undefined,
-    );
+    const requested = await requestReview(interaction.channelId);
     await interaction.editReply({
       content: requested
-        ? 'Review requested. A moderator can react to the post with ✅ to approve it or ❌ to reset the chain.'
-        : 'No review could be requested. Check that this is the counting-chain channel and that the target message contains an image.',
+        ? 'Review requested for the last counting-chain post. A moderator can react to the post with ✅ to approve it or ❌ to reset the chain.'
+        : 'No game-ending counting-chain post is waiting for review.',
     });
   },
 };

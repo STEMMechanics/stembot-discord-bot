@@ -46,6 +46,7 @@ describe('Discord commands', () => {
     expect(
       definitions.find((definition) => definition.name === 'players')?.default_member_permissions,
     ).toBeUndefined();
+    expect(definitions.find((definition) => definition.name === 'review')?.options).toEqual([]);
   });
 
   it('filters cancelled and past workshops and sorts by start time', () => {
@@ -185,16 +186,12 @@ describe('Discord commands', () => {
     });
   });
 
-  it('requests counting-chain review for a selected message and number', async () => {
+  it('requests counting-chain review for the last game-ending post', async () => {
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
     const requestCountingChainReview = vi.fn().mockResolvedValue(true);
     const interaction = {
       channelId: 'counting-channel',
-      options: {
-        getString: vi.fn().mockReturnValue('message-2'),
-        getInteger: vi.fn().mockReturnValue(2),
-      },
       deferReply,
       editReply,
     } as unknown as ChatInputCommandInteraction;
@@ -204,7 +201,7 @@ describe('Discord commands', () => {
       requestCountingChainReview,
     });
 
-    expect(requestCountingChainReview).toHaveBeenCalledWith('counting-channel', 'message-2', 2);
+    expect(requestCountingChainReview).toHaveBeenCalledWith('counting-channel');
     expect(deferReply).toHaveBeenCalledOnce();
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining('Review requested'),

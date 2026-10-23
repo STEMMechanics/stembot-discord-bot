@@ -71,7 +71,8 @@ export type CountingChainRemoteAddressLookup = (
 
 export interface CountingChainService {
   handleMessage(message: CountingChainMessage): Promise<void>;
-  requestReview(message: CountingChainMessage, proposedNumber?: number): Promise<boolean>;
+  getReviewTargetMessageId(): Promise<string | undefined>;
+  requestReview(message: CountingChainMessage): Promise<boolean>;
   reviewMessage(
     message: CountingChainMessage,
     decision: 'approve' | 'reject',
@@ -99,12 +100,16 @@ type CountingChainGameState = CountingChainGameStatus & {
 
 type CountingChainReviewReason = 'unreadable' | 'wrong-number' | 'same-user' | 'manual';
 
-interface CountingChainPendingReview {
+interface CountingChainGameEnding {
   messageId: string;
   authorId: string;
   expectedNumber: number;
   proposedNumber: number | null;
   reason: CountingChainReviewReason;
+  endedAt: string;
+}
+
+interface CountingChainPendingReview extends CountingChainGameEnding {
   requestedAt: string;
 }
 
@@ -113,6 +118,7 @@ interface CountingChainState {
   game: CountingChainGameState | null;
   infoMessageId: string | null;
   historyRecoveryPending: boolean;
+  lastGameEnding: CountingChainGameEnding | null;
   pendingReview: CountingChainPendingReview | null;
 }
 
@@ -224,7 +230,25 @@ export class PersistentCountingChainService implements CountingChainService {
     });
   }
 
-  public requestReview(message: CountingChainMessage, proposedNumber?: number): Promise<boolean> {
+  public getReviewTargetMessageId(): Promise<string | undefined> {
+    if (
+      !this.dependencies.config.enabled ||
+      !this.dependencies.config.reviewEnabled ||
+      !this.dependencies.config.channelId
+    ) {
+      return Promise.resolve(undefined);
+    }
+
+    return this.dependencies.state.load().then((rootState) => {
+      const state = readCountingChainState(
+        rootState[STATE_KEY],
+        this.dependencies.config.channelId,
+      );
+      return state.pendingReview?.messageId ?? state.lastGameEnding?.messageId;
+    });
+  }
+
+  public requestReview(message: CountingChainMessage): Promise<boolean> {
     if (
       !this.dependencies.config.enabled ||
       !this.dependencies.config.reviewEnabled ||
@@ -236,7 +260,7 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     return this.enqueue(message.channelId, () =>
-      this.createReviewRequest(message, proposedNumber, 'manual'),
+      this.createReviewRequest(message, undefined, 'manual'),
     );
   }
 
@@ -655,6 +679,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRoundReason: game.lastRoundReason,
         lastProcessedMessageId: message.id,
       };
+      state.lastGameEnding = null;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
@@ -672,6 +697,14 @@ export class PersistentCountingChainService implements CountingChainService {
     const now = this.currentTime();
     const roundScore = Math.max(0, game.expectedNumber - 1);
     const highScore = Math.max(game.highScore, roundScore);
+    state.lastGameEnding = {
+      messageId: message.id,
+      authorId: message.authorId,
+      expectedNumber: game.expectedNumber,
+      proposedNumber: normalizeReviewNumber(recognizedNumber),
+      reason: reviewReason,
+      endedAt: now.toISOString(),
+    };
     state.game = createInitialGameState(now, {
       highScore,
       highScoreAt: roundScore > game.highScore ? now.toISOString() : game.highScoreAt,
@@ -714,10 +747,22 @@ export class PersistentCountingChainService implements CountingChainService {
         return false;
       }
 
-      if (proposedNumber !== undefined && proposedNumber !== state.pendingReview.proposedNumber) {
+      const normalizedProposedNumber = normalizeReviewNumber(proposedNumber);
+      if (
+        proposedNumber !== undefined &&
+        normalizedProposedNumber !== state.pendingReview.proposedNumber
+      ) {
         state.pendingReview = {
           ...state.pendingReview,
-          proposedNumber,
+          proposedNumber: normalizedProposedNumber,
+        };
+        state.lastGameEnding = {
+          messageId: state.pendingReview.messageId,
+          authorId: state.pendingReview.authorId,
+          expectedNumber: state.pendingReview.expectedNumber,
+          proposedNumber: normalizedProposedNumber,
+          reason: state.pendingReview.reason,
+          endedAt: state.lastGameEnding?.endedAt ?? state.pendingReview.requestedAt,
         };
         writeCountingChainState(rootState, state);
         await this.dependencies.state.save(rootState);
@@ -735,13 +780,27 @@ export class PersistentCountingChainService implements CountingChainService {
 
     const now = this.currentTime();
     const game = state.game ?? createInitialGameState(now);
-    const normalizedProposedNumber = normalizeReviewNumber(proposedNumber);
+    const previousEnding =
+      state.lastGameEnding?.messageId === message.id ? state.lastGameEnding : undefined;
+    const expectedNumber = previousEnding?.expectedNumber ?? game.expectedNumber;
+    const normalizedProposedNumber =
+      previousEnding?.proposedNumber ?? normalizeReviewNumber(proposedNumber);
+    const effectiveReason = previousEnding?.reason ?? reason;
+    state.lastGameEnding = {
+      messageId: message.id,
+      authorId: message.authorId,
+      expectedNumber,
+      proposedNumber: normalizedProposedNumber,
+      reason: effectiveReason,
+      endedAt: previousEnding?.endedAt ?? now.toISOString(),
+    };
     state.pendingReview = {
       messageId: message.id,
       authorId: message.authorId,
-      expectedNumber: game.expectedNumber,
+      expectedNumber,
       proposedNumber: normalizedProposedNumber,
-      reason,
+      reason: effectiveReason,
+      endedAt: previousEnding?.endedAt ?? now.toISOString(),
       requestedAt: now.toISOString(),
     };
     game.lastProcessedMessageId = message.id;
@@ -757,7 +816,7 @@ export class PersistentCountingChainService implements CountingChainService {
       normalizedProposedNumber === null ? 'not determined' : String(normalizedProposedNumber);
     await this.reply(
       message,
-      `${roleMention}Counting chain review requested. Expected **${game.expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve this post or ${REVIEW_REJECT_REACTION} to reset the chain.`,
+      `${roleMention}Counting chain review requested. Expected **${expectedNumber}**; proposed number **${proposedText}**. React with ${REVIEW_APPROVE_REACTION} to approve this post or ${REVIEW_REJECT_REACTION} to reset the chain.`,
       roleId ? { mentionRoleId: roleId } : undefined,
     );
     this.dependencies.logger.info(
@@ -765,9 +824,9 @@ export class PersistentCountingChainService implements CountingChainService {
         channelId: message.channelId,
         messageId: message.id,
         authorId: message.authorId,
-        expectedNumber: game.expectedNumber,
+        expectedNumber,
         proposedNumber: normalizedProposedNumber,
-        reason,
+        reason: effectiveReason,
       },
       'Counting chain moderator review requested',
     );
@@ -798,7 +857,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const now = this.currentTime();
     const game = state.game ?? createInitialGameState(now);
     if (decision === 'approve') {
-      const approvedNumber = pendingReview.proposedNumber ?? game.expectedNumber;
+      const approvedNumber = pendingReview.proposedNumber ?? pendingReview.expectedNumber;
       const highScore = Math.max(game.highScore, approvedNumber);
       state.game = {
         expectedNumber: approvedNumber + 1,
@@ -812,6 +871,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastRoundReason: game.lastRoundReason,
         lastProcessedMessageId: message.id,
       };
+      state.lastGameEnding = null;
       state.pendingReview = null;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
@@ -830,7 +890,7 @@ export class PersistentCountingChainService implements CountingChainService {
       return true;
     }
 
-    const roundScore = Math.max(0, game.expectedNumber - 1);
+    const roundScore = Math.max(0, pendingReview.expectedNumber - 1);
     const highScore = Math.max(game.highScore, roundScore);
     state.game = createInitialGameState(now, {
       highScore,
@@ -840,6 +900,7 @@ export class PersistentCountingChainService implements CountingChainService {
       lastRoundReason: 'moderator-rejected',
       lastProcessedMessageId: message.id,
     });
+    state.lastGameEnding = null;
     state.pendingReview = null;
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
@@ -1047,6 +1108,7 @@ function writeCountingChainState(rootState: JsonState, state: CountingChainState
     version: state.version,
     infoMessageId: state.infoMessageId,
     ...(state.historyRecoveryPending ? { historyRecoveryPending: true } : {}),
+    ...(state.lastGameEnding ? { lastGameEnding: state.lastGameEnding } : {}),
     ...(state.pendingReview ? { pendingReview: state.pendingReview } : {}),
     ...(state.game ?? {}),
   };
@@ -1161,6 +1223,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
       game: null,
       infoMessageId: null,
       historyRecoveryPending: false,
+      lastGameEnding: null,
       pendingReview: null,
     };
   }
@@ -1181,11 +1244,12 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     game: currentGame ?? nestedGame ?? legacyGame ?? null,
     infoMessageId: readNullableString(value.infoMessageId),
     historyRecoveryPending: value.historyRecoveryPending === true,
+    lastGameEnding: readGameEnding(value.lastGameEnding),
     pendingReview: readPendingReview(value.pendingReview),
   };
 }
 
-function readPendingReview(value: unknown): CountingChainPendingReview | null {
+function readGameEnding(value: unknown, fallbackEndedAt?: string): CountingChainGameEnding | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -1195,7 +1259,7 @@ function readPendingReview(value: unknown): CountingChainPendingReview | null {
   const expectedNumber = value.expectedNumber;
   const proposedNumber = value.proposedNumber;
   const reason = value.reason;
-  const requestedAt = value.requestedAt;
+  const endedAt = value.endedAt ?? fallbackEndedAt;
   if (
     typeof messageId !== 'string' ||
     typeof authorId !== 'string' ||
@@ -1206,7 +1270,7 @@ function readPendingReview(value: unknown): CountingChainPendingReview | null {
     (typeof proposedNumber === 'number' &&
       (!Number.isSafeInteger(proposedNumber) || proposedNumber <= 0)) ||
     !isCountingChainReviewReason(reason) ||
-    typeof requestedAt !== 'string'
+    typeof endedAt !== 'string'
   ) {
     return null;
   }
@@ -1217,6 +1281,27 @@ function readPendingReview(value: unknown): CountingChainPendingReview | null {
     expectedNumber,
     proposedNumber,
     reason,
+    endedAt,
+  };
+}
+
+function readPendingReview(value: unknown): CountingChainPendingReview | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const requestedAt = value.requestedAt;
+  if (typeof requestedAt !== 'string') {
+    return null;
+  }
+
+  const ending = readGameEnding(value, requestedAt);
+  if (!ending) {
+    return null;
+  }
+
+  return {
+    ...ending,
     requestedAt,
   };
 }

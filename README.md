@@ -42,7 +42,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/ping` — Discord gateway latency.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
-- `/review` — request moderator review of a counting-chain post; optionally provide its message ID and the number to approve.
+- `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/minecraft` — server availability, player count, capacity, maintenance state, and version.
 - `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
 
@@ -67,11 +67,11 @@ Set `COUNTING_CHAIN_REVIEW_ENABLED=true` and provide
 moderator review instead of resetting or asking the member to retry. STEMBot
 mentions that role and adds `🔎`. A moderator with that role, `Manage Messages`,
 or `Administrator` can react with `✅` to approve the proposed number or `❌`
-to reset the chain. Use `/review message_id number` when the model recognised
-the wrong number; the number option updates the pending proposal before the
-reaction is applied. While a review is pending, later posts are held until a
-moderator approves or rejects the pending post. The pending review is persisted
-across restarts.
+to confirm the reset. If review is enabled after a normal reset, any member can
+use `/review`; STEMBot resolves the persisted image that ended the game, so the
+member does not need to know a Discord message ID. While a review is pending,
+later posts are held until a moderator approves or rejects the pending post.
+The pending review is persisted across restarts.
 
 The bot downloads Discord CDN attachments, direct image URLs, and image URLs
 supplied by Discord embeds, samples animated GIF frames as PNG images, and sends
@@ -276,12 +276,21 @@ when editing it offline:
     "lastRound": 66,
     "lastRoundAt": "2026-10-22T23:56:00.000Z",
     "lastRoundReason": "same-user",
+    "lastGameEnding": {
+      "messageId": "DISCORD_MESSAGE_ID",
+      "authorId": "DISCORD_USER_ID",
+      "expectedNumber": 67,
+      "proposedNumber": 67,
+      "reason": "same-user",
+      "endedAt": "2026-10-22T23:56:00.000Z"
+    },
     "pendingReview": {
       "messageId": "DISCORD_MESSAGE_ID",
       "authorId": "DISCORD_USER_ID",
       "expectedNumber": 67,
       "proposedNumber": 67,
       "reason": "wrong-number",
+      "endedAt": "2026-10-23T00:00:00.000Z",
       "requestedAt": "2026-10-23T00:00:00.000Z"
     }
   }
@@ -291,17 +300,20 @@ when editing it offline:
 `expectedNumber` is the next number accepted, `highScore` is the highest
 accepted number, and `lastRound` is the score reached before the latest reset.
 `lastRoundReason` may use `same-user` or `wrong-number`, or contain a custom
-display note. A pending review contains the target message, the number the
-model or moderator proposed, and the reason (`unreadable`, `wrong-number`,
-`same-user`, or `manual`). While it exists, the service holds newer counting
-posts. `lastProcessedMessageId` is the Discord history scan checkpoint
-used for startup reconciliation. It advances to the newest scanned message,
-including messages without a supported image; `lastMessageId` remains the last
-accepted counting image. This lets a restart resume from the newest message
-without changing the game state for ordinary chat. The bot accepts older
-records without the score fields or checkpoint and fills them in on the next
-state write. It also accepts the previous nested `game` and
-channel-keyed `games` shapes and rewrites them to this flat shape at startup.
+display note. `lastGameEnding` identifies the most recent image that caused a
+normal reset and is retained so `/review` can reopen that image without a
+message ID. A pending review contains the target message, the number the model
+proposed, and the reason (`unreadable`, `wrong-number`, `same-user`, or
+`manual`). While it exists, the service holds newer counting posts. Both
+records are cleared after a moderator approves or confirms the reset.
+`lastProcessedMessageId` is the Discord history scan checkpoint used for startup
+reconciliation. It advances to the newest scanned message, including messages
+without a supported image; `lastMessageId` remains the last accepted counting
+image. This lets a restart resume from the newest message without changing the
+game state for ordinary chat. The bot accepts older records without the score
+fields or checkpoint and fills them in on the next state write. It also accepts
+the previous nested `game` and channel-keyed `games` shapes and rewrites them to
+this flat shape at startup.
 
 On every startup, STEMBot reads the configured counting channel history and
 processes image messages newer than `lastProcessedMessageId` in chronological

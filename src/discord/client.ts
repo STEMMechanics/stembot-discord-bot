@@ -78,15 +78,13 @@ export function createDiscordGateway(
   let countingChainEventQueue: Promise<void> = Promise.resolve();
   const requestCountingChainReview =
     dependencies.countingChain && config.countingChain.enabled && config.countingChain.reviewEnabled
-      ? (channelId: string, messageId?: string, proposedNumber?: number) =>
+      ? (channelId: string) =>
           requestCountingChainReviewFromDiscord(
             client,
             config.countingChain.channelId!,
             channelId,
             dependencies.countingChain!,
             logger,
-            messageId,
-            proposedNumber,
           )
       : undefined;
 
@@ -465,10 +463,13 @@ async function requestCountingChainReviewFromDiscord(
   channelId: string,
   service: CountingChainService,
   logger: AppLogger,
-  messageId?: string,
-  proposedNumber?: number,
 ): Promise<boolean> {
   if (!configuredChannelId || channelId !== configuredChannelId) {
+    return false;
+  }
+
+  const targetMessageId = await service.getReviewTargetMessageId();
+  if (!targetMessageId) {
     return false;
   }
 
@@ -477,25 +478,26 @@ async function requestCountingChainReviewFromDiscord(
     return false;
   }
 
-  let targetMessage: Message | undefined;
-  if (messageId) {
-    targetMessage = await channel.messages.fetch(messageId);
-  } else {
-    const recentMessages = await channel.messages.fetch({ limit: 100 });
-    targetMessage = [...recentMessages.values()]
-      .sort(compareMessagesNewestFirst)
-      .find((candidate) => !candidate.author.bot && hasCountingChainImageCandidate(candidate));
+  let targetMessage: Message;
+  try {
+    targetMessage = await channel.messages.fetch(targetMessageId);
+  } catch (error: unknown) {
+    logger.warn(
+      { err: error, channelId, messageId: targetMessageId },
+      'Counting chain review target could not be fetched',
+    );
+    return false;
   }
 
-  if (!targetMessage) {
+  if (targetMessage.author.bot) {
     return false;
   }
 
   logger.info(
-    { channelId, messageId: targetMessage.id, proposedNumber },
-    'Counting chain review command selected a message',
+    { channelId, messageId: targetMessage.id },
+    'Counting chain review command selected the last game-ending message',
   );
-  return service.requestReview(toCountingChainMessage(targetMessage), proposedNumber);
+  return service.requestReview(toCountingChainMessage(targetMessage));
 }
 
 async function handleCountingChainReviewReaction(
@@ -553,14 +555,6 @@ async function handleCountingChainReviewReaction(
 
 function isCountingChainReviewReaction(emoji: string): boolean {
   return emoji === '✅' || emoji === '❌';
-}
-
-function hasCountingChainImageCandidate(message: Message): boolean {
-  return (
-    message.attachments.size > 0 ||
-    getCountingChainImageUrls(message).length > 0 ||
-    /https?:\/\/\S+/i.test(message.content)
-  );
 }
 
 function compareCountingChainMessagesOldestFirst(
