@@ -97,6 +97,7 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   'media.giphy.com',
   'i.giphy.com',
   'i.imgur.com',
+  'static.klipy.com',
 ]);
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 

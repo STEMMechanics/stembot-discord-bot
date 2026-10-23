@@ -152,6 +152,24 @@ describe('counting-chain service', () => {
     expect(message.react).toHaveBeenCalledWith('👍');
   });
 
+  it('processes GIF-picker images from Klipy', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(1),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-klipy', {
+      content: 'https://klipy.com/gifs/example',
+      attachments: [],
+      imageUrls: ['https://static.klipy.com/example/number.gif'],
+    });
+
+    await service.handleMessage(message);
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledOnce();
+    expect(message.react).toHaveBeenCalledWith('👍');
+  });
+
   it('processes a GIF when Discord adds the embed after the message event', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
