@@ -45,6 +45,7 @@ interface StemScrambleRoundState {
   word: string;
   hint: string;
   scrambled: string;
+  wrongAttempts: number;
   startedAt: string;
 }
 
@@ -71,6 +72,7 @@ interface StemScrambleServiceDependencies {
 const STATE_KEY = 'stemScramble';
 const PASS_REACTION = '✅';
 const WRONG_REACTION = '❌';
+const MAX_WRONG_ATTEMPTS = 5;
 const MAX_RECENT_WORDS = 50;
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_WORD_GENERATION_ATTEMPTS = 3;
@@ -122,7 +124,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
       await this.publishNextRound(
         rootState,
         state,
-        '🔄 The previous scramble was reset by a moderator. A new scramble starts now.',
+        '🔄 The previous scramble was reset by a moderator.',
       );
       return previousWord;
     });
@@ -151,6 +153,25 @@ export class PersistentStemScrambleService implements StemScrambleService {
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     const answer = normalizeScrambleText(message.content);
     if (answer !== normalizeScrambleText(round.word)) {
+      round.wrongAttempts += 1;
+      if (round.wrongAttempts >= MAX_WRONG_ATTEMPTS) {
+        state.round = null;
+        writeStemScrambleState(rootState, state);
+        await this.dependencies.state.save(rootState);
+        await this.react(message, WRONG_REACTION);
+        await this.publishNextRound(rootState, state, `The answer was **${round.word}**.`);
+        this.dependencies.logger.info(
+          {
+            channelId: message.channelId,
+            messageId: message.id,
+            roundNumber: round.roundNumber,
+            wrongAttempts: round.wrongAttempts,
+          },
+          'STEM scramble answer limit reached; answer revealed and round advanced',
+        );
+        return;
+      }
+
       writeStemScrambleState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, WRONG_REACTION);
@@ -167,12 +188,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
     await this.react(message, PASS_REACTION);
     await this.recordGameParticipation(message.authorId, message);
 
-    const leadIn = [
-      `🎉 <@${message.authorId}> solved it! The word was **${round.word}**.`,
-      round.hint,
-      'A new scramble starts now.',
-    ].join('\n');
-    await this.publishNextRound(rootState, state, leadIn);
+    await this.publishNextRound(rootState, state);
     this.dependencies.logger.info(
       {
         channelId: message.channelId,
@@ -212,6 +228,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
       word: word.word,
       hint: word.hint,
       scrambled,
+      wrongAttempts: 0,
       startedAt: this.currentTime().toISOString(),
     };
     state.nextRoundNumber += 1;
@@ -378,6 +395,10 @@ function readRoundState(value: unknown): StemScrambleRoundState | null {
     typeof value.word !== 'string' ||
     typeof value.hint !== 'string' ||
     typeof value.scrambled !== 'string' ||
+    (value.wrongAttempts !== undefined &&
+      (typeof value.wrongAttempts !== 'number' ||
+        !Number.isSafeInteger(value.wrongAttempts) ||
+        value.wrongAttempts < 0)) ||
     typeof value.startedAt !== 'string' ||
     !hasSameLetters(value.word, value.scrambled)
   ) {
@@ -391,6 +412,7 @@ function readRoundState(value: unknown): StemScrambleRoundState | null {
     word: value.word,
     hint: value.hint,
     scrambled: value.scrambled,
+    wrongAttempts: typeof value.wrongAttempts === 'number' ? value.wrongAttempts : 0,
     startedAt: value.startedAt,
   };
 }

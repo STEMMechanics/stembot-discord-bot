@@ -6,7 +6,9 @@ import { OpenAIStemQuizEngine, type StemQuizQuestion } from '../src/integrations
 const logger = pino({ level: 'silent' });
 
 const question: StemQuizQuestion = {
+  type: 'short-answer',
   prompt: 'What force pulls objects towards Earth?',
+  options: [],
   answer: 'gravity',
   acceptedAnswers: ['gravitational force'],
   explanation: 'Gravity pulls objects towards Earth.',
@@ -29,7 +31,9 @@ describe('OpenAI STEM quiz engine', () => {
       new Response(
         JSON.stringify({
           output_text: JSON.stringify({
+            type: 'multiple-choice',
             prompt: 'Which force pulls objects towards Earth?',
+            options: ['Gravity', 'Friction'],
             answer: 'gravity',
             acceptedAnswers: ['gravitational force'],
             explanation: 'Gravity attracts objects towards Earth.',
@@ -47,10 +51,13 @@ describe('OpenAI STEM quiz engine', () => {
         targetAgeMax: 14,
         olderAgeMax: 18,
         olderPlayerChallenge: false,
+        questionType: 'multiple-choice',
         avoidQuestions: [question],
       }),
     ).resolves.toEqual({
+      type: 'multiple-choice',
       prompt: 'Which force pulls objects towards Earth?',
+      options: ['Gravity', 'Friction'],
       answer: 'gravity',
       acceptedAnswers: ['gravitational force'],
       explanation: 'Gravity attracts objects towards Earth.',
@@ -70,6 +77,9 @@ describe('OpenAI STEM quiz engine', () => {
       name: 'stem_quiz_question',
     });
     expect(body.input[0]?.content[0]?.text).toContain('aged 8-14');
+    expect(body.input[0]?.content[0]?.text).toContain(
+      'Use exactly this question type: multiple-choice.',
+    );
     expect(body.input[0]?.content[0]?.text).toContain('redstone ticks');
     expect(body.input[0]?.content[0]?.text).toContain('metres');
     expect(body.input[0]?.content[0]?.text).toContain('Do not repeat any listed question');
@@ -114,7 +124,9 @@ describe('OpenAI STEM quiz engine', () => {
         new Response(
           JSON.stringify({
             output_text: JSON.stringify({
+              type: 'short-answer',
               prompt: 'What is 2 plus 2?',
+              options: [],
               answer: '4',
               acceptedAnswers: ['four'],
               explanation: 'Two plus two equals four.',

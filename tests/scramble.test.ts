@@ -109,6 +109,8 @@ describe('STEM scramble service', () => {
     expect(correct.react).toHaveBeenCalledWith('✅');
     expect(recordGameParticipation).toHaveBeenCalledWith('user-1');
     expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).not.toContain('solved it');
+    expect(publisher.send.mock.calls[1]?.[1]).not.toContain('A clue for circuit.');
     expect(state.state).toMatchObject({
       stemScramble: {
         nextRoundNumber: 3,
@@ -142,6 +144,37 @@ describe('STEM scramble service', () => {
       stemScramble: {
         recentWords: ['circuit', 'robot'],
         round: { word: 'robot' },
+      },
+    });
+  });
+
+  it('reveals the answer after five wrong guesses and advances the round', async () => {
+    const state = new MemoryStateStore();
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi
+        .fn()
+        .mockResolvedValueOnce(word('circuit'))
+        .mockResolvedValueOnce(word('robot')),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('scramble-message-1')
+        .mockResolvedValueOnce('scramble-message-2'),
+    };
+    const service = createService(state, generator, publisher);
+
+    await service.initialize();
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await service.handleMessage(createMessage('user-1', `wrong-${attempt}`, 'not-it'));
+    }
+
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain('The answer was **circuit**.');
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        nextRoundNumber: 3,
+        round: { word: 'robot', wrongAttempts: 0 },
       },
     });
   });

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { StemQuizEngine, StemQuizQuestion } from '../src/integrations/openai-quiz.js';
 import {
+  formatStemQuizQuestion,
   PersistentStemQuizService,
   type StemQuizConfig,
   type StemQuizMessage,
@@ -84,6 +85,62 @@ function createService(
 }
 
 describe('STEM quiz service', () => {
+  it('renders true-false and multiple-choice question formats', () => {
+    expect(
+      formatStemQuizQuestion(
+        {
+          type: 'true-false',
+          prompt: 'The Earth orbits the Sun.',
+          answer: 'True',
+          acceptedAnswers: ['true'],
+          explanation: 'Earth orbits the Sun.',
+        },
+        1,
+      ),
+    ).toContain('**True or false?**');
+    expect(
+      formatStemQuizQuestion(
+        {
+          type: 'multiple-choice',
+          prompt: 'Which planet is closest to the Sun?',
+          options: ['Earth', 'Mercury', 'Mars'],
+          answer: 'Mercury',
+          acceptedAnswers: ['Mercury'],
+          explanation: 'Mercury is closest to the Sun.',
+        },
+        2,
+      ),
+    ).toContain('A) Earth\nB) Mercury\nC) Mars');
+  });
+
+  it('checks true-false and multiple-choice selections locally', async () => {
+    const state = new MemoryStateStore();
+    const multipleChoiceQuestion: StemQuizQuestion = {
+      type: 'multiple-choice',
+      prompt: 'Which planet is closest to the Sun?',
+      options: ['Earth', 'Mercury', 'Mars'],
+      answer: 'Mercury',
+      acceptedAnswers: ['Mercury'],
+      explanation: 'Mercury is closest to the Sun.',
+    };
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(multipleChoiceQuestion)
+        .mockResolvedValue(question('gravity')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('question-message-1') };
+    const service = createService(state, engine, publisher);
+
+    await service.initialize();
+    await service.handleMessage(createMessage('user-1', 'answer-1', 'B'));
+
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(publisher.send.mock.calls[0]?.[1]).toContain('A) Earth\nB) Mercury\nC) Mars');
+    expect(state.state).toMatchObject({ stemQuiz: { scores: { 'user-1': 1 } } });
+  });
+
   it('posts an age-targeted question when the game starts', async () => {
     const state = new MemoryStateStore();
     const engine: StemQuizEngine = {
@@ -101,6 +158,7 @@ describe('STEM quiz service', () => {
       targetAgeMax: 14,
       olderAgeMax: 18,
       olderPlayerChallenge: false,
+      questionType: 'short-answer',
     });
     expect(publisher.send).toHaveBeenCalledWith(
       'quiz-channel',

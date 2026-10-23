@@ -150,6 +150,15 @@ const environmentSchema = z.object({
     .default(
       'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
     ),
+  STEM_WORD_CHAIN_ENABLED: booleanFromEnvironment(false),
+  STEM_WORD_CHAIN_CHANNEL_ID: optionalDiscordId,
+  STEM_WORD_CHAIN_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_ASK_ENABLED: booleanFromEnvironment(false),
+  STEM_ASK_CHANNEL_ID: optionalDiscordId,
+  STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
+  STEM_ASK_USER_COOLDOWN_SECONDS: positiveInteger(30, 86400),
+  STEM_ASK_USER_DAILY_LIMIT: positiveInteger(10, 1000),
+  STEM_ASK_GLOBAL_DAILY_LIMIT: positiveInteger(100, 10000),
   STEM_LEVELS_ENABLED: booleanFromEnvironment(false),
   STEM_LEVELS_ANNOUNCEMENT_CHANNEL_ID: optionalDiscordId,
   STEM_LEVELS_MESSAGE_XP: positiveInteger(5, 100),
@@ -219,6 +228,19 @@ export interface AppConfig {
     topic: string;
     targetAgeMin: number;
     targetAgeMax: number;
+  };
+  wordChain: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+  };
+  ask: {
+    enabled: boolean;
+    channelId?: string;
+    maxQuestionLength: number;
+    userCooldownMs: number;
+    userDailyLimit: number;
+    globalDailyLimit: number;
   };
   levels: {
     enabled: boolean;
@@ -327,6 +349,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  if (values.STEM_WORD_CHAIN_ENABLED && !values.STEM_WORD_CHAIN_CHANNEL_ID) {
+    throw new Error('STEM_WORD_CHAIN_CHANNEL_ID is required when STEM_WORD_CHAIN_ENABLED is true');
+  }
+
+  if (values.STEM_ASK_ENABLED && !values.STEM_ASK_CHANNEL_ID) {
+    throw new Error('STEM_ASK_CHANNEL_ID is required when STEM_ASK_ENABLED is true');
+  }
+
+  if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
+  }
+
   try {
     new Intl.DateTimeFormat('en-AU', { timeZone: values.WORKSHOP_TIME_ZONE }).format();
   } catch (error: unknown) {
@@ -402,6 +436,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       topic: values.STEM_SCRAMBLE_TOPIC,
       targetAgeMin: values.STEM_SCRAMBLE_TARGET_AGE_MIN,
       targetAgeMax: values.STEM_SCRAMBLE_TARGET_AGE_MAX,
+    },
+    wordChain: {
+      enabled: values.STEM_WORD_CHAIN_ENABLED,
+      ...(values.STEM_WORD_CHAIN_CHANNEL_ID
+        ? { channelId: values.STEM_WORD_CHAIN_CHANNEL_ID }
+        : {}),
+      retryIntervalMs: values.STEM_WORD_CHAIN_RETRY_INTERVAL_MS,
+    },
+    ask: {
+      enabled: values.STEM_ASK_ENABLED,
+      ...(values.STEM_ASK_CHANNEL_ID ? { channelId: values.STEM_ASK_CHANNEL_ID } : {}),
+      maxQuestionLength: values.STEM_ASK_MAX_QUESTION_LENGTH,
+      userCooldownMs: values.STEM_ASK_USER_COOLDOWN_SECONDS * 1000,
+      userDailyLimit: values.STEM_ASK_USER_DAILY_LIMIT,
+      globalDailyLimit: values.STEM_ASK_GLOBAL_DAILY_LIMIT,
     },
     levels: {
       enabled: values.STEM_LEVELS_ENABLED,

@@ -6,6 +6,7 @@ import type {
   StemQuizQuestion,
   StemQuizQuestionHistory,
   StemQuizQuestionOptions,
+  StemQuizQuestionType,
 } from '../integrations/openai-quiz.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
@@ -192,6 +193,11 @@ export class PersistentStemQuizService implements StemQuizService {
       return 'correct';
     }
 
+    const localChoiceResult = evaluateChoiceAnswer(question, answer);
+    if (localChoiceResult) {
+      return localChoiceResult;
+    }
+
     return this.dependencies.engine.evaluateAnswer(question, answer.slice(0, 500));
   }
 
@@ -282,6 +288,7 @@ export class PersistentStemQuizService implements StemQuizService {
       targetAgeMax: this.dependencies.config.targetAgeMax,
       olderAgeMax: this.dependencies.config.olderAgeMax,
       olderPlayerChallenge,
+      questionType: selectQuestionType(this.random()),
       ...(state.recentQuestions.length > 0 ? { avoidQuestions: state.recentQuestions } : {}),
     };
     const question = await this.generateQuestionAvoidingDuplicates(
@@ -393,7 +400,17 @@ export function formatStemQuizQuestion(
   questionNumber: number,
   leadIn?: string,
 ): string {
-  const sections = [leadIn, `🧠 **Question ${questionNumber}**`, question.prompt];
+  const type = question.type ?? 'short-answer';
+  const answerPrompt =
+    type === 'true-false'
+      ? '**True or false?**'
+      : type === 'multiple-choice'
+        ? [
+            '**Choose one:**',
+            ...(question.options ?? []).map((option, index) => `${choiceLetter(index)}) ${option}`),
+          ].join('\n')
+        : undefined;
+  const sections = [leadIn, `🧠 **Question ${questionNumber}**`, question.prompt, answerPrompt];
   return sections.filter((section): section is string => Boolean(section)).join('\n\n');
 }
 
@@ -486,6 +503,21 @@ function readQuestionState(value: unknown): StemQuizQuestionState | null {
     return null;
   }
 
+  const type = readQuestionType(value.type);
+  const options = readQuestionOptions(value.options);
+  if (value.type !== undefined && !type) {
+    return null;
+  }
+  if (value.options !== undefined && !options) {
+    return null;
+  }
+  if (type === 'multiple-choice' && (options?.length ?? 0) < 2) {
+    return null;
+  }
+  if (type !== 'multiple-choice' && (options?.length ?? 0) > 0) {
+    return null;
+  }
+
   return {
     id: value.id,
     messageId: value.messageId,
@@ -496,7 +528,101 @@ function readQuestionState(value: unknown): StemQuizQuestionState | null {
     answer: value.answer,
     acceptedAnswers: value.acceptedAnswers,
     explanation: value.explanation,
+    ...(type ? { type } : {}),
+    ...(options ? { options } : {}),
   };
+}
+
+function evaluateChoiceAnswer(
+  question: StemQuizQuestion,
+  answer: string,
+): StemQuizAnswerResult | undefined {
+  const type = question.type ?? 'short-answer';
+  if (type === 'short-answer') {
+    return undefined;
+  }
+
+  const normalizedAnswer = normalizeQuizText(answer);
+  if (type === 'true-false') {
+    if (['true', 't'].includes(normalizedAnswer)) {
+      return normalizeQuizText(question.answer) === 'true' ? 'correct' : 'incorrect';
+    }
+    if (['false', 'f'].includes(normalizedAnswer)) {
+      return normalizeQuizText(question.answer) === 'false' ? 'correct' : 'incorrect';
+    }
+    return undefined;
+  }
+
+  const options = question.options ?? [];
+  const optionIndex = readChoiceIndex(answer, options.length);
+  const selectedTextIndex = options.findIndex(
+    (option) => normalizeQuizText(option) === normalizedAnswer,
+  );
+  const selectedIndex = optionIndex ?? (selectedTextIndex >= 0 ? selectedTextIndex : undefined);
+  if (selectedIndex === undefined) {
+    return undefined;
+  }
+
+  const selectedOption = options[selectedIndex];
+  if (!selectedOption) {
+    return undefined;
+  }
+
+  const canonicalIndex = readChoiceIndex(question.answer, options.length);
+  if (canonicalIndex !== undefined) {
+    return canonicalIndex === selectedIndex ? 'correct' : 'incorrect';
+  }
+
+  const acceptedAnswers = [question.answer, ...question.acceptedAnswers].map(normalizeQuizText);
+  return acceptedAnswers.includes(normalizeQuizText(selectedOption)) ? 'correct' : 'incorrect';
+}
+
+function readChoiceIndex(answer: string, optionCount: number): number | undefined {
+  const normalized = normalizeQuizText(answer);
+  const letterMatch = normalized.match(/^([a-d])(?:\s+|\s*[.)])?$/);
+  if (letterMatch?.[1]) {
+    const index = letterMatch[1].charCodeAt(0) - 'a'.charCodeAt(0);
+    return index >= 0 && index < optionCount ? index : undefined;
+  }
+
+  const numberMatch = normalized.match(/^([1-4])$/);
+  if (numberMatch?.[1]) {
+    const index = Number(numberMatch[1]) - 1;
+    return index >= 0 && index < optionCount ? index : undefined;
+  }
+
+  return undefined;
+}
+
+function readQuestionType(value: unknown): StemQuizQuestion['type'] | undefined {
+  return value === 'short-answer' || value === 'true-false' || value === 'multiple-choice'
+    ? value
+    : undefined;
+}
+
+function readQuestionOptions(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return Array.isArray(value) && value.every((option) => typeof option === 'string')
+    ? value
+    : undefined;
+}
+
+function choiceLetter(index: number): string {
+  return String.fromCharCode('A'.charCodeAt(0) + index);
+}
+
+function selectQuestionType(value: number): StemQuizQuestionType {
+  const normalized = Math.max(0, Math.min(0.999999, value));
+  if (normalized < 1 / 3) {
+    return 'true-false';
+  }
+  if (normalized < 2 / 3) {
+    return 'multiple-choice';
+  }
+  return 'short-answer';
 }
 
 function createInitialState(): StemQuizState {

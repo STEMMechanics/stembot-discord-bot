@@ -28,9 +28,11 @@ import type {
   CountingChainReplyOptions,
   CountingChainService,
 } from '../services/counting-chain.js';
+import type { StemAskMessage, StemAskService } from '../services/stem-ask.js';
 import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
 import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
-import type { UserLevelService } from '../services/user-levels.js';
+import type { UserLevelProfile, UserLevelService } from '../services/user-levels.js';
+import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -64,6 +66,8 @@ export interface DiscordCommandDependencies {
   countingChain?: CountingChainService;
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
+  wordChain?: StemWordChainService;
+  ask?: StemAskService;
   userLevels?: UserLevelService;
   uptime?: UptimeKumaIntegration;
 }
@@ -80,6 +84,8 @@ export function createDiscordGateway(
     (config.countingChain.enabled && dependencies.countingChain) ||
     (config.quiz.enabled && dependencies.quiz) ||
     (config.scramble.enabled && dependencies.scramble) ||
+    (config.wordChain.enabled && dependencies.wordChain) ||
+    (config.ask.enabled && dependencies.ask) ||
     (config.levels.enabled && dependencies.userLevels);
   const reactionTrackingEnabled =
     (config.countingChain.enabled && config.countingChain.reviewEnabled) || config.levels.enabled;
@@ -100,6 +106,7 @@ export function createDiscordGateway(
   };
   const client = new Client(clientOptions);
   let countingChainEventQueue: Promise<void> = Promise.resolve();
+  let refreshMinigameDashboard: (() => Promise<void>) | undefined;
   const requestCountingChainReview =
     dependencies.countingChain && config.countingChain.enabled && config.countingChain.reviewEnabled
       ? (channelId: string) =>
@@ -111,6 +118,16 @@ export function createDiscordGateway(
             logger,
           )
       : undefined;
+  const refreshDashboardSafely = (): void => {
+    const refresh = refreshMinigameDashboard;
+    if (!refresh) {
+      return;
+    }
+
+    void refresh().catch((error: unknown) => {
+      logger.warn({ err: error }, 'STEM minigame dashboard refresh failed');
+    });
+  };
 
   let resolveClientReady!: () => void;
   const clientReady = new Promise<void>((resolve) => {
@@ -140,8 +157,10 @@ export function createDiscordGateway(
             config.countingChain.infoChannelId,
             config.countingChain.infoMessageId,
             config.workshops.timeZone,
+            dependencies.userLevels,
           )
         : undefined;
+      refreshMinigameDashboard = infoPublisher?.refresh;
 
       initializationTasks.push(
         dependencies.countingChain
@@ -175,6 +194,17 @@ export function createDiscordGateway(
           logger.warn(
             { err: error, channelId: config.scramble.channelId },
             'STEM scramble startup initialization failed',
+          );
+        }),
+      );
+    }
+
+    if (dependencies.wordChain && config.wordChain.enabled && config.wordChain.channelId) {
+      initializationTasks.push(
+        dependencies.wordChain.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.wordChain.channelId },
+            'STEM word chain startup initialization failed',
           );
         }),
       );
@@ -270,12 +300,14 @@ export function createDiscordGateway(
             for (const candidate of orderedMessages) {
               await dependencies.countingChain?.handleMessage(candidate);
             }
+            refreshDashboardSafely();
           } catch (error: unknown) {
             logger.warn(
               { err: error, channelId: message.channelId, messageId: message.id },
               'Counting chain recent history could not be read; processing the current message',
             );
             await dependencies.countingChain?.handleMessage(toCountingChainMessage(message));
+            refreshDashboardSafely();
           }
         });
       countingChainEventQueue = next.then(
@@ -350,12 +382,15 @@ export function createDiscordGateway(
         'STEM quiz Discord message received',
       );
 
-      void dependencies.quiz!.handleMessage(toStemQuizMessage(message)).catch((error: unknown) => {
-        logger.warn(
-          { err: error, channelId: message.channelId, messageId: message.id },
-          'STEM quiz message could not be processed',
-        );
-      });
+      void dependencies
+        .quiz!.handleMessage(toStemQuizMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM quiz message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
     });
   }
 
@@ -381,6 +416,68 @@ export function createDiscordGateway(
           logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id },
             'STEM scramble message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
+
+  if (dependencies.wordChain && config.wordChain.enabled && config.wordChain.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (message.channelId !== config.wordChain.channelId || message.author.bot) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'STEM word chain Discord message received',
+      );
+
+      void dependencies
+        .wordChain!.handleMessage(toStemWordChainMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM word chain message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
+
+  if (dependencies.ask && config.ask.enabled && config.ask.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (
+        message.channelId !== config.ask.channelId ||
+        message.author.bot ||
+        !client.user ||
+        !message.mentions.has(client.user)
+      ) {
+        return;
+      }
+
+      const question = removeBotMentions(message.content, client.user.id);
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          questionLength: question.length,
+        },
+        'STEM ask Discord message received',
+      );
+
+      void dependencies
+        .ask!.handleMessage(toStemAskMessage(message, question))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM ask message could not be processed',
           );
         });
     });
@@ -616,6 +713,39 @@ function toStemScrambleMessage(message: Message): StemScrambleMessage {
   };
 }
 
+function toStemWordChainMessage(message: Message): StemWordChainMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
+    },
+  };
+}
+
+function toStemAskMessage(message: Message, question: string): StemAskMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    question,
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
+    },
+  };
+}
+
+function removeBotMentions(content: string, botUserId: string): string {
+  return content.replace(new RegExp(`<@!?${botUserId}>`, 'g'), '').trim();
+}
+
 function getCountingChainImageUrls(message: Message): string[] {
   return message.embeds.flatMap((embed) =>
     [embed.image?.url, embed.thumbnail?.url].filter(
@@ -822,88 +952,115 @@ function createCountingChainInfoPublisher(
   channelId: string,
   configuredMessageId: string | undefined,
   timeZone: string,
-): CountingChainInfoPublisher {
+  userLevels: UserLevelService | undefined,
+): CountingChainInfoPublisher & { refresh(): Promise<void> } {
   let messageId = configuredMessageId;
+  let latestStatus: CountingChainGameStatus | undefined;
+
+  const update = async (
+    status: CountingChainGameStatus,
+    persistedMessageId?: string,
+  ): Promise<string | undefined> => {
+    latestStatus = status;
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased() || !('messages' in channel) || !('send' in channel)) {
+      throw new Error(`Counting chain info channel is not writable: ${channelId}`);
+    }
+
+    let infoMessage: Message | undefined;
+    const requestedMessageId = persistedMessageId ?? messageId;
+    if (requestedMessageId) {
+      try {
+        const candidate = await channel.messages.fetch(requestedMessageId);
+        if (candidate.author.id === botUserId) {
+          infoMessage = candidate;
+        }
+      } catch {
+        messageId = undefined;
+      }
+    }
+
+    if (!infoMessage) {
+      const recentMessages = await channel.messages.fetch({ limit: 100 });
+      infoMessage = recentMessages.find(
+        (candidate) =>
+          candidate.author.id === botUserId &&
+          candidate.embeds.some(
+            (embed) => embed.title === 'STEMBot Minigames' || embed.title === 'Counting Chain Game',
+          ),
+      );
+    }
+
+    let leaderboard: readonly UserLevelProfile[] = [];
+    if (userLevels) {
+      try {
+        leaderboard = await userLevels.getLeaderboard(25);
+      } catch {
+        leaderboard = [];
+      }
+    }
+    const embed = buildMinigameInfoEmbed(status, timeZone, leaderboard);
+    if (infoMessage) {
+      await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
+      messageId = infoMessage.id;
+      return infoMessage.id;
+    }
+
+    const createdMessage = await channel.send({
+      embeds: [embed],
+      allowedMentions: { parse: [] },
+    });
+    messageId = createdMessage.id;
+    return createdMessage.id;
+  };
 
   return {
-    async update(
-      status: CountingChainGameStatus,
-      persistedMessageId?: string,
-    ): Promise<string | undefined> {
-      const channel = await client.channels.fetch(channelId);
-      if (!channel || !channel.isTextBased() || !('messages' in channel) || !('send' in channel)) {
-        throw new Error(`Counting chain info channel is not writable: ${channelId}`);
+    update,
+    async refresh(): Promise<void> {
+      if (latestStatus) {
+        await update(latestStatus);
       }
-
-      let infoMessage: Message | undefined;
-      const requestedMessageId = persistedMessageId ?? messageId;
-      if (requestedMessageId) {
-        try {
-          const candidate = await channel.messages.fetch(requestedMessageId);
-          if (candidate.author.id === botUserId) {
-            infoMessage = candidate;
-          }
-        } catch {
-          messageId = undefined;
-        }
-      }
-
-      if (!infoMessage) {
-        const recentMessages = await channel.messages.fetch({ limit: 100 });
-        infoMessage = recentMessages.find(
-          (candidate) =>
-            candidate.author.id === botUserId &&
-            candidate.embeds.some((embed) => embed.title === 'Counting Chain Game'),
-        );
-      }
-
-      const embed = buildCountingChainInfoEmbed(status, timeZone);
-      if (infoMessage) {
-        await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
-        messageId = infoMessage.id;
-        return infoMessage.id;
-      }
-
-      const createdMessage = await channel.send({
-        embeds: [embed],
-        allowedMentions: { parse: [] },
-      });
-      messageId = createdMessage.id;
-      return createdMessage.id;
     },
   };
 }
 
-function buildCountingChainInfoEmbed(status: CountingChainGameStatus, timeZone: string): APIEmbed {
+function buildMinigameInfoEmbed(
+  status: CountingChainGameStatus,
+  timeZone: string,
+  leaderboard: readonly UserLevelProfile[],
+): APIEmbed {
   return {
-    title: 'Counting Chain Game',
+    title: 'STEMBot Minigames',
     color: 0x58d5d8,
     description: [
-      'The goal is to get to the highest number we can!',
+      'Play STEMBot’s minigames to build your streak and level up.',
       '',
-      '**Rule #1**',
-      'Post a GIF or picture containing a number.',
+      '**Counting chain**',
+      'Post a GIF or picture containing the next number.',
       '',
-      '**Rule #2**',
-      'The next number must be 1 higher than the previous number.',
+      '**Other games**',
+      'Answer the STEM quiz, solve the scramble, or keep the themed word chain going.',
       '',
-      '**Rule #3**',
-      'You cannot post twice in a row.',
-      '',
-      '**When does the chain break?**',
-      'An incorrect number or a consecutive post resets the chain to 1.',
-      '',
-      'Have fun!',
+      'Accepted moves across the minigames count toward the shared activity leaderboard.',
     ].join('\n'),
     fields: [
-      { name: 'Current number', value: String(status.expectedNumber), inline: true },
       {
-        name: 'Current Highscore',
+        name: 'Counting streak',
+        value: `${Math.max(0, status.expectedNumber - 1)} accepted · next **${status.expectedNumber}**`,
+        inline: true,
+      },
+      {
+        name: 'Best counting streak',
         value: formatCountingChainStat(status.highScore, status.highScoreAt, timeZone),
         inline: true,
       },
       {
-        name: 'Last round',
+        name: 'Minigame leaderboard',
+        value: formatMinigameLeaderboard(leaderboard),
+        inline: false,
+      },
+      {
+        name: 'Last counting round',
         value: formatCountingChainStat(
           status.lastRound,
           status.lastRoundAt,
@@ -913,8 +1070,31 @@ function buildCountingChainInfoEmbed(status: CountingChainGameStatus, timeZone: 
         inline: false,
       },
     ],
-    footer: { text: 'STEMBot counting chain' },
+    footer: { text: 'STEMBot minigames' },
   };
+}
+
+function formatMinigameLeaderboard(profiles: readonly UserLevelProfile[]): string {
+  const activeProfiles = profiles
+    .filter((profile) => profile.gameCount > 0)
+    .sort(
+      (left, right) =>
+        right.gameCount - left.gameCount || right.level - left.level || right.xp - left.xp,
+    );
+  if (profiles.length === 0) {
+    return 'Enable participation levels to show the shared leaderboard.';
+  }
+  if (activeProfiles.length === 0) {
+    return 'No minigame plays recorded yet.';
+  }
+
+  return activeProfiles
+    .slice(0, 5)
+    .map(
+      (profile, index) =>
+        `**${index + 1}.** <@${profile.userId}> · Level ${profile.level} · ${profile.gameCount} game ${profile.gameCount === 1 ? 'play' : 'plays'}`,
+    )
+    .join('\n');
 }
 
 function formatCountingChainStat(

@@ -1,6 +1,7 @@
 import type { AppConfig } from './config/env.js';
 import { createDiscordGateway, type DiscordGateway } from './discord/client.js';
 import { createOpenAINumberRecognizer } from './integrations/openai.js';
+import { createOpenAIStemAskAnswerer } from './integrations/openai-ask.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
 import { createOpenAIScrambleWordGenerator } from './integrations/openai-scramble.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
@@ -16,12 +17,14 @@ import {
   createCountingChainService,
   type CountingChainService,
 } from './services/counting-chain.js';
+import { createStemAskService, type StemAskService } from './services/stem-ask.js';
 import {
   createWorkshopNotificationService,
   type WorkshopNotificationService,
 } from './services/workshop-notifications.js';
 import { createStemScrambleService, type StemScrambleService } from './services/scramble.js';
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
+import { createStemWordChainService, type StemWordChainService } from './services/word-chain.js';
 import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
 import {
   createUserLevelService,
@@ -47,6 +50,8 @@ export interface ApplicationDependencies {
   countingChain?: CountingChainService;
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
+  wordChain?: StemWordChainService;
+  ask?: StemAskService;
   userLevels?: UserLevelService;
   workshopNotifications: WorkshopNotificationService;
 }
@@ -177,6 +182,43 @@ export function createApplication(
           ...(userLevels ? { userLevels } : {}),
         })
       : undefined);
+  const wordChain =
+    dependencies?.wordChain ??
+    (config.wordChain.enabled
+      ? createStemWordChainService({
+          config: config.wordChain,
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for STEM word chain'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
+  const ask =
+    dependencies?.ask ??
+    (config.ask.enabled
+      ? createStemAskService({
+          config: config.ask,
+          answerer: createOpenAIStemAskAnswerer({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
+          state,
+          logger,
+        })
+      : undefined);
   const discord =
     dependencies?.discord ??
     createDiscordGateway(config, logger, {
@@ -186,6 +228,8 @@ export function createApplication(
       ...(countingChain ? { countingChain } : {}),
       ...(quiz ? { quiz } : {}),
       ...(scramble ? { scramble } : {}),
+      ...(wordChain ? { wordChain } : {}),
+      ...(ask ? { ask } : {}),
       ...(userLevels ? { userLevels } : {}),
       ...(uptime ? { uptime } : {}),
     });
@@ -234,6 +278,14 @@ export function createApplication(
       name: 'stem-scramble-maintenance',
       intervalMs: config.scramble.retryIntervalMs,
       run: () => scramble.ensureRound(),
+    });
+  }
+
+  if (wordChain && config.wordChain.enabled) {
+    scheduler.register({
+      name: 'stem-word-chain-maintenance',
+      intervalMs: config.wordChain.retryIntervalMs,
+      run: () => wordChain.ensureRound(),
     });
   }
 

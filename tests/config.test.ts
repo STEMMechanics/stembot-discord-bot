@@ -61,6 +61,17 @@ describe('loadConfig', () => {
         topic:
           'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
       },
+      wordChain: {
+        enabled: false,
+        retryIntervalMs: 300000,
+      },
+      ask: {
+        enabled: false,
+        maxQuestionLength: 500,
+        userCooldownMs: 30000,
+        userDailyLimit: 10,
+        globalDailyLimit: 100,
+      },
       levels: {
         enabled: false,
         messageXp: 5,
@@ -381,6 +392,75 @@ describe('loadConfig', () => {
       gameXp: 20,
       messageCooldownMs: 90000,
       reactionCooldownMs: 45000,
+    });
+  });
+
+  it('requires a word-chain channel when the game is enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_WORD_CHAIN_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_WORD_CHAIN_CHANNEL_ID/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      STEM_WORD_CHAIN_ENABLED: 'true',
+      STEM_WORD_CHAIN_CHANNEL_ID: '8234567890',
+      STEM_WORD_CHAIN_RETRY_INTERVAL_MS: '60000',
+    });
+
+    expect(config.wordChain).toEqual({
+      enabled: true,
+      channelId: '8234567890',
+      retryIntervalMs: 60000,
+    });
+  });
+
+  it('requires ask credentials and parses its abuse limits', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_ASK_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_ASK_CHANNEL_ID/);
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_ASK_ENABLED: 'true',
+        STEM_ASK_CHANNEL_ID: '7234567890',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_ASK_ENABLED: 'true',
+      STEM_ASK_CHANNEL_ID: '7234567890',
+      STEM_ASK_MAX_QUESTION_LENGTH: '800',
+      STEM_ASK_USER_COOLDOWN_SECONDS: '45',
+      STEM_ASK_USER_DAILY_LIMIT: '12',
+      STEM_ASK_GLOBAL_DAILY_LIMIT: '250',
+    });
+
+    expect(config.ask).toEqual({
+      enabled: true,
+      channelId: '7234567890',
+      maxQuestionLength: 800,
+      userCooldownMs: 45000,
+      userDailyLimit: 12,
+      globalDailyLimit: 250,
     });
   });
 });
