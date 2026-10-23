@@ -425,6 +425,7 @@ export class PersistentCountingChainService implements CountingChainService {
       .catch(() => undefined)
       .then(() => this.initializationPromise)
       .then(() => this.recoveryPromise)
+      .then(() => this.retryPendingRecovery())
       .then(task);
     const tracked = next.then(
       () => undefined,
@@ -437,6 +438,24 @@ export class PersistentCountingChainService implements CountingChainService {
         this.queues.delete(channelId);
       }
     });
+  }
+
+  private async retryPendingRecovery(): Promise<void> {
+    if (!this.historyProvider || !this.dependencies.config.channelId) {
+      return;
+    }
+
+    const rootState = await this.dependencies.state.load();
+    const state = readCountingChainState(rootState[STATE_KEY], this.dependencies.config.channelId);
+    if (!state.historyRecoveryPending || state.pendingReview) {
+      return;
+    }
+
+    this.dependencies.logger.info(
+      { channelId: this.dependencies.config.channelId },
+      'Counting chain retrying pending history reconciliation before processing a new post',
+    );
+    await this.scheduleRecovery(this.historyProvider);
   }
 
   private scheduleRecovery(historyProvider: CountingChainHistoryProvider): Promise<void> {

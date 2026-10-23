@@ -752,6 +752,12 @@ function toStemWordChainMessage(message: Message): StemWordChainMessage {
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
     },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
+    },
   };
 }
 

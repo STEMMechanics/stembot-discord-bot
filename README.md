@@ -86,6 +86,10 @@ later posts are held until a moderator approves or rejects the pending post.
 The pending review is persisted across restarts.
 After the moderator reacts, STEMBot adds its final `👍` or `❌` reaction and
 deletes the temporary review request message.
+If Discord history cannot be read during startup or catch-up, STEMBot keeps a
+recovery marker and retries the history reconciliation before handling the
+next counting post, so a temporary Discord/API failure does not permanently
+freeze the chain.
 
 Moderators with `Manage Messages` can use `/counting-chain number:16` to set the
 next number manually. This clears a pending review, refreshes the minigame
@@ -190,10 +194,12 @@ When `STEM_WORD_CHAIN_ENABLED=true`, STEMBot starts a persistent word chain in
 `STEM_WORD_CHAIN_CHANNEL_ID`. Each word must be a STEM word from the displayed
 theme and must start with the last letter of the previous word. Common bundled
 terms are accepted immediately; OpenAI checks unfamiliar words against the
-theme. This feature requires `OPENAI_API_KEY`. An invalid word ends the round,
+theme and replies with a short definition for accepted words. This feature
+requires `OPENAI_API_KEY`. An invalid word ends the round,
 records the streak, and rotates to the next theme. If the validator is
 temporarily unavailable, the round stays open and the move is not counted. The
-Unfamiliar-word checks are cached and rate limited per member and globally. The
+word checks and definitions are cached and rate limited per member and globally.
+The
 bundled themes are Space, Biology, Chemistry, Technology and Physics.
 
 ### Mention-based STEM answers

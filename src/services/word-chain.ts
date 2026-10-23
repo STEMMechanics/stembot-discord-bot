@@ -21,6 +21,7 @@ export interface StemWordChainMessage {
   authorIsBot: boolean;
   content: string;
   react(emoji: string): Promise<void>;
+  reply(content: string): Promise<void>;
 }
 
 export interface StemWordChainPublisher {
@@ -211,6 +212,10 @@ const MAX_THEME_VALIDATION_CACHE_ENTRIES = 500;
 const THEME_VALIDATION_USER_COOLDOWN_MS = 5_000;
 const THEME_VALIDATION_GLOBAL_WINDOW_MS = 60_000;
 const THEME_VALIDATION_GLOBAL_LIMIT = 30;
+const MAX_WORD_DEFINITION_CACHE_ENTRIES = 500;
+const WORD_DEFINITION_USER_COOLDOWN_MS = 5_000;
+const WORD_DEFINITION_GLOBAL_WINDOW_MS = 60_000;
+const WORD_DEFINITION_GLOBAL_LIMIT = 30;
 
 export class PersistentStemWordChainService implements StemWordChainService {
   private eventQueue: Promise<void> = Promise.resolve();
@@ -218,6 +223,11 @@ export class PersistentStemWordChainService implements StemWordChainService {
   private readonly lastThemeValidationAt = new Map<string, number>();
   private themeValidationWindowStartedAt = 0;
   private themeValidationWindowRequestCount = 0;
+  private definitionQueue: Promise<void> = Promise.resolve();
+  private readonly wordDefinitionCache = new Map<string, string>();
+  private readonly lastWordDefinitionAt = new Map<string, number>();
+  private wordDefinitionWindowStartedAt = 0;
+  private wordDefinitionWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemWordChainServiceDependencies) {}
 
@@ -307,6 +317,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       await this.dependencies.state.save(rootState);
       await this.react(message, PASS_REACTION);
       await this.recordGameParticipation(message);
+      this.queueWordDefinition(message, theme, word);
       this.dependencies.logger.info(
         {
           channelId: message.channelId,
@@ -404,6 +415,71 @@ export class PersistentStemWordChainService implements StemWordChainService {
     }
   }
 
+  private queueWordDefinition(
+    message: StemWordChainMessage,
+    theme: StemWordChainTheme,
+    word: string,
+  ): void {
+    const next = this.definitionQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const definition = await this.getWordDefinition(theme, word, message.authorId);
+        if (!definition) {
+          return;
+        }
+
+        try {
+          await message.reply(`📖 **${word}** — ${definition}`);
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id, word },
+            'STEM word chain definition reply could not be sent',
+          );
+        }
+      });
+    this.definitionQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    void next;
+  }
+
+  private async getWordDefinition(
+    theme: StemWordChainTheme,
+    word: string,
+    authorId: string,
+  ): Promise<string | undefined> {
+    const cachedDefinition = this.wordDefinitionCache.get(word);
+    if (cachedDefinition) {
+      return cachedDefinition;
+    }
+
+    if (
+      !this.dependencies.themeValidator?.getWordDefinition ||
+      !this.canRequestWordDefinition(authorId)
+    ) {
+      return undefined;
+    }
+
+    try {
+      const definition = (
+        await this.dependencies.themeValidator.getWordDefinition(theme.name, word)
+      ).trim();
+      if (!definition) {
+        return undefined;
+      }
+
+      this.cacheWordDefinition(word, definition);
+      return definition;
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, theme: theme.name, word },
+        'STEM word chain definition could not be generated',
+      );
+      return undefined;
+    }
+  }
+
   private canRequestThemeValidation(authorId: string): boolean {
     const now = Date.now();
     const lastRequestedAt = this.lastThemeValidationAt.get(authorId);
@@ -433,6 +509,37 @@ export class PersistentStemWordChainService implements StemWordChainService {
       }
     }
     this.themeValidationCache.set(cacheKey, result);
+  }
+
+  private canRequestWordDefinition(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastWordDefinitionAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < WORD_DEFINITION_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.wordDefinitionWindowStartedAt >= WORD_DEFINITION_GLOBAL_WINDOW_MS) {
+      this.wordDefinitionWindowStartedAt = now;
+      this.wordDefinitionWindowRequestCount = 0;
+    }
+
+    if (this.wordDefinitionWindowRequestCount >= WORD_DEFINITION_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastWordDefinitionAt.set(authorId, now);
+    this.wordDefinitionWindowRequestCount += 1;
+    return true;
+  }
+
+  private cacheWordDefinition(word: string, definition: string): void {
+    if (this.wordDefinitionCache.size >= MAX_WORD_DEFINITION_CACHE_ENTRIES) {
+      const oldestWord = this.wordDefinitionCache.keys().next().value;
+      if (oldestWord) {
+        this.wordDefinitionCache.delete(oldestWord);
+      }
+    }
+    this.wordDefinitionCache.set(word, definition);
   }
 
   private async publishRound(

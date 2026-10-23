@@ -43,6 +43,7 @@ function createMessage(
     authorIsBot: false,
     content,
     react: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -179,6 +180,39 @@ describe('STEM word chain service', () => {
     expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(1, 'Biology', 'llama');
     expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(2, 'Chemistry', 'nitrogen');
     expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(3, 'Technology', 'wire');
+  });
+
+  it('replies with a definition without blocking the accepted move', async () => {
+    const state = new MemoryStateStore();
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    let resolveDefinition!: (definition: string) => void;
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+      getWordDefinition: vi.fn<NonNullable<StemWordChainThemeValidator['getWordDefinition']>>(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveDefinition = resolve;
+          }),
+      ),
+    };
+    const service = createService(state, publisher, themeValidator);
+    await service.initialize();
+    const message = createMessage('definition', 'moon');
+
+    await service.handleMessage(message);
+
+    expect(message.react).toHaveBeenCalledWith('✅');
+    expect(message.reply).not.toHaveBeenCalled();
+
+    resolveDefinition('a natural satellite that orbits a planet');
+    await vi.waitFor(() => {
+      expect(message.reply).toHaveBeenCalledWith(
+        '📖 **moon** — a natural satellite that orbits a planet',
+      );
+    });
+    expect(state.state).toMatchObject({
+      stemWordChain: { lastWord: 'moon', streak: 1 },
+    });
   });
 
   it('keeps the round open when AI theme validation is unavailable', async () => {

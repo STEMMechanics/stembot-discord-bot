@@ -59,6 +59,31 @@ describe('OpenAI STEM word-chain validator', () => {
     await expect(validator.isWordInTheme('Technology', 'volcano')).resolves.toBe(false);
   });
 
+  it('generates a concise definition with a separate structured result', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: '{"definition":"A natural satellite that orbits a planet."}',
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const validator = createValidator(fetchImplementation);
+
+    await expect(validator.getWordDefinition('Space', 'moon')).resolves.toBe(
+      'A natural satellite that orbits a planet.',
+    );
+
+    const request = fetchImplementation.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      input: Array<{ content: Array<{ text?: string }> }>;
+      text: { format: { name: string; schema: { properties: { definition: unknown } } } };
+    };
+    expect(body.text.format.name).toBe('stem_word_chain_definition');
+    expect(body.text.format.schema.properties.definition).toBeDefined();
+    expect(body.input[0]?.content[0]?.text).toContain('Word: <word>moon</word>');
+  });
+
   it('retries an incomplete high-effort response with the shared low setting', async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()

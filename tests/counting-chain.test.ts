@@ -1235,6 +1235,45 @@ describe('counting-chain service', () => {
     expect(state.state.countingChain).not.toHaveProperty('historyRecoveryPending');
   });
 
+  it('retries pending history recovery before processing a later post', async () => {
+    const state = new MemoryStateStore();
+    const firstService = createService(state, {
+      recognizeNumber: vi.fn().mockResolvedValue(1),
+    });
+    await firstService.handleMessage(createMessage('user-1', '1562802766370447550'));
+
+    const pendingImage = createHistoryMessage('user-2', '1562802766370447551');
+    const laterImage = createHistoryMessage('user-3', '1562802766370447552');
+    const historyProvider = vi
+      .fn<() => Promise<readonly CountingChainHistoryMessage[]>>()
+      .mockRejectedValueOnce(new Error('Discord history temporarily unavailable'))
+      .mockResolvedValueOnce([laterImage, pendingImage]);
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(3),
+    };
+    const service = createService(state, recognizer);
+    await service.initialize(historyProvider);
+
+    expect(state.state.countingChain).toHaveProperty('historyRecoveryPending', true);
+
+    await service.handleMessage(createMessage('user-3', laterImage.id));
+
+    expect(historyProvider).toHaveBeenCalledTimes(2);
+    expect(pendingImage.react).toHaveBeenCalledWith('👍');
+    expect(laterImage.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 4,
+        lastMessageId: laterImage.id,
+        lastProcessedMessageId: laterImage.id,
+      },
+    });
+    expect(state.state.countingChain).not.toHaveProperty('historyRecoveryPending');
+  });
+
   it('ignores messages outside the configured channel and bot messages', async () => {
     const state = new MemoryStateStore();
     const recognizer = { recognizeNumber: vi.fn().mockResolvedValue(1) };
