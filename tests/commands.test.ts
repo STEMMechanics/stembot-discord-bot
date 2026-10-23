@@ -18,10 +18,12 @@ import {
   playersCommand,
   reviewCommand,
   robotJokes,
+  scrambleCommand,
   statusCommand,
 } from '../src/discord/commands.js';
 import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
+import type { StemScrambleService } from '../src/services/scramble.js';
 import type { UserLevelProfile } from '../src/services/user-levels.js';
 
 function workshop(overrides: Partial<WorkshopRecord> = {}): WorkshopRecord {
@@ -47,6 +49,7 @@ describe('Discord commands', () => {
       'joke',
       'level',
       'status',
+      'scramble',
       'leaderboard',
       'review',
       'minecraft',
@@ -267,6 +270,28 @@ describe('Discord commands', () => {
     expect(editReply).toHaveBeenCalledWith({
       embeds: [expect.objectContaining({ color: 0x2ecc71 })],
       allowedMentions: { parse: [] },
+    });
+  });
+
+  it('lets members with Manage Messages reset the scramble', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const resetRound = vi.fn().mockResolvedValue('magnet');
+    const interaction = {
+      memberPermissions: { has: vi.fn().mockReturnValue(true) },
+      deferReply,
+      editReply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await scrambleCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      scramble: { resetRound } as unknown as StemScrambleService,
+    });
+
+    expect(resetRound).toHaveBeenCalledOnce();
+    expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Scramble reset. The previous answer was **magnet**.',
     });
   });
 

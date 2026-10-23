@@ -146,6 +146,71 @@ describe('STEM scramble service', () => {
     });
   });
 
+  it('resets an active round and starts a replacement round', async () => {
+    const state = new MemoryStateStore();
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi
+        .fn()
+        .mockResolvedValueOnce(word('circuit'))
+        .mockResolvedValueOnce(word('robot')),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('scramble-message-1')
+        .mockResolvedValueOnce('scramble-message-2'),
+    };
+    const service = createService(state, generator, publisher);
+
+    await service.initialize();
+    await expect(service.resetRound()).resolves.toBe('circuit');
+
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      'The previous scramble was reset by a moderator',
+    );
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        round: { word: 'robot', roundNumber: 2 },
+      },
+    });
+  });
+
+  it('discards a persisted round whose scrambled letters do not match its answer', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemScramble: {
+        version: 1,
+        nextRoundNumber: 2,
+        round: {
+          id: 'round-1',
+          messageId: 'scramble-message-1',
+          roundNumber: 1,
+          word: 'magnet',
+          hint: 'It can pull certain metals toward it.',
+          scrambled: 'gmnta',
+          startedAt: '2026-10-23T02:00:00.000Z',
+        },
+        recentWords: ['magnet'],
+        processedMessageIds: [],
+      },
+    };
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi.fn().mockResolvedValue(word('robot')),
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('scramble-message-2') };
+    const service = createService(state, generator, publisher);
+
+    await service.initialize();
+
+    expect(publisher.send).toHaveBeenCalledOnce();
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        round: { word: 'robot', roundNumber: 2 },
+      },
+    });
+  });
+
   it('keeps the scrambled output different from the source word', () => {
     expect(scrambleWord('robot', () => 0.9)).not.toBe('robot');
     expect(formatStemScramble(word('robot', 'A machine that can sense and act.'), 'tobor', 4)).toBe(

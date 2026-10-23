@@ -48,6 +48,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/level` — your persisted XP, level and activity counts, or the public level card for another member.
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
+- `/scramble reset` — reset the active word scramble and start a new round; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
@@ -167,6 +168,8 @@ The first correct member receives `✅`, earns minigame XP and starts the next
 round. Incorrect guesses receive `❌` and leave the round open. The last 50
 words are retained and sent as exclusions so the generator does not quickly
 repeat a word; exact duplicates are also rejected locally and regenerated.
+The active round is persistent across restarts. Moderators can use
+`/scramble reset` to discard a stuck round and publish a replacement.
 
 Set `STEM_SCRAMBLE_CHANNEL_ID` to the channel where the game should run. The
 bot needs the Message Content intent and permission to add reactions there.

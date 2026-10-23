@@ -212,6 +212,7 @@ export function createDiscordGateway(
       logger,
       website: dependencies.website,
       stemcraft: dependencies.stemcraft,
+      ...(dependencies.scramble ? { scramble: dependencies.scramble } : {}),
       ...(dependencies.uptime ? { uptime: dependencies.uptime } : {}),
       timeZone: dependencies.timeZone,
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),

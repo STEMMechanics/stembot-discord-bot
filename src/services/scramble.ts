@@ -34,6 +34,7 @@ export interface StemScramblePublisher {
 export interface StemScrambleService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
+  resetRound(): Promise<string | undefined>;
   handleMessage(message: StemScrambleMessage): Promise<void>;
 }
 
@@ -106,6 +107,27 @@ export class PersistentStemScrambleService implements StemScrambleService {
     });
   }
 
+  public async resetRound(): Promise<string | undefined> {
+    if (!this.isEnabled()) {
+      return undefined;
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemScrambleState(rootState[STATE_KEY]);
+      const previousWord = state.round?.word;
+      state.round = null;
+      writeStemScrambleState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      await this.publishNextRound(
+        rootState,
+        state,
+        '🔄 The previous scramble was reset by a moderator. A new scramble starts now.',
+      );
+      return previousWord;
+    });
+  }
+
   public async handleMessage(message: StemScrambleMessage): Promise<void> {
     if (!this.isEnabled() || message.channelId !== this.dependencies.config.channelId) {
       return;
@@ -175,6 +197,9 @@ export class PersistentStemScrambleService implements StemScrambleService {
     };
     const word = await this.generateUniqueWord(options, state.recentWords);
     const scrambled = scrambleWord(word.word, this.random);
+    if (!hasSameLetters(word.word, scrambled)) {
+      throw new Error('STEM scramble generated a scrambled word with mismatched letters');
+    }
     const roundNumber = state.nextRoundNumber;
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
@@ -257,13 +282,13 @@ export class PersistentStemScrambleService implements StemScrambleService {
     return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
   }
 
-  private async enqueue(work: () => Promise<void>): Promise<void> {
+  private async enqueue<T>(work: () => Promise<T>): Promise<T> {
     const next = this.eventQueue.catch(() => undefined).then(work);
     this.eventQueue = next.then(
       () => undefined,
       () => undefined,
     );
-    await next;
+    return next;
   }
 }
 
@@ -353,7 +378,8 @@ function readRoundState(value: unknown): StemScrambleRoundState | null {
     typeof value.word !== 'string' ||
     typeof value.hint !== 'string' ||
     typeof value.scrambled !== 'string' ||
-    typeof value.startedAt !== 'string'
+    typeof value.startedAt !== 'string' ||
+    !hasSameLetters(value.word, value.scrambled)
   ) {
     return null;
   }
@@ -394,6 +420,12 @@ function normalizeScrambleText(value: string): string {
     .normalize('NFKC')
     .toLocaleLowerCase()
     .replace(/[^a-z]+/g, '');
+}
+
+function hasSameLetters(left: string, right: string): boolean {
+  const leftLetters = [...normalizeScrambleText(left)].sort().join('');
+  const rightLetters = [...normalizeScrambleText(right)].sort().join('');
+  return leftLetters.length > 0 && leftLetters === rightLetters;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

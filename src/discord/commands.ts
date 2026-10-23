@@ -1,10 +1,12 @@
 import {
   MessageFlags,
+  PermissionFlagsBits,
   SlashCommandBuilder,
   type APIEmbed,
   type ChatInputCommandInteraction,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
   type SlashCommandOptionsOnlyBuilder,
+  type SlashCommandSubcommandsOnlyBuilder,
   type User,
 } from 'discord.js';
 
@@ -24,6 +26,7 @@ import {
   type UserLevelProfile,
   type UserLevelService,
 } from '../services/user-levels.js';
+import type { StemScrambleService } from '../services/scramble.js';
 import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/uptime-kuma.js';
 
 export interface CommandContext {
@@ -34,11 +37,12 @@ export interface CommandContext {
   getCurrentTime?: () => Date;
   requestCountingChainReview?: (channelId: string) => Promise<boolean>;
   userLevels?: UserLevelService;
+  scramble?: StemScrambleService;
   uptime?: UptimeKumaIntegration;
 }
 
 export interface DiscordCommand {
-  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder;
   execute(interaction: ChatInputCommandInteraction, context: CommandContext): Promise<void>;
 }
 
@@ -284,6 +288,42 @@ export const statusCommand: DiscordCommand = {
   },
 };
 
+export const scrambleCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('scramble')
+    .setDescription('Manage the STEM word scramble.')
+    .addSubcommand((subcommand) =>
+      subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const scramble = context.scramble;
+    if (!scramble) {
+      await interaction.reply({
+        content: 'The scramble game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to reset the scramble.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const previousWord = await scramble.resetRound();
+    await interaction.editReply({
+      content: previousWord
+        ? `Scramble reset. The previous answer was **${previousWord}**.`
+        : 'No active scramble was found; a new round has been started.',
+    });
+  },
+};
+
 export const leaderboardCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('leaderboard')
@@ -385,6 +425,7 @@ export const commands: readonly DiscordCommand[] = [
   jokeCommand,
   levelCommand,
   statusCommand,
+  scrambleCommand,
   leaderboardCommand,
   reviewCommand,
   minecraftCommand,
