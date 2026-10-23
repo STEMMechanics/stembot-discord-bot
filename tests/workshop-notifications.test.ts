@@ -204,6 +204,30 @@ describe('persistent workshop notifications', () => {
     expect(sendChannelMessage).toHaveBeenCalledTimes(3);
   });
 
+  it('does not announce RSS fallback content as a workshop update', async () => {
+    const fullDescription = '<p>Full workshop description from the page.</p>';
+    let currentWorkshop = workshop({ description: fullDescription });
+    const website: WebsiteIntegration = {
+      getWorkshops: vi.fn().mockImplementation(() => Promise.resolve([currentWorkshop])),
+    };
+    const state = new MemoryStateStore();
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
+
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+    expect(sendChannelMessage).toHaveBeenCalledOnce();
+
+    currentWorkshop = workshop({
+      description: 'Truncated RSS description...',
+      descriptionFallback: true,
+    });
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+    expect(sendChannelMessage).toHaveBeenCalledOnce();
+
+    currentWorkshop = workshop({ description: fullDescription });
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+    expect(sendChannelMessage).toHaveBeenCalledOnce();
+  });
+
   it('includes the registration call to action in announcement messages', () => {
     const message = formatWorkshopAnnouncement(
       workshop({

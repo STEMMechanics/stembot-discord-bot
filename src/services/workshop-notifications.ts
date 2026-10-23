@@ -52,6 +52,7 @@ interface StoredWorkshop {
   statusCode: WorkshopStatusCode;
   type: string | null;
   fingerprint: string;
+  stableFingerprint: string | null;
   lastAnnouncedFingerprint: string | null;
   pendingAnnouncement: WorkshopAnnouncementKind | null;
   pendingAnnouncementAt: string | null;
@@ -152,6 +153,7 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
     initialSync: boolean,
   ): Promise<void> {
     const fingerprint = workshopFingerprint(workshop);
+    const stableFingerprint = workshopStableFingerprint(workshop);
     let existing = state.workshops[workshop.externalId];
 
     if (!existing && workshop.legacyExternalId) {
@@ -165,6 +167,23 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
         state.workshops[workshop.externalId] = existing;
         existing.externalId = workshop.externalId;
       }
+    }
+
+    if (
+      existing &&
+      workshop.descriptionFallback === true &&
+      (existing.stableFingerprint === null || existing.stableFingerprint === stableFingerprint)
+    ) {
+      if (existing.stableFingerprint === null) {
+        updateStoredWorkshop(existing, workshop, existing.fingerprint, stableFingerprint);
+        await this.saveState(rootState, state);
+      }
+
+      this.dependencies.logger.info(
+        { workshopId: workshop.externalId },
+        'Workshop page content unavailable; retaining last known workshop content',
+      );
+      return;
     }
 
     const statusCode = getWorkshopStatusCode(workshop);
@@ -411,9 +430,17 @@ export class UnconfiguredWorkshopNotificationService implements WorkshopNotifica
 }
 
 export function workshopFingerprint(workshop: WorkshopRecord): string {
+  return hashWorkshopFingerprint(workshop, true);
+}
+
+function workshopStableFingerprint(workshop: WorkshopRecord): string {
+  return hashWorkshopFingerprint(workshop, false);
+}
+
+function hashWorkshopFingerprint(workshop: WorkshopRecord, includeDescription: boolean): string {
   const canonical = JSON.stringify({
     ages: workshop.ages ?? null,
-    description: workshop.description ?? null,
+    ...(includeDescription ? { description: workshop.description ?? null } : {}),
     endsAt: workshop.endsAt?.toISOString() ?? null,
     externalId: workshop.externalId,
     imageUrl: workshop.imageUrl ?? null,
@@ -649,6 +676,7 @@ function toStoredWorkshop(
     statusCode: getWorkshopStatusCode(workshop),
     type: workshop.type ?? null,
     fingerprint,
+    stableFingerprint: workshopStableFingerprint(workshop),
     lastAnnouncedFingerprint: null,
     pendingAnnouncement,
     pendingAnnouncementAt,
@@ -704,6 +732,7 @@ function updateStoredWorkshop(
   stored: StoredWorkshop,
   workshop: WorkshopRecord,
   fingerprint: string,
+  stableFingerprint = workshopStableFingerprint(workshop),
 ): void {
   stored.externalId = workshop.externalId;
   stored.title = workshop.title;
@@ -714,6 +743,7 @@ function updateStoredWorkshop(
   stored.statusCode = getWorkshopStatusCode(workshop);
   stored.type = workshop.type ?? null;
   stored.fingerprint = fingerprint;
+  stored.stableFingerprint = stableFingerprint;
 }
 
 function legacyWorkshopFingerprint(workshop: WorkshopRecord): string {
@@ -802,6 +832,7 @@ function readStoredWorkshop(value: Record<string, unknown>): StoredWorkshop | un
     ),
     type: typeof value.type === 'string' ? value.type : null,
     fingerprint: String(value.fingerprint),
+    stableFingerprint: typeof value.stableFingerprint === 'string' ? value.stableFingerprint : null,
     lastAnnouncedFingerprint:
       typeof value.lastAnnouncedFingerprint === 'string' ? value.lastAnnouncedFingerprint : null,
     pendingAnnouncement,

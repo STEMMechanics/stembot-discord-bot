@@ -39,6 +39,8 @@ export interface WorkshopRecord {
   statusCode?: WorkshopStatusCode;
   /** Final RSS workshop type, such as `stemcraft`. */
   type?: string;
+  /** The page description could not be refreshed and currently comes from RSS. */
+  descriptionFallback?: boolean;
   sourceUpdatedAt?: Date;
 }
 
@@ -182,10 +184,10 @@ export class WebsiteRssIntegration implements WebsiteIntegration {
           { workshopId: workshop.externalId, workshopUrl: workshop.url },
           'Workshop page did not contain a usable content article; using RSS description',
         );
-        return workshop;
+        return { ...workshop, descriptionFallback: true };
       }
 
-      return { ...workshop, description };
+      return { ...workshop, description, descriptionFallback: false };
     } catch (error: unknown) {
       if (signal?.aborted) {
         throw error;
@@ -195,7 +197,7 @@ export class WebsiteRssIntegration implements WebsiteIntegration {
         { err: error, workshopId: workshop.externalId, workshopUrl: workshop.url },
         'Workshop page could not be read; using RSS description',
       );
-      return workshop;
+      return { ...workshop, descriptionFallback: true };
     }
   }
 

@@ -123,6 +123,39 @@ describe('Website RSS integration', () => {
     );
   });
 
+  it('marks RSS descriptions as fallback content when the workshop page is unavailable', async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          `<rss xmlns:sm="https://stemmechanics.com/ns/rss/workshop"><channel>
+            <item>
+              <title>Redstone Music Challenge</title>
+              <link>https://example.test/workshops/redstone</link>
+              <sm:id>redstone-id</sm:id>
+              <sm:startDate>2026-10-24T16:00:00+10:00</sm:startDate>
+              <description>Can you build a musical machine...\n\nSat 24 Oct 2026 4:00pm · STEMCraft</description>
+            </item>
+          </channel></rss>`,
+        ),
+      )
+      .mockResolvedValueOnce(new Response('maintenance', { status: 503 }));
+
+    const integration = new WebsiteRssIntegration({
+      feedUrl: 'https://example.test/workshops/feed',
+      requestTimeoutMs: 1000,
+      logger,
+      fetchImplementation,
+    });
+
+    await expect(integration.getWorkshops()).resolves.toMatchObject([
+      {
+        description: expect.stringContaining('Can you build a musical machine'),
+        descriptionFallback: true,
+      },
+    ]);
+  });
+
   it('parses every final registration type, including duplicate titles and missing optional fields', async () => {
     const item = (id: string, registration: string, value = '') => `
       <item>
