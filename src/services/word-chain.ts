@@ -1169,11 +1169,15 @@ function formatWordChainContinuation(
   nextLetter: string,
   usedWords: readonly string[],
 ): string {
-  const visibleWords = usedWords.slice(-20);
-  const omittedCount = Math.max(0, usedWords.length - visibleWords.length);
+  const matchingWords = usedWords.filter((word) => word.startsWith(nextLetter));
+  const visibleWords = matchingWords.slice(-20);
+  const omittedCount = Math.max(0, matchingWords.length - visibleWords.length);
   const listedWords = visibleWords.map((word) => `**${word}**`).join(', ');
   const omittedText = omittedCount > 0 ? `, and ${omittedCount} more` : '';
-  return `Give me a word starting with **${nextLetter.toLocaleUpperCase()}** on the theme of **${theme.name}**. You can't use the words ${listedWords}${omittedText}.`;
+  const usedWordsText = listedWords
+    ? `You can't use the words ${listedWords}${omittedText}.`
+    : `No previous **${nextLetter.toLocaleUpperCase()}** words have been used yet.`;
+  return `Give me a word starting with **${nextLetter.toLocaleUpperCase()}** on the theme of **${theme.name}**. ${usedWordsText}`;
 }
 
 function containsWholeWord(value: string, word: string): boolean {

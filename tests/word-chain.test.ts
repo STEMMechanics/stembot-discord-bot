@@ -349,7 +349,7 @@ describe('STEM word chain service', () => {
     resolveDefinition('a natural satellite that orbits a planet');
     await vi.waitFor(() => {
       expect(message.reply).toHaveBeenCalledWith(
-        "📖 moon — a natural satellite that orbits a planet\n\nGive me a word starting with **N** on the theme of **Space**. You can't use the words **moon**.",
+        '📖 moon — a natural satellite that orbits a planet\n\nGive me a word starting with **N** on the theme of **Space**. No previous **N** words have been used yet.',
       );
     });
     expect(state.state).toMatchObject({
