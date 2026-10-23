@@ -27,15 +27,15 @@ describe('STEM minigame dashboard', () => {
     expect(embed.fields).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: 'Counting · highest number',
+          name: 'Countain Chain · highest number',
           value: expect.stringContaining('<@counting-user> · **7** highest number reached'),
         }),
         expect.objectContaining({
-          name: 'Quiz · correct answers',
+          name: 'Trivia · correct answers',
           value: expect.stringContaining('<@quiz-user> · **12** correct answers'),
         }),
         expect.objectContaining({
-          name: 'Scramble · solved rounds',
+          name: 'Word Scramble · solved rounds',
           value: expect.stringContaining('<@scramble-user> · **5** solved rounds'),
         }),
         expect.objectContaining({

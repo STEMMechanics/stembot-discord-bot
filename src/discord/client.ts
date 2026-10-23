@@ -1179,7 +1179,7 @@ export function buildMinigameInfoEmbed(
         inline: true,
       },
       {
-        name: 'Counting · highest number',
+        name: 'Countain Chain · highest number',
         value: formatMinigameLeaderboard(
           leaderboards.counting,
           'highest number reached',
@@ -1189,7 +1189,7 @@ export function buildMinigameInfoEmbed(
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: 'Quiz · correct answers',
+        name: 'Trivia · correct answers',
         value: formatMinigameLeaderboard(
           leaderboards.quiz,
           'correct answers',
@@ -1199,7 +1199,7 @@ export function buildMinigameInfoEmbed(
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: 'Scramble · solved rounds',
+        name: 'Word Scramble · solved rounds',
         value: formatMinigameLeaderboard(
           leaderboards.scramble,
           'solved rounds',
