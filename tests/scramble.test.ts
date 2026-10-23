@@ -159,6 +159,41 @@ describe('STEM scramble service', () => {
     });
   });
 
+  it('posts one automatic extra clue after the round has been idle', async () => {
+    const state = new MemoryStateStore();
+    const generateHint = vi
+      .fn<NonNullable<ScrambleWordGenerator['generateHint']>>()
+      .mockResolvedValue('It is commonly used to complete an electrical path.');
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi.fn().mockResolvedValue(word('circuit')),
+      generateHint,
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('scramble-message-1')
+        .mockResolvedValueOnce('hint-message-1'),
+    };
+    const service = createService(state, generator, publisher);
+
+    await service.initialize();
+    const scrambleState = state.state.stemScramble as {
+      round: { startedAt: string };
+    };
+    scrambleState.round.startedAt = '2026-10-19T02:00:00.000Z';
+    await service.checkInactivity();
+    await service.checkInactivity();
+
+    expect(generateHint).toHaveBeenCalledOnce();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '💡 The scramble has gone quiet, so here is an extra clue: It is commonly used',
+    );
+    expect(state.state).toMatchObject({
+      stemScramble: { round: { automaticHintAt: '2026-10-23T02:00:00.000Z' } },
+    });
+  });
+
   it('skips an answer that was sent before the replacement scramble was posted', async () => {
     const state = new MemoryStateStore();
     const generator: ScrambleWordGenerator = {

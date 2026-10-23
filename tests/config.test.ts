@@ -41,6 +41,7 @@ describe('loadConfig', () => {
         enabled: false,
         reviewEnabled: false,
         maxAttachmentBytes: 8388608,
+        idleNudgeMs: 259200000,
       },
       quiz: {
         enabled: false,
@@ -52,6 +53,7 @@ describe('loadConfig', () => {
         topic:
           'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
         retryIntervalMs: 300000,
+        idleTimeoutMs: 259200000,
       },
       scramble: {
         enabled: false,
@@ -60,10 +62,16 @@ describe('loadConfig', () => {
         targetAgeMax: 14,
         topic:
           'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+        idleTimeoutMs: 259200000,
       },
       wordChain: {
         enabled: false,
         retryIntervalMs: 300000,
+        idleTimeoutMs: 259200000,
+      },
+      reminders: {
+        enabled: false,
+        checkIntervalMs: 60000,
       },
       ask: {
         enabled: false,
@@ -245,6 +253,7 @@ describe('loadConfig', () => {
       OPENAI_MODEL: 'test-model',
       OPENAI_REASONING_EFFORT: 'low',
       OPENAI_TIMEOUT: '42',
+      COUNTING_CHAIN_IDLE_NUDGE_MS: '120000',
     });
 
     expect(config.openai).toEqual({
@@ -260,6 +269,7 @@ describe('loadConfig', () => {
       infoMessageId: '5234567890',
       reviewEnabled: false,
       maxAttachmentBytes: 8388608,
+      idleNudgeMs: 120000,
     });
   });
 
@@ -321,6 +331,7 @@ describe('loadConfig', () => {
       STEM_QUIZ_OLDER_PLAYER_RATE: '0.2',
       STEM_QUIZ_TOPIC: 'space science',
       STEM_QUIZ_RETRY_INTERVAL_MS: '60000',
+      STEM_QUIZ_IDLE_TIMEOUT_MS: '120000',
     });
 
     expect(config.quiz).toEqual({
@@ -333,6 +344,7 @@ describe('loadConfig', () => {
       olderPlayerRate: 0.2,
       topic: 'space science',
       retryIntervalMs: 60000,
+      idleTimeoutMs: 120000,
     });
   });
 
@@ -384,6 +396,7 @@ describe('loadConfig', () => {
       STEM_SCRAMBLE_ENABLED: 'true',
       STEM_SCRAMBLE_CHANNEL_ID: '8234567890',
       STEM_SCRAMBLE_RETRY_INTERVAL_MS: '60000',
+      STEM_SCRAMBLE_IDLE_TIMEOUT_MS: '120000',
       STEM_SCRAMBLE_TOPIC: 'space science',
       STEM_SCRAMBLE_TARGET_AGE_MIN: '8',
       STEM_SCRAMBLE_TARGET_AGE_MAX: '16',
@@ -403,6 +416,7 @@ describe('loadConfig', () => {
       topic: 'space science',
       targetAgeMin: 8,
       targetAgeMax: 16,
+      idleTimeoutMs: 120000,
     });
     expect(config.levels).toEqual({
       enabled: true,
@@ -443,12 +457,40 @@ describe('loadConfig', () => {
       STEM_WORD_CHAIN_ENABLED: 'true',
       STEM_WORD_CHAIN_CHANNEL_ID: '8234567890',
       STEM_WORD_CHAIN_RETRY_INTERVAL_MS: '60000',
+      STEM_WORD_CHAIN_IDLE_TIMEOUT_MS: '120000',
     });
 
     expect(config.wordChain).toEqual({
       enabled: true,
       channelId: '8234567890',
       retryIntervalMs: 60000,
+      idleTimeoutMs: 120000,
+    });
+  });
+
+  it('requires a moderator reminders channel when reminders are enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_REMINDERS_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_REMINDERS_CHANNEL_ID/);
+
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      STEM_REMINDERS_ENABLED: 'true',
+      STEM_REMINDERS_CHANNEL_ID: '9234567890',
+      STEM_REMINDERS_CHECK_INTERVAL_MS: '120000',
+    });
+
+    expect(config.reminders).toEqual({
+      enabled: true,
+      channelId: '9234567890',
+      checkIntervalMs: 120000,
     });
   });
 

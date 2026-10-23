@@ -19,6 +19,10 @@ import { IntervalJobScheduler, type JobScheduler } from './jobs/scheduler.js';
 import type { AppLogger } from './logging/logger.js';
 import { registerCommands } from './register-commands.js';
 import {
+  createAdminReminderService,
+  type AdminReminderService,
+} from './services/admin-reminders.js';
+import {
   createCountingChainService,
   type CountingChainService,
 } from './services/counting-chain.js';
@@ -56,6 +60,7 @@ export interface ApplicationDependencies {
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
   wordChain?: StemWordChainService;
+  reminders?: AdminReminderService;
   ask?: StemAskService;
   userLevels?: UserLevelService;
   workshopNotifications: WorkshopNotificationService;
@@ -137,7 +142,41 @@ export function createApplication(
           }),
           state,
           logger,
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for counting-chain reminders'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
           ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
+  const reminders =
+    dependencies?.reminders ??
+    (config.reminders.enabled
+      ? createAdminReminderService({
+          config: config.reminders,
+          publisher: {
+            send: (channelId, content, mentionUserId) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for admin reminders'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                content,
+                allowedMentions: mentionUserId ? { users: [mentionUserId] } : { parse: [] },
+              });
+            },
+          },
+          state,
+          logger,
         })
       : undefined);
   const quiz =
@@ -246,6 +285,7 @@ export function createApplication(
       ...(quiz ? { quiz } : {}),
       ...(scramble ? { scramble } : {}),
       ...(wordChain ? { wordChain } : {}),
+      ...(reminders ? { reminders } : {}),
       ...(ask ? { ask } : {}),
       ...(userLevels ? { userLevels } : {}),
       ...(uptime ? { uptime } : {}),
@@ -286,7 +326,10 @@ export function createApplication(
     scheduler.register({
       name: 'stem-quiz-maintenance',
       intervalMs: config.quiz.retryIntervalMs,
-      run: () => quiz.ensureQuestion(),
+      run: async () => {
+        await quiz.checkInactivity();
+        await quiz.ensureQuestion();
+      },
     });
   }
 
@@ -294,7 +337,10 @@ export function createApplication(
     scheduler.register({
       name: 'stem-scramble-maintenance',
       intervalMs: config.scramble.retryIntervalMs,
-      run: () => scramble.ensureRound(),
+      run: async () => {
+        await scramble.checkInactivity();
+        await scramble.ensureRound();
+      },
     });
   }
 
@@ -302,7 +348,26 @@ export function createApplication(
     scheduler.register({
       name: 'stem-word-chain-maintenance',
       intervalMs: config.wordChain.retryIntervalMs,
-      run: () => wordChain.ensureRound(),
+      run: async () => {
+        await wordChain.checkInactivity();
+        await wordChain.ensureRound();
+      },
+    });
+  }
+
+  if (reminders && config.reminders.enabled) {
+    scheduler.register({
+      name: 'admin-reminder-delivery',
+      intervalMs: config.reminders.checkIntervalMs,
+      run: () => reminders.deliverDueReminders(),
+    });
+  }
+
+  if (countingChain && config.countingChain.enabled) {
+    scheduler.register({
+      name: 'counting-chain-maintenance',
+      intervalMs: Math.min(config.countingChain.idleNudgeMs, 300000),
+      run: () => countingChain.checkInactivity(),
     });
   }
 

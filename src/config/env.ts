@@ -120,6 +120,7 @@ const environmentSchema = z.object({
   COUNTING_CHAIN_REVIEW_ENABLED: booleanFromEnvironment(false),
   COUNTING_CHAIN_REVIEW_ROLE_ID: optionalDiscordId,
   COUNTING_CHAIN_MAX_ATTACHMENT_BYTES: positiveInteger(8 * 1024 * 1024, 20 * 1024 * 1024),
+  COUNTING_CHAIN_IDLE_NUDGE_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_QUIZ_ENABLED: booleanFromEnvironment(false),
   STEM_QUIZ_CHANNEL_ID: optionalDiscordId,
   STEM_QUIZ_MAX_WRONG_ANSWERS: positiveInteger(5, 50),
@@ -138,9 +139,11 @@ const environmentSchema = z.object({
       'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
     ),
   STEM_QUIZ_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_QUIZ_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_SCRAMBLE_ENABLED: booleanFromEnvironment(false),
   STEM_SCRAMBLE_CHANNEL_ID: optionalDiscordId,
   STEM_SCRAMBLE_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_SCRAMBLE_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_SCRAMBLE_TARGET_AGE_MIN: positiveInteger(8, 18),
   STEM_SCRAMBLE_TARGET_AGE_MAX: positiveInteger(14, 18),
   STEM_SCRAMBLE_TOPIC: z
@@ -153,6 +156,10 @@ const environmentSchema = z.object({
   STEM_WORD_CHAIN_ENABLED: booleanFromEnvironment(false),
   STEM_WORD_CHAIN_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_CHAIN_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_WORD_CHAIN_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_REMINDERS_ENABLED: booleanFromEnvironment(false),
+  STEM_REMINDERS_CHANNEL_ID: optionalDiscordId,
+  STEM_REMINDERS_CHECK_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
   STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
   STEM_ASK_USER_COOLDOWN_SECONDS: positiveInteger(30, 86400),
@@ -208,6 +215,7 @@ export interface AppConfig {
     reviewEnabled: boolean;
     reviewRoleId?: string;
     maxAttachmentBytes: number;
+    idleNudgeMs: number;
   };
   quiz: {
     enabled: boolean;
@@ -219,6 +227,7 @@ export interface AppConfig {
     olderPlayerRate: number;
     topic: string;
     retryIntervalMs: number;
+    idleTimeoutMs: number;
   };
   scramble: {
     enabled: boolean;
@@ -227,11 +236,18 @@ export interface AppConfig {
     topic: string;
     targetAgeMin: number;
     targetAgeMax: number;
+    idleTimeoutMs: number;
   };
   wordChain: {
     enabled: boolean;
     channelId?: string;
     retryIntervalMs: number;
+    idleTimeoutMs: number;
+  };
+  reminders: {
+    enabled: boolean;
+    channelId?: string;
+    checkIntervalMs: number;
   };
   ask: {
     enabled: boolean;
@@ -355,6 +371,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('OPENAI_API_KEY is required when STEM_WORD_CHAIN_ENABLED is true');
   }
 
+  if (values.STEM_REMINDERS_ENABLED && !values.STEM_REMINDERS_CHANNEL_ID) {
+    throw new Error('STEM_REMINDERS_CHANNEL_ID is required when STEM_REMINDERS_ENABLED is true');
+  }
+
   if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
   }
@@ -415,6 +435,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? { reviewRoleId: values.COUNTING_CHAIN_REVIEW_ROLE_ID }
         : {}),
       maxAttachmentBytes: values.COUNTING_CHAIN_MAX_ATTACHMENT_BYTES,
+      idleNudgeMs: values.COUNTING_CHAIN_IDLE_NUDGE_MS,
     },
     quiz: {
       enabled: values.STEM_QUIZ_ENABLED,
@@ -426,6 +447,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       olderPlayerRate: values.STEM_QUIZ_OLDER_PLAYER_RATE,
       topic: values.STEM_QUIZ_TOPIC,
       retryIntervalMs: values.STEM_QUIZ_RETRY_INTERVAL_MS,
+      idleTimeoutMs: values.STEM_QUIZ_IDLE_TIMEOUT_MS,
     },
     scramble: {
       enabled: values.STEM_SCRAMBLE_ENABLED,
@@ -434,6 +456,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       topic: values.STEM_SCRAMBLE_TOPIC,
       targetAgeMin: values.STEM_SCRAMBLE_TARGET_AGE_MIN,
       targetAgeMax: values.STEM_SCRAMBLE_TARGET_AGE_MAX,
+      idleTimeoutMs: values.STEM_SCRAMBLE_IDLE_TIMEOUT_MS,
     },
     wordChain: {
       enabled: values.STEM_WORD_CHAIN_ENABLED,
@@ -441,6 +464,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? { channelId: values.STEM_WORD_CHAIN_CHANNEL_ID }
         : {}),
       retryIntervalMs: values.STEM_WORD_CHAIN_RETRY_INTERVAL_MS,
+      idleTimeoutMs: values.STEM_WORD_CHAIN_IDLE_TIMEOUT_MS,
+    },
+    reminders: {
+      enabled: values.STEM_REMINDERS_ENABLED,
+      ...(values.STEM_REMINDERS_CHANNEL_ID ? { channelId: values.STEM_REMINDERS_CHANNEL_ID } : {}),
+      checkIntervalMs: values.STEM_REMINDERS_CHECK_INTERVAL_MS,
     },
     ask: {
       enabled: values.STEM_ASK_ENABLED,

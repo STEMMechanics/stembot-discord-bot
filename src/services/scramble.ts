@@ -24,6 +24,7 @@ export interface StemScrambleConfig {
   topic: string;
   targetAgeMin: number;
   targetAgeMax: number;
+  idleTimeoutMs?: number;
 }
 
 export interface StemScrambleMessage {
@@ -44,6 +45,7 @@ export interface StemScramblePublisher {
 export interface StemScrambleService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
+  checkInactivity(): Promise<void>;
   resetRound(): Promise<string | undefined>;
   handleMessage(message: StemScrambleMessage): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
@@ -59,6 +61,7 @@ interface StemScrambleRoundState {
   scrambled: string;
   wrongAttempts: number;
   startedAt: string;
+  automaticHintAt: string | null;
 }
 
 interface StemScrambleState {
@@ -93,6 +96,7 @@ const MAX_HINTS_PER_ROUND = 5;
 const SCRAMBLE_HINT_USER_COOLDOWN_MS = 5_000;
 const SCRAMBLE_HINT_GLOBAL_WINDOW_MS = 60_000;
 const SCRAMBLE_HINT_GLOBAL_LIMIT = 30;
+const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 
 export class PersistentStemScrambleService implements StemScrambleService {
   private readonly currentTime: () => Date;
@@ -126,6 +130,88 @@ export class PersistentStemScrambleService implements StemScrambleService {
       }
 
       await this.publishNextRound(rootState, state);
+    });
+  }
+
+  public async checkInactivity(): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemScrambleState(rootState[STATE_KEY]);
+      const round = state.round;
+      if (!round) {
+        return;
+      }
+
+      const startedAt = Date.parse(round.startedAt);
+      const now = this.currentTime();
+      const idleTimeoutMs = this.dependencies.config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      if (!Number.isFinite(startedAt) || now.getTime() - startedAt < idleTimeoutMs) {
+        return;
+      }
+
+      const automaticHintAt = round.automaticHintAt
+        ? Date.parse(round.automaticHintAt)
+        : Number.NaN;
+      if (Number.isFinite(automaticHintAt) && automaticHintAt >= startedAt) {
+        return;
+      }
+
+      let hint: string | undefined;
+      if (round.hints.length < MAX_HINTS_PER_ROUND && this.dependencies.generator.generateHint) {
+        try {
+          const generatedHint = (
+            await this.dependencies.generator.generateHint({
+              word: round.word,
+              topic: this.dependencies.config.topic,
+              targetAgeMin: this.dependencies.config.targetAgeMin,
+              targetAgeMax: this.dependencies.config.targetAgeMax,
+              previousHints: round.hints,
+            })
+          ).trim();
+          if (
+            generatedHint &&
+            !round.hints.some((previousHint) => sameHint(previousHint, generatedHint)) &&
+            !containsWholeWord(generatedHint, round.word)
+          ) {
+            hint = generatedHint;
+          }
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            {
+              err: error,
+              channelId: this.dependencies.config.channelId,
+              roundNumber: round.roundNumber,
+            },
+            'STEM scramble automatic hint could not be generated; using a general clue',
+          );
+        }
+      }
+
+      if (!hint) {
+        hint =
+          round.hints.length < MAX_HINTS_PER_ROUND
+            ? `Think about how the original clue connects to ${this.dependencies.config.topic}.`
+            : 'I have already given all the extra clues I have for this round.';
+      }
+
+      await this.dependencies.publisher.send(
+        this.dependencies.config.channelId!,
+        `💡 The scramble has gone quiet, so here is an extra clue: ${hint}`,
+      );
+      if (round.hints.length < MAX_HINTS_PER_ROUND) {
+        round.hints = [...round.hints, hint].slice(-MAX_HINTS_PER_ROUND);
+      }
+      round.automaticHintAt = now.toISOString();
+      writeStemScrambleState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        { channelId: this.dependencies.config.channelId, roundNumber: round.roundNumber },
+        'STEM scramble inactivity hint posted',
+      );
     });
   }
 
@@ -348,6 +434,7 @@ export class PersistentStemScrambleService implements StemScrambleService {
       scrambled,
       wrongAttempts: 0,
       startedAt: this.currentTime().toISOString(),
+      automaticHintAt: null,
     };
     state.nextRoundNumber += 1;
     state.recentWords = [...state.recentWords, word.word].slice(-MAX_RECENT_WORDS);
@@ -579,6 +666,7 @@ function readRoundState(value: unknown): StemScrambleRoundState | null {
     scrambled: value.scrambled,
     wrongAttempts: typeof value.wrongAttempts === 'number' ? value.wrongAttempts : 0,
     startedAt: value.startedAt,
+    automaticHintAt: typeof value.automaticHintAt === 'string' ? value.automaticHintAt : null,
   };
 }
 

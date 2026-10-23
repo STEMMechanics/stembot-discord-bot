@@ -17,6 +17,7 @@ export interface StemWordChainConfig {
   enabled: boolean;
   channelId?: string;
   retryIntervalMs: number;
+  idleTimeoutMs?: number;
 }
 
 export interface StemWordChainMessage {
@@ -37,6 +38,7 @@ export interface StemWordChainPublisher {
 export interface StemWordChainService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
+  checkInactivity(): Promise<void>;
   handleMessage(message: StemWordChainMessage): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
@@ -202,6 +204,8 @@ interface StemWordChainState {
   usedWords: string[];
   hintedWords: string[];
   hintHistory: string[];
+  lastActivityAt: string | null;
+  automaticHintAt: string | null;
   processedMessageIds: string[];
 }
 
@@ -212,6 +216,7 @@ interface StemWordChainServiceDependencies {
   logger: AppLogger;
   themeValidator?: StemWordChainThemeValidator;
   userLevels?: UserLevelService;
+  clock?: () => Date;
 }
 
 const STATE_KEY = 'stemWordChain';
@@ -233,6 +238,7 @@ const MAX_HINT_HISTORY = 5;
 const WORD_CHAIN_HINT_USER_COOLDOWN_MS = 5_000;
 const WORD_CHAIN_HINT_GLOBAL_WINDOW_MS = 60_000;
 const WORD_CHAIN_HINT_GLOBAL_LIMIT = 30;
+const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 
 export class PersistentStemWordChainService implements StemWordChainService {
   private eventQueue: Promise<void> = Promise.resolve();
@@ -249,7 +255,11 @@ export class PersistentStemWordChainService implements StemWordChainService {
   private hintWindowStartedAt = 0;
   private hintWindowRequestCount = 0;
 
-  public constructor(private readonly dependencies: StemWordChainServiceDependencies) {}
+  private readonly currentTime: () => Date;
+
+  public constructor(private readonly dependencies: StemWordChainServiceDependencies) {
+    this.currentTime = dependencies.clock ?? (() => new Date());
+  }
 
   public async initialize(): Promise<void> {
     await this.ensureRound();
@@ -268,6 +278,83 @@ export class PersistentStemWordChainService implements StemWordChainService {
       }
 
       await this.publishRound(rootState, state);
+    });
+  }
+
+  public async checkInactivity(): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemWordChainState(rootState[STATE_KEY]);
+      if (!state.promptMessageId || !state.lastActivityAt) {
+        return;
+      }
+
+      const lastActivityAt = Date.parse(state.lastActivityAt);
+      const now = this.currentTime();
+      const idleTimeoutMs = this.dependencies.config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      if (!Number.isFinite(lastActivityAt) || now.getTime() - lastActivityAt < idleTimeoutMs) {
+        return;
+      }
+
+      const automaticHintAt = state.automaticHintAt
+        ? Date.parse(state.automaticHintAt)
+        : Number.NaN;
+      if (Number.isFinite(automaticHintAt) && automaticHintAt >= lastActivityAt) {
+        return;
+      }
+
+      const theme = getTheme(state.themeIndex);
+      const expectedLetter = state.lastWord?.slice(-1);
+      const excludedWords = [...state.usedWords, ...state.hintedWords];
+      let selectedHint: StemWordChainHint | undefined;
+      if (this.dependencies.themeValidator?.getWordChainHint) {
+        try {
+          const generatedHint = await this.dependencies.themeValidator.getWordChainHint(
+            theme.name,
+            expectedLetter,
+            excludedWords,
+          );
+          selectedHint = validateWordChainHint(generatedHint, expectedLetter, excludedWords);
+        } catch (error: unknown) {
+          this.dependencies.logger.warn(
+            { err: error, theme: theme.name },
+            'STEM word chain automatic hint could not be generated; using a local clue',
+          );
+        }
+      }
+
+      if (!selectedHint) {
+        const fallbackWord = findUnusedThemeWord(theme, expectedLetter, excludedWords);
+        selectedHint = {
+          word: fallbackWord ?? '',
+          hint: expectedLetter
+            ? `Try an unused ${theme.name} word that starts with ${expectedLetter.toLocaleUpperCase()}.`
+            : `Try an unused word connected to ${theme.name}.`,
+        };
+      }
+
+      const letterPrompt = expectedLetter
+        ? ` It starts with **${expectedLetter.toLocaleUpperCase()}**.`
+        : '';
+      await this.dependencies.publisher.send(
+        this.dependencies.config.channelId!,
+        `💡 The word chain has gone quiet, so here is an extra clue for **${theme.name}**:${letterPrompt} ${selectedHint.hint}`,
+      );
+      state.hintHistory = [...state.hintHistory, selectedHint.hint].slice(-MAX_HINT_HISTORY);
+      if (selectedHint.word) {
+        state.hintedWords = [...state.hintedWords, selectedHint.word].slice(-MAX_HINTED_WORDS);
+      }
+      state.automaticHintAt = now.toISOString();
+      writeStemWordChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        { channelId: this.dependencies.config.channelId, roundNumber: state.roundNumber },
+        'STEM word chain inactivity hint posted',
+      );
     });
   }
 
@@ -362,6 +449,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
       state.lastWord = word;
       state.lastAuthorId = message.authorId;
       state.lastMessageId = message.id;
+      state.lastActivityAt = this.currentTime().toISOString();
+      state.automaticHintAt = null;
       state.streak += 1;
       state.bestStreak = Math.max(state.bestStreak, state.streak);
       const playerStreak = (state.roundStreaks[message.authorId] ?? 0) + 1;
@@ -519,6 +608,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
     state.usedWords = [];
     state.hintedWords = [];
     state.hintHistory = [];
+    state.lastActivityAt = null;
+    state.automaticHintAt = null;
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     writeStemWordChainState(rootState, state);
     await this.dependencies.state.save(rootState);
@@ -746,6 +837,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
       formatStemWordChainRound(theme, state.roundNumber, leadIn),
     );
     state.promptMessageId = messageId;
+    state.lastActivityAt = this.currentTime().toISOString();
+    state.automaticHintAt = null;
     writeStemWordChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     this.dependencies.logger.info(
@@ -890,6 +983,8 @@ function readStemWordChainState(value: unknown): StemWordChainState {
     usedWords: lastWord && !usedWords.includes(lastWord) ? [...usedWords, lastWord] : usedWords,
     hintedWords,
     hintHistory,
+    lastActivityAt: typeof value.lastActivityAt === 'string' ? value.lastActivityAt : null,
+    automaticHintAt: typeof value.automaticHintAt === 'string' ? value.automaticHintAt : null,
     processedMessageIds,
   };
 }
@@ -910,6 +1005,8 @@ function createInitialState(): StemWordChainState {
     usedWords: [],
     hintedWords: [],
     hintHistory: [],
+    lastActivityAt: null,
+    automaticHintAt: null,
     processedMessageIds: [],
   };
 }

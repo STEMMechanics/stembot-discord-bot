@@ -28,6 +28,7 @@ export interface StemQuizConfig {
   olderPlayerRate: number;
   topic: string;
   retryIntervalMs: number;
+  idleTimeoutMs?: number;
 }
 
 export interface StemQuizMessage {
@@ -46,6 +47,7 @@ export interface StemQuizPublisher {
 export interface StemQuizService {
   initialize(): Promise<void>;
   ensureQuestion(): Promise<void>;
+  checkInactivity(): Promise<void>;
   handleMessage(message: StemQuizMessage): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
@@ -87,6 +89,7 @@ const EVALUATION_FAILURE_REACTION = '⚠️';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_RECENT_QUESTIONS = 20;
 const MAX_QUESTION_GENERATION_ATTEMPTS = 3;
+const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 
 export class PersistentStemQuizService implements StemQuizService {
   private readonly currentTime: () => Date;
@@ -117,6 +120,45 @@ export class PersistentStemQuizService implements StemQuizService {
       }
 
       await this.publishNextQuestion(rootState, state);
+    });
+  }
+
+  public async checkInactivity(): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readStemQuizState(rootState[STATE_KEY]);
+      const question = state.question;
+      if (!question) {
+        return;
+      }
+
+      const askedAt = Date.parse(question.askedAt);
+      const now = this.currentTime();
+      const idleTimeoutMs = this.dependencies.config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      if (!Number.isFinite(askedAt) || now.getTime() - askedAt < idleTimeoutMs) {
+        return;
+      }
+
+      state.question = null;
+      writeStemQuizState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      const leadIn = [
+        `💥 This one was too tough for everyone! The answer was **${question.answer}**. ${question.explanation}`,
+        'A fresh question starts now.',
+      ].join('\n\n');
+      await this.publishNextQuestion(rootState, state, leadIn);
+      this.dependencies.logger.info(
+        {
+          channelId: this.dependencies.config.channelId,
+          questionId: question.id,
+          questionNumber: question.questionNumber,
+        },
+        'STEM quiz inactivity timeout revealed the answer and advanced the question',
+      );
     });
   }
 

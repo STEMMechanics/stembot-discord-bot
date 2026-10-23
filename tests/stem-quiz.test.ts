@@ -403,4 +403,38 @@ describe('STEM quiz service', () => {
     expect(engine.generateQuestion).toHaveBeenCalledOnce();
     expect(publisher.send).toHaveBeenCalledOnce();
   });
+
+  it('reveals an unanswered question after the idle timeout without changing scores', async () => {
+    const state = new MemoryStateStore();
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(question('water'))
+        .mockResolvedValueOnce(question('gravity')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('question-message-1')
+        .mockResolvedValueOnce('question-message-2'),
+    };
+    const service = createService(state, engine, publisher, { idleTimeoutMs: 3 * 86_400_000 });
+
+    await service.initialize();
+    const quizState = state.state.stemQuiz as { question: { askedAt: string } };
+    quizState.question.askedAt = '2026-10-19T02:00:00.000Z';
+    await service.checkInactivity();
+
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '💥 This one was too tough for everyone! The answer was **water**.',
+    );
+    expect(state.state).toMatchObject({
+      stemQuiz: {
+        question: { answer: 'gravity', questionNumber: 2 },
+        scores: {},
+      },
+    });
+  });
 });

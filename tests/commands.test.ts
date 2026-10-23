@@ -56,6 +56,7 @@ describe('Discord commands', () => {
       'leaderboard',
       'review',
       'counting-chain',
+      'remind',
       'minecraft',
       'players',
     ]);

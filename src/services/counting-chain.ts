@@ -15,6 +15,7 @@ export interface CountingChainConfig {
   enabled: boolean;
   channelId?: string;
   maxAttachmentBytes: number;
+  idleNudgeMs?: number;
   reviewEnabled?: boolean;
   reviewRoleId?: string;
 }
@@ -73,6 +74,10 @@ export interface CountingChainInfoPublisher {
   ): Promise<string | undefined>;
 }
 
+export interface CountingChainPublisher {
+  send(channelId: string, content: string): Promise<string>;
+}
+
 export interface CountingChainRemoteAddress {
   address: string;
   family: 4 | 6;
@@ -99,6 +104,7 @@ export interface CountingChainService {
     infoPublisher?: CountingChainInfoPublisher,
   ): Promise<void>;
   reconcileHistory(): Promise<void>;
+  checkInactivity(): Promise<void>;
 }
 
 export interface CountingChainServiceDependencies {
@@ -106,6 +112,7 @@ export interface CountingChainServiceDependencies {
   recognizer: NumberRecognizer;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  publisher?: CountingChainPublisher;
   userLevels?: UserLevelService;
   fetchImplementation?: typeof fetch;
   lookupImplementation?: CountingChainRemoteAddressLookup;
@@ -140,6 +147,7 @@ interface CountingChainState {
   historyRecoveryPending: boolean;
   lastGameEnding: CountingChainGameEnding | null;
   pendingReview: CountingChainPendingReview | null;
+  lastNudgeAt: string | null;
 }
 
 interface ProcessMessageOptions {
@@ -153,6 +161,15 @@ const RECOGNITION_FAILURE_REACTION = '⚠️';
 const REVIEW_REQUEST_REACTION = '🔎';
 const REVIEW_APPROVE_REACTION = '✅';
 const REVIEW_REJECT_REACTION = '❌';
+const DEFAULT_IDLE_NUDGE_MS = 259200000;
+const COUNTING_CHAIN_IDLE_MESSAGES = [
+  (expectedNumber: number) =>
+    `🔢 The counting chain has gone very quiet... even the numbers are getting lonely. Who has **${expectedNumber}**?`,
+  (expectedNumber: number) =>
+    `🧮 I checked the maths: the next number is still **${expectedNumber}**. Your move!`,
+  (expectedNumber: number) =>
+    `🔢 The next number is **${expectedNumber}** whenever someone is brave enough to post it. The chain is waiting!`,
+] as const;
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 const IMAGE_URL_NUMBER_WORDS = new Map<string, number>([
   ['one', 1],
@@ -248,6 +265,47 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     return this.scheduleRecovery(this.historyProvider);
+  }
+
+  public checkInactivity(): Promise<void> {
+    const channelId = this.dependencies.config.channelId;
+    const publisher = this.dependencies.publisher;
+    if (!this.dependencies.config.enabled || !channelId || !publisher) {
+      return Promise.resolve();
+    }
+
+    return this.enqueue(channelId, async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readCountingChainState(rootState[STATE_KEY], channelId);
+      const game = state.game;
+      if (!game || state.historyRecoveryPending || state.pendingReview) {
+        return;
+      }
+
+      const updatedAt = Date.parse(game.updatedAt);
+      const now = this.currentTime();
+      const idleNudgeMs = this.dependencies.config.idleNudgeMs ?? DEFAULT_IDLE_NUDGE_MS;
+      if (!Number.isFinite(updatedAt) || now.getTime() - updatedAt < idleNudgeMs) {
+        return;
+      }
+
+      const lastNudgeAt = state.lastNudgeAt ? Date.parse(state.lastNudgeAt) : Number.NaN;
+      if (Number.isFinite(lastNudgeAt) && lastNudgeAt >= updatedAt) {
+        return;
+      }
+
+      const message = COUNTING_CHAIN_IDLE_MESSAGES[
+        game.expectedNumber % COUNTING_CHAIN_IDLE_MESSAGES.length
+      ]!(game.expectedNumber);
+      await publisher.send(channelId, message);
+      state.lastNudgeAt = now.toISOString();
+      writeCountingChainState(rootState, state);
+      await this.dependencies.state.save(rootState);
+      this.dependencies.logger.info(
+        { channelId, expectedNumber: game.expectedNumber },
+        'Counting chain inactivity reminder posted',
+      );
+    });
   }
 
   public handleMessage(message: CountingChainMessage): Promise<void> {
@@ -372,6 +430,7 @@ export class PersistentCountingChainService implements CountingChainService {
       state.lastGameEnding = null;
       state.pendingReview = null;
       state.historyRecoveryPending = false;
+      state.lastNudgeAt = null;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
@@ -861,6 +920,7 @@ export class PersistentCountingChainService implements CountingChainService {
         lastProcessedMessageId: message.id,
       };
       state.lastGameEnding = null;
+      state.lastNudgeAt = null;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
@@ -1105,6 +1165,7 @@ export class PersistentCountingChainService implements CountingChainService {
       };
       state.lastGameEnding = null;
       state.pendingReview = null;
+      state.lastNudgeAt = null;
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
@@ -1137,6 +1198,7 @@ export class PersistentCountingChainService implements CountingChainService {
     });
     state.lastGameEnding = null;
     state.pendingReview = null;
+    state.lastNudgeAt = null;
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
@@ -1314,6 +1376,7 @@ export class PersistentCountingChainService implements CountingChainService {
     game.lastProcessedMessageId = message.id;
     game.updatedAt = this.currentTime().toISOString();
     state.game = game;
+    state.lastNudgeAt = null;
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
   }
@@ -1438,6 +1501,7 @@ function writeCountingChainState(rootState: JsonState, state: CountingChainState
     version: state.version,
     infoMessageId: state.infoMessageId,
     playerHighScores: state.playerHighScores,
+    ...(state.lastNudgeAt ? { lastNudgeAt: state.lastNudgeAt } : {}),
     ...(state.historyRecoveryPending ? { historyRecoveryPending: true } : {}),
     ...(state.lastGameEnding ? { lastGameEnding: state.lastGameEnding } : {}),
     ...(state.pendingReview ? { pendingReview: state.pendingReview } : {}),
@@ -1557,6 +1621,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
       historyRecoveryPending: false,
       lastGameEnding: null,
       pendingReview: null,
+      lastNudgeAt: null,
     };
   }
 
@@ -1579,6 +1644,7 @@ function readCountingChainState(value: unknown, channelId?: string): CountingCha
     historyRecoveryPending: value.historyRecoveryPending === true,
     lastGameEnding: readGameEnding(value.lastGameEnding),
     pendingReview: readPendingReview(value.pendingReview),
+    lastNudgeAt: readNullableString(value.lastNudgeAt),
   };
 }
 

@@ -59,6 +59,7 @@ function createService(
     state,
     logger,
     ...(themeValidator ? { themeValidator } : {}),
+    clock: () => new Date('2026-10-23T02:00:00.000Z'),
   });
 }
 
@@ -389,6 +390,44 @@ describe('STEM word chain service', () => {
       },
     });
     expect(publisher.send).toHaveBeenCalledOnce();
+  });
+
+  it('posts one automatic theme-aware clue after the chain has been idle', async () => {
+    const state = new MemoryStateStore();
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('round-message-1')
+        .mockResolvedValueOnce('hint-message-1'),
+    };
+    const getWordChainHint = vi
+      .fn<NonNullable<StemWordChainThemeValidator['getWordChainHint']>>()
+      .mockResolvedValue({ word: 'asteroid', hint: 'A rocky object that travels around the Sun.' });
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+      getWordChainHint,
+    };
+    const service = createService(state, publisher, themeValidator);
+
+    await service.initialize();
+    const wordChainState = state.state.stemWordChain as { lastActivityAt: string };
+    wordChainState.lastActivityAt = '2026-10-19T02:00:00.000Z';
+    await service.checkInactivity();
+    await service.checkInactivity();
+
+    expect(getWordChainHint).toHaveBeenCalledOnce();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '💡 The word chain has gone quiet, so here is an extra clue for **Space**:',
+    );
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        hintHistory: ['A rocky object that travels around the Sun.'],
+        hintedWords: ['asteroid'],
+        automaticHintAt: '2026-10-23T02:00:00.000Z',
+        streak: 0,
+      },
+    });
   });
 
   it('formats the theme and chain rules in the opening message', () => {

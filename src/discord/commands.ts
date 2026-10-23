@@ -29,6 +29,7 @@ import {
 import type { StemScrambleService } from '../services/scramble.js';
 import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/uptime-kuma.js';
 import type { CountingChainService } from '../services/counting-chain.js';
+import { parseReminderDuration, type AdminReminderService } from '../services/admin-reminders.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -41,6 +42,7 @@ export interface CommandContext {
   userLevels?: UserLevelService;
   scramble?: StemScrambleService;
   uptime?: UptimeKumaIntegration;
+  reminders?: AdminReminderService;
 }
 
 export interface DiscordCommand {
@@ -425,6 +427,69 @@ export const countingChainCommand: DiscordCommand = {
   },
 };
 
+export const remindCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('remind')
+    .setDescription('Schedule a reminder in the moderator reminders channel.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages.toString())
+    .addStringOption((option) =>
+      option
+        .setName('duration')
+        .setDescription('How long to wait, for example 30m or 5d.')
+        .setMaxLength(16)
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('message')
+        .setDescription('What should STEMBot remind you about?')
+        .setMaxLength(1800)
+        .setRequired(true),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const reminders = context.reminders;
+    if (!reminders) {
+      await interaction.reply({
+        content: 'Moderator reminders are not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const hasModeratorPermission =
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) === true ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
+    if (!hasModeratorPermission) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to schedule reminders.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const durationText = interaction.options.getString('duration', true);
+    const delayMs = parseReminderDuration(durationText);
+    if (!delayMs) {
+      await interaction.reply({
+        content: 'Use a positive duration such as `30m` for minutes or `5d` for days.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const content = interaction.options.getString('message', true);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const reminder = await reminders.schedule(interaction.user.id, delayMs, content);
+    const dueAt = new Date(reminder.dueAt).toLocaleString('en-AU', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: context.timeZone ?? 'Australia/Brisbane',
+    });
+    await interaction.editReply({ content: `Reminder scheduled for **${dueAt}**.` });
+  },
+};
+
 export const minecraftCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('minecraft')
@@ -481,6 +546,7 @@ export const commands: readonly DiscordCommand[] = [
   leaderboardCommand,
   reviewCommand,
   countingChainCommand,
+  remindCommand,
   minecraftCommand,
   playersCommand,
 ];

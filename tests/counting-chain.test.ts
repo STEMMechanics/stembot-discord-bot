@@ -5,6 +5,7 @@ import type { NumberRecognizer } from '../src/integrations/openai.js';
 import {
   PersistentCountingChainService,
   type CountingChainConfig,
+  type CountingChainPublisher,
   type CountingChainRemoteAddressLookup,
   type CountingChainHistoryMessage,
   type CountingChainMessage,
@@ -64,6 +65,7 @@ function createService(
     fetchImplementation?: typeof fetch;
     lookupImplementation?: CountingChainRemoteAddressLookup;
     config?: Partial<CountingChainConfig>;
+    publisher?: CountingChainPublisher;
   } = {},
 ): PersistentCountingChainService {
   return new PersistentCountingChainService({
@@ -82,6 +84,7 @@ function createService(
     lookupImplementation:
       options.lookupImplementation ??
       (async () => [{ address: '93.184.216.34', family: 4 as const }]),
+    ...(options.publisher ? { publisher: options.publisher } : {}),
     clock: () => new Date('2026-10-23T00:00:00.000Z'),
   });
 }
@@ -100,6 +103,35 @@ function createHistoryMessage(
 }
 
 describe('counting-chain service', () => {
+  it('posts one reminder after the chain has been idle without changing the next number', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      countingChain: {
+        version: 1,
+        expectedNumber: 14,
+        lastAuthorId: 'user-13',
+        lastMessageId: 'message-13',
+        updatedAt: '2026-10-19T00:00:00.000Z',
+        highScore: 13,
+        highScoreAt: '2026-10-19T00:00:00.000Z',
+        lastRound: 0,
+        lastRoundAt: null,
+        lastRoundReason: null,
+        lastProcessedMessageId: 'message-13',
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('reminder-message-1') };
+    const service = createService(state, { recognizeNumber: vi.fn() }, { publisher });
+
+    await service.checkInactivity();
+    await service.checkInactivity();
+
+    expect(publisher.send).toHaveBeenCalledOnce();
+    expect(publisher.send.mock.calls[0]?.[1]).toContain('**14**');
+    expect(state.state).toMatchObject({ countingChain: { expectedNumber: 14 } });
+    expect(state.state.countingChain).toHaveProperty('lastNudgeAt', '2026-10-23T00:00:00.000Z');
+  });
+
   it('reacts to valid images and persists the next expected number', async () => {
     const state = new MemoryStateStore();
     const recognizer = {

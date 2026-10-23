@@ -20,6 +20,7 @@ import type { UptimeKumaIntegration } from '../integrations/uptime-kuma.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
+import type { AdminReminderService } from '../services/admin-reminders.js';
 import type {
   CountingChainGameStatus,
   CountingChainHistoryMessage,
@@ -75,6 +76,7 @@ export interface DiscordCommandDependencies {
   ask?: StemAskService;
   userLevels?: UserLevelService;
   uptime?: UptimeKumaIntegration;
+  reminders?: AdminReminderService;
 }
 
 export function createDiscordGateway(
@@ -269,6 +271,7 @@ export function createDiscordGateway(
       timeZone: dependencies.timeZone,
       ...(dependencies.countingChain ? { countingChain: dependencies.countingChain } : {}),
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
+      ...(dependencies.reminders ? { reminders: dependencies.reminders } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });
   });
