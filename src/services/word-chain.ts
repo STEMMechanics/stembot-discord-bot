@@ -1213,8 +1213,9 @@ function formatWordChainContinuation(
   const omittedCount = Math.max(0, matchingWords.length - visibleWords.length);
   const listedWords = visibleWords.map((word) => `**${word}**`).join(', ');
   const omittedText = omittedCount > 0 ? `, and ${omittedCount} more` : '';
+  const usedWordNoun = matchingWords.length === 1 ? 'word' : 'words';
   const usedWordsText = listedWords
-    ? `You can't use the words ${listedWords}${omittedText}.`
+    ? `You can't use the ${usedWordNoun} ${listedWords}${omittedText}.`
     : `No previous **${nextLetter.toLocaleUpperCase()}** words have been used yet.`;
   return `Give me a word starting with **${nextLetter.toLocaleUpperCase()}** on the theme of **${theme.name}**. ${usedWordsText}`;
 }

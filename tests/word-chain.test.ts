@@ -392,7 +392,7 @@ describe('STEM word chain service', () => {
 
     await vi.waitFor(() => {
       expect(message.reply).toHaveBeenCalledWith(
-        "📖 lactic — A word used in chemistry.\n\nGive me a word starting with **C** on the theme of **Chemistry**. You can't use the words **chemical**.",
+        "📖 lactic — A word used in chemistry.\n\nGive me a word starting with **C** on the theme of **Chemistry**. You can't use the word **chemical**.",
       );
     });
   });
