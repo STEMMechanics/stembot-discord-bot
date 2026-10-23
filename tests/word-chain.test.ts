@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StemWordChainThemeValidator } from '../src/integrations/openai-word-chain.js';
 import {
   formatStemWordChainRound,
+  extractWordChainCandidate,
   PersistentStemWordChainService,
   type StemWordChainConfig,
   type StemWordChainMessage,
@@ -235,6 +236,42 @@ describe('STEM word chain service', () => {
         roundNumber: 4,
         lastWord: 'robot',
         streak: 1,
+      },
+    });
+  });
+
+  it('accepts a word followed by a parenthetical explanation', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 4,
+        roundNumber: 2,
+        promptMessageId: '100',
+        lastWord: 'planet',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 1,
+        bestStreak: 1,
+        roundStreaks: { 'user-one': 1 },
+        bestStreaks: { 'user-one': 1 },
+        usedWords: ['planet'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-2') };
+    const service = createService(state, publisher);
+    const transfer = createMessage('200', 'transfer (with energy)');
+
+    await service.handleMessage(transfer);
+
+    expect(extractWordChainCandidate('transfer (with energy)')).toBe('transfer');
+    expect(transfer.react).toHaveBeenCalledWith('✅');
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        themeIndex: 4,
+        lastWord: 'transfer',
+        streak: 2,
       },
     });
   });

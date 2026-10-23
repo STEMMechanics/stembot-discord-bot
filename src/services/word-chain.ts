@@ -181,6 +181,7 @@ export const STEM_WORD_CHAIN_THEMES: readonly StemWordChainTheme[] = [
       'resistance',
       'resonance',
       'speed',
+      'transfer',
       'velocity',
       'wave',
       'work',
@@ -411,7 +412,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       return;
     }
 
-    const word = normalizeWordChainWord(message.content);
+    const word = extractWordChainCandidate(message.content);
     const expectedLetter = state.lastWord?.slice(-1) ?? undefined;
     if (!word) {
       await this.endRound(rootState, state, message, theme, word);
@@ -930,6 +931,19 @@ export function formatStemWordChainRound(
 export function normalizeWordChainWord(value: string): string | undefined {
   const normalized = value.normalize('NFKC').trim().toLocaleLowerCase();
   return /^[a-z]+$/.test(normalized) ? normalized : undefined;
+}
+
+export function extractWordChainCandidate(value: string): string | undefined {
+  const normalized = value.normalize('NFKC').trim();
+  const directWord = normalizeWordChainWord(normalized);
+  if (directWord) {
+    return directWord;
+  }
+
+  const contextualWord = normalized.match(
+    /^([a-z]+)\s+(?:\([^()\r\n]{1,200}\)|[-:–—]\s+[^\r\n]{1,200})$/i,
+  )?.[1];
+  return contextualWord ? normalizeWordChainWord(contextualWord) : undefined;
 }
 
 function readStemWordChainState(value: unknown): StemWordChainState {
