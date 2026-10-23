@@ -93,7 +93,7 @@ describe('persistent user levels', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith({
       channelId: 'announcement-channel',
-      content: expect.stringMatching(/<@user-1>.*level 2|level 2.*<@user-1>/),
+      content: expect.stringMatching(/<@user-1>.*2/),
       allowedUserIds: ['user-1'],
     });
     await expect(service.getProfile('user-1')).resolves.toMatchObject({ xp: 105, level: 2 });

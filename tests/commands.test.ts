@@ -245,13 +245,6 @@ describe('Discord commands', () => {
     expect(getProfile).toHaveBeenCalledWith('user-2');
     expect(deferReply).toHaveBeenCalledWith();
     expect(editReply).toHaveBeenCalledWith({
-      embeds: [
-        expect.objectContaining({
-          author: expect.objectContaining({ name: "Builder's STEMBot level" }),
-          description: expect.stringContaining('## Level 2'),
-          fields: expect.arrayContaining([expect.objectContaining({ name: 'Rank', value: '#4' })]),
-        }),
-      ],
       files: [expect.objectContaining({ name: 'stembot-level-card.png' })],
       allowedMentions: { parse: [] },
     });

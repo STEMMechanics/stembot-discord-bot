@@ -266,7 +266,6 @@ export const levelCommand: DiscordCommand = {
     const rank = await userLevels.getRank(targetUser.id);
     const card = await buildUserLevelCard(profile, targetUser, rank);
     await interaction.editReply({
-      embeds: [buildUserLevelEmbed(profile, targetUser, rank)],
       files: [new AttachmentBuilder(card, { name: 'stembot-level-card.png' })],
       allowedMentions: { parse: [] },
     });
@@ -697,7 +696,7 @@ export function buildUserLevelCardSvg(
   const filledBarWidth = Math.round((barWidth * progress.percent) / 100);
   const avatar = avatarDataUri
     ? `<clipPath id="avatar-clip"><circle cx="104" cy="126" r="70" /></clipPath><image href="${avatarDataUri}" x="34" y="56" width="140" height="140" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatar-clip)" />`
-    : `<circle cx="104" cy="126" r="70" fill="#5865f2" /><text x="104" y="144" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff">${safeInitials}</text>`;
+    : `<circle cx="104" cy="126" r="70" fill="#5865f2" /><text x="104" y="144" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="48" font-weight="700" fill="#ffffff">${safeInitials}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="280" viewBox="0 0 900 280">
   <defs>
@@ -712,16 +711,16 @@ export function buildUserLevelCardSvg(
   </defs>
   <rect width="900" height="280" rx="18" fill="url(#card)" />
   ${avatar}
-  <text x="198" y="82" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#ffffff">${safeName}</text>
-  <text x="198" y="114" font-family="Arial, sans-serif" font-size="17" letter-spacing="2" fill="#9aa8bd">STEMBOT LEVEL</text>
-  <text x="648" y="66" font-family="Arial, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">RANK</text>
-  <text x="648" y="101" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#ffffff">#${safeRank}</text>
-  <text x="770" y="66" font-family="Arial, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">LEVEL</text>
-  <text x="770" y="101" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#55d6f5">${profile.level}</text>
+  <text x="198" y="82" font-family="DejaVu Sans, sans-serif" font-size="30" font-weight="700" fill="#ffffff">${safeName}</text>
+  <text x="198" y="114" font-family="DejaVu Sans, sans-serif" font-size="17" letter-spacing="2" fill="#9aa8bd">STEMBOT LEVEL</text>
+  <text x="648" y="66" font-family="DejaVu Sans, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">RANK</text>
+  <text x="648" y="101" font-family="DejaVu Sans, sans-serif" font-size="35" font-weight="700" fill="#ffffff">#${safeRank}</text>
+  <text x="770" y="66" font-family="DejaVu Sans, sans-serif" font-size="15" letter-spacing="1" fill="#9aa8bd">LEVEL</text>
+  <text x="770" y="101" font-family="DejaVu Sans, sans-serif" font-size="35" font-weight="700" fill="#55d6f5">${profile.level}</text>
   <rect x="198" y="164" width="${barWidth}" height="24" rx="12" fill="#3a4553" />
   <rect x="198" y="164" width="${filledBarWidth}" height="24" rx="12" fill="url(#progress)" />
-  <text x="198" y="226" font-family="Arial, sans-serif" font-size="18" fill="#ffffff">${progress.currentXp} / ${progress.requiredXp} XP</text>
-  <text x="848" y="226" text-anchor="end" font-family="Arial, sans-serif" font-size="18" fill="#9aa8bd">to level ${profile.level + 1}</text>
+  <text x="198" y="226" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#ffffff">${progress.currentXp} / ${progress.requiredXp} XP</text>
+  <text x="848" y="226" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#9aa8bd">to level ${profile.level + 1}</text>
 </svg>`;
 }
 

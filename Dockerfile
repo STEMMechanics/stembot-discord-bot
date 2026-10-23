@@ -21,7 +21,11 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/data \
+    && chown node:node /app/data
 
 USER node
 
