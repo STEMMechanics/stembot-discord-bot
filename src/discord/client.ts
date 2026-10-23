@@ -116,6 +116,7 @@ export function createDiscordGateway(
   const client = new Client(clientOptions);
   let countingChainEventQueue: Promise<void> = Promise.resolve();
   let refreshMinigameDashboard: (() => Promise<void>) | undefined;
+  let minigameDashboardRefreshQueue: Promise<void> = Promise.resolve();
   const requestCountingChainReview =
     dependencies.countingChain && config.countingChain.enabled && config.countingChain.reviewEnabled
       ? (channelId: string) =>
@@ -133,9 +134,17 @@ export function createDiscordGateway(
       return;
     }
 
-    void refresh().catch((error: unknown) => {
-      logger.warn({ err: error }, 'STEM minigame dashboard refresh failed');
-    });
+    const next = minigameDashboardRefreshQueue
+      .catch(() => undefined)
+      .then(refresh)
+      .catch((error: unknown) => {
+        logger.warn({ err: error }, 'STEM minigame dashboard refresh failed');
+      });
+    minigameDashboardRefreshQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    void next;
   };
 
   let resolveClientReady!: () => void;
@@ -996,12 +1005,13 @@ function createCountingChainInfoPublisher(
 ): CountingChainInfoPublisher & { refresh(): Promise<void> } {
   let messageId = configuredMessageId;
   let latestStatus: CountingChainGameStatus | undefined;
+  let updateQueue: Promise<string | undefined> = Promise.resolve(undefined);
 
-  const update = async (
+  const updateDashboard = async (
     status: CountingChainGameStatus,
     persistedMessageId?: string,
+    providedCountingLeaderboard?: readonly MinigameLeaderboardEntry[],
   ): Promise<string | undefined> => {
-    latestStatus = status;
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !('messages' in channel) || !('send' in channel)) {
       throw new Error(`Counting chain info channel is not writable: ${channelId}`);
@@ -1033,7 +1043,7 @@ function createCountingChainInfoPublisher(
 
     const [countingLeaderboard, quizLeaderboard, scrambleLeaderboard, wordChainLeaderboard] =
       await Promise.all([
-        readMinigameLeaderboard(countingChain),
+        readMinigameLeaderboard(countingChain, providedCountingLeaderboard),
         readMinigameLeaderboard(quiz),
         readMinigameLeaderboard(scramble),
         readMinigameLeaderboard(wordChain),
@@ -1056,6 +1066,22 @@ function createCountingChainInfoPublisher(
     });
     messageId = createdMessage.id;
     return createdMessage.id;
+  };
+
+  const update = (
+    status: CountingChainGameStatus,
+    persistedMessageId?: string,
+    countingLeaderboard?: readonly MinigameLeaderboardEntry[],
+  ): Promise<string | undefined> => {
+    latestStatus = status;
+    const next = updateQueue
+      .catch(() => undefined)
+      .then(() => updateDashboard(status, persistedMessageId, countingLeaderboard));
+    updateQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   };
 
   return {
@@ -1158,7 +1184,12 @@ interface MinigameLeaderboards {
 
 async function readMinigameLeaderboard(
   service: MinigameLeaderboardProvider | undefined,
+  preloadedLeaderboard?: readonly MinigameLeaderboardEntry[],
 ): Promise<readonly MinigameLeaderboardEntry[]> {
+  if (preloadedLeaderboard !== undefined) {
+    return preloadedLeaderboard;
+  }
+
   if (!service) {
     return [];
   }

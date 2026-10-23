@@ -66,7 +66,11 @@ export interface CountingChainGameStatus {
 }
 
 export interface CountingChainInfoPublisher {
-  update(status: CountingChainGameStatus, messageId?: string): Promise<string | undefined>;
+  update(
+    status: CountingChainGameStatus,
+    messageId?: string,
+    countingLeaderboard?: readonly MinigameLeaderboardEntry[],
+  ): Promise<string | undefined>;
 }
 
 export interface CountingChainRemoteAddress {
@@ -1188,7 +1192,11 @@ export class PersistentCountingChainService implements CountingChainService {
       const rootState = await this.dependencies.state.load();
       const state = readCountingChainState(rootState[STATE_KEY], channelId);
       const game = state.game ?? createInitialGameState(this.currentTime());
-      const infoMessageId = await this.infoPublisher.update(game, state.infoMessageId ?? undefined);
+      const infoMessageId = await this.infoPublisher.update(
+        game,
+        state.infoMessageId ?? undefined,
+        toMinigameLeaderboard(state.playerHighScores, 3),
+      );
       if (infoMessageId && infoMessageId !== state.infoMessageId) {
         state.infoMessageId = infoMessageId;
         writeCountingChainState(rootState, state);

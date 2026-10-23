@@ -8,6 +8,7 @@ import { createOpenAINumberRecognizer } from './integrations/openai.js';
 import { createOpenAIStemAskAnswerer } from './integrations/openai-ask.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
 import { createOpenAIScrambleWordGenerator } from './integrations/openai-scramble.js';
+import { createOpenAIStemWordChainValidator } from './integrations/openai-word-chain.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
 import {
   createUptimeKumaIntegration,
@@ -196,6 +197,13 @@ export function createApplication(
     (config.wordChain.enabled
       ? createStemWordChainService({
           config: config.wordChain,
+          themeValidator: createOpenAIStemWordChainValidator({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
           publisher: {
             send: (channelId, content) => {
               if (!discordGatewayRef.current) {

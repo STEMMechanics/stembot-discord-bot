@@ -180,9 +180,13 @@ bot needs the Message Content intent and permission to add reactions there.
 
 When `STEM_WORD_CHAIN_ENABLED=true`, STEMBot starts a persistent word chain in
 `STEM_WORD_CHAIN_CHANNEL_ID`. Each word must be a STEM word from the displayed
-theme and must start with the last letter of the previous word. An invalid word
-ends the round, records the streak, and rotates to the next theme. The bundled
-themes are Space, Biology, Chemistry, Technology and Physics.
+theme and must start with the last letter of the previous word. Common bundled
+terms are accepted immediately; OpenAI checks unfamiliar words against the
+theme. This feature requires `OPENAI_API_KEY`. An invalid word ends the round,
+records the streak, and rotates to the next theme. If the validator is
+temporarily unavailable, the round stays open and the move is not counted. The
+Unfamiliar-word checks are cached and rate limited per member and globally. The
+bundled themes are Space, Biology, Chemistry, Technology and Physics.
 
 ### Mention-based STEM answers
 
@@ -229,8 +233,8 @@ records a member's best correct-guess streak in one round. Set
 edited. If the message ID is omitted, STEMBot searches the most recent 100
 messages for its `STEMBot Minigames` embed (and can reuse the old counting
 embed) and creates one only when it cannot find an existing message. The
-dashboard is updated after accepted numbers and resets, and once when the
-service starts.
+dashboard is updated after game results and resets, and once when the service
+starts.
 
 Startup reconciliation paginates through the channel in 100-message pages. If
 the game has a saved checkpoint, it processes image attachments and GIF URLs

@@ -395,7 +395,7 @@ describe('loadConfig', () => {
     });
   });
 
-  it('requires a word-chain channel when the game is enabled', () => {
+  it('requires a word-chain channel and OpenAI credentials when the game is enabled', () => {
     expect(() =>
       loadConfig({
         DISCORD_CLIENT_ID: '1234567890',
@@ -405,10 +405,21 @@ describe('loadConfig', () => {
       }),
     ).toThrow(/STEM_WORD_CHAIN_CHANNEL_ID/);
 
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_WORD_CHAIN_ENABLED: 'true',
+        STEM_WORD_CHAIN_CHANNEL_ID: '8234567890',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
+
     const config = loadConfig({
       DISCORD_CLIENT_ID: '1234567890',
       DISCORD_GUILD_ID: '2234567890',
       DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
       STEM_WORD_CHAIN_ENABLED: 'true',
       STEM_WORD_CHAIN_CHANNEL_ID: '8234567890',
       STEM_WORD_CHAIN_RETRY_INTERVAL_MS: '60000',

@@ -1,5 +1,6 @@
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
+import type { StemWordChainThemeValidator } from '../integrations/openai-word-chain.js';
 import {
   readMinigameScores,
   toMinigameLeaderboard,
@@ -198,6 +199,7 @@ interface StemWordChainServiceDependencies {
   publisher: StemWordChainPublisher;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  themeValidator?: StemWordChainThemeValidator;
   userLevels?: UserLevelService;
 }
 
@@ -205,9 +207,17 @@ const STATE_KEY = 'stemWordChain';
 const PASS_REACTION = '✅';
 const FAILURE_REACTION = '❌';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
+const MAX_THEME_VALIDATION_CACHE_ENTRIES = 500;
+const THEME_VALIDATION_USER_COOLDOWN_MS = 5_000;
+const THEME_VALIDATION_GLOBAL_WINDOW_MS = 60_000;
+const THEME_VALIDATION_GLOBAL_LIMIT = 30;
 
 export class PersistentStemWordChainService implements StemWordChainService {
   private eventQueue: Promise<void> = Promise.resolve();
+  private readonly themeValidationCache = new Map<string, boolean>();
+  private readonly lastThemeValidationAt = new Map<string, number>();
+  private themeValidationWindowStartedAt = 0;
+  private themeValidationWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemWordChainServiceDependencies) {}
 
@@ -265,10 +275,20 @@ export class PersistentStemWordChainService implements StemWordChainService {
     const theme = getTheme(state.themeIndex);
     const word = normalizeWordChainWord(message.content);
     const expectedLetter = state.lastWord?.slice(-1) ?? undefined;
-    const valid =
+    const startsWithExpectedLetter =
       word !== undefined &&
-      theme.words.includes(word) &&
       (!state.lastWord || (expectedLetter !== undefined && word.startsWith(expectedLetter)));
+    if (!startsWithExpectedLetter || !word) {
+      await this.endRound(rootState, state, message, theme, word);
+      return;
+    }
+
+    const fitsTheme = await this.isWordInTheme(theme, word, message.authorId);
+    if (fitsTheme === undefined) {
+      return;
+    }
+
+    const valid = fitsTheme;
 
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     if (valid && word) {
@@ -301,6 +321,16 @@ export class PersistentStemWordChainService implements StemWordChainService {
       return;
     }
 
+    await this.endRound(rootState, state, message, theme, word);
+  }
+
+  private async endRound(
+    rootState: JsonState,
+    state: StemWordChainState,
+    message: StemWordChainMessage,
+    theme: StemWordChainTheme,
+    word: string | undefined,
+  ): Promise<void> {
     const previousStreak = state.streak;
     const nextThemeIndex = (state.themeIndex + 1) % STEM_WORD_CHAIN_THEMES.length;
     const nextTheme = getTheme(nextThemeIndex);
@@ -332,6 +362,77 @@ export class PersistentStemWordChainService implements StemWordChainService {
       },
       'STEM word chain round ended',
     );
+  }
+
+  private async isWordInTheme(
+    theme: StemWordChainTheme,
+    word: string,
+    authorId: string,
+  ): Promise<boolean | undefined> {
+    if (theme.words.includes(word)) {
+      return true;
+    }
+
+    const cacheKey = `${theme.name}:${word}`;
+    const cachedResult = this.themeValidationCache.get(cacheKey);
+    if (cachedResult !== undefined) {
+      return cachedResult;
+    }
+
+    if (!this.dependencies.themeValidator) {
+      return false;
+    }
+
+    if (!this.canRequestThemeValidation(authorId)) {
+      this.dependencies.logger.debug(
+        { theme: theme.name, word, userId: authorId },
+        'STEM word chain theme validation was rate limited; keeping the round open',
+      );
+      return undefined;
+    }
+
+    try {
+      const result = await this.dependencies.themeValidator.isWordInTheme(theme.name, word);
+      this.cacheThemeValidation(cacheKey, result);
+      return result;
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, theme: theme.name, word },
+        'STEM word chain theme validation could not be completed; keeping the round open',
+      );
+      return undefined;
+    }
+  }
+
+  private canRequestThemeValidation(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastThemeValidationAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < THEME_VALIDATION_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.themeValidationWindowStartedAt >= THEME_VALIDATION_GLOBAL_WINDOW_MS) {
+      this.themeValidationWindowStartedAt = now;
+      this.themeValidationWindowRequestCount = 0;
+    }
+
+    if (this.themeValidationWindowRequestCount >= THEME_VALIDATION_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastThemeValidationAt.set(authorId, now);
+    this.themeValidationWindowRequestCount += 1;
+    return true;
+  }
+
+  private cacheThemeValidation(cacheKey: string, result: boolean): void {
+    if (this.themeValidationCache.size >= MAX_THEME_VALIDATION_CACHE_ENTRIES) {
+      const oldestKey = this.themeValidationCache.keys().next().value;
+      if (oldestKey) {
+        this.themeValidationCache.delete(oldestKey);
+      }
+    }
+    this.themeValidationCache.set(cacheKey, result);
   }
 
   private async publishRound(

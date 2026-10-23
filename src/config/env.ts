@@ -351,6 +351,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('STEM_WORD_CHAIN_CHANNEL_ID is required when STEM_WORD_CHAIN_ENABLED is true');
   }
 
+  if (values.STEM_WORD_CHAIN_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_WORD_CHAIN_ENABLED is true');
+  }
+
   if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
   }

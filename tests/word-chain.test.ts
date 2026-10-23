@@ -1,6 +1,7 @@
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { StemWordChainThemeValidator } from '../src/integrations/openai-word-chain.js';
 import {
   formatStemWordChainRound,
   PersistentStemWordChainService,
@@ -49,8 +50,15 @@ function createMessage(
 function createService(
   state: MemoryStateStore,
   publisher: StemWordChainPublisher,
+  themeValidator?: StemWordChainThemeValidator,
 ): PersistentStemWordChainService {
-  return new PersistentStemWordChainService({ config, publisher, state, logger });
+  return new PersistentStemWordChainService({
+    config,
+    publisher,
+    state,
+    logger,
+    ...(themeValidator ? { themeValidator } : {}),
+  });
 }
 
 describe('STEM word chain service', () => {
@@ -123,6 +131,80 @@ describe('STEM word chain service', () => {
       { userId: 'nomad', score: 2 },
       { userId: 'other', score: 1 },
     ]);
+  });
+
+  it('asks AI to validate valid themed words outside the built-in vocabulary', async () => {
+    const state = new MemoryStateStore();
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+    };
+    const service = createService(state, publisher, themeValidator);
+
+    await service.initialize();
+    const setState = (themeIndex: number, lastWord: string | null, streak: number): void => {
+      state.state = {
+        stemWordChain: {
+          version: 1,
+          themeIndex,
+          roundNumber: 2,
+          promptMessageId: 'round-message-2',
+          lastWord,
+          lastAuthorId: lastWord ? 'user-one' : null,
+          lastMessageId: lastWord ? 'message-one' : null,
+          streak,
+          bestStreak: streak,
+          roundStreaks: lastWord ? { 'user-one': streak } : {},
+          bestStreaks: lastWord ? { 'user-one': streak } : {},
+          processedMessageIds: [],
+        },
+      };
+    };
+
+    setState(1, 'animal', 1);
+    const llama = createMessage('llama', 'llama');
+    await service.handleMessage(llama);
+    expect(llama.react).toHaveBeenCalledWith('✅');
+
+    setState(2, 'electron', 1);
+    const nitrogen = createMessage('nitrogen', 'nitrogen');
+    await service.handleMessage(nitrogen);
+    expect(nitrogen.react).toHaveBeenCalledWith('✅');
+
+    setState(3, null, 0);
+    const wire = createMessage('wire', 'wire');
+    await service.handleMessage(wire);
+    expect(wire.react).toHaveBeenCalledWith('✅');
+
+    expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(1, 'Biology', 'llama');
+    expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(2, 'Chemistry', 'nitrogen');
+    expect(themeValidator.isWordInTheme).toHaveBeenNthCalledWith(3, 'Technology', 'wire');
+  });
+
+  it('keeps the round open when AI theme validation is unavailable', async () => {
+    const state = new MemoryStateStore();
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    const themeValidator = {
+      isWordInTheme: vi
+        .fn<StemWordChainThemeValidator['isWordInTheme']>()
+        .mockRejectedValue(new Error('OpenAI unavailable')),
+    };
+    const service = createService(state, publisher, themeValidator);
+
+    await service.initialize();
+    const candidate = createMessage('candidate', 'quasar');
+    await service.handleMessage(candidate);
+
+    expect(candidate.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemWordChain: {
+        themeIndex: 0,
+        roundNumber: 1,
+        lastWord: null,
+        streak: 0,
+      },
+    });
+    expect(publisher.send).toHaveBeenCalledOnce();
   });
 
   it('formats the theme and chain rules in the opening message', () => {

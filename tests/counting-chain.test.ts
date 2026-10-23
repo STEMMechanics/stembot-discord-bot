@@ -959,6 +959,7 @@ describe('counting-chain service', () => {
         lastMessageId: 'history-message',
       }),
       undefined,
+      [{ userId: 'user-1', score: 7 }],
     );
 
     const next = createMessage('user-2', 'message-2');
