@@ -165,6 +165,79 @@ describe('counting-chain service', () => {
     expect(message.react).toHaveBeenCalledWith('👍');
   });
 
+  it('falls back to an unambiguous number in the image URL', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi
+        .fn<NumberRecognizer['recognizeNumber']>()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(null),
+    };
+    const service = createService(state, recognizer);
+    await service.handleMessage(createMessage('user-0', 'message-url-seed'));
+    const message = createMessage('user-1', 'message-url-number', {
+      content: 'https://static.example/counting-chain-2.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(recognizer.recognizeNumber).toHaveBeenCalledTimes(2);
+    expect(message.react).toHaveBeenCalledWith('👍');
+    expect(message.reply).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 3,
+        lastMessageId: 'message-url-number',
+      },
+    });
+  });
+
+  it('uses an explicit image URL query value when the image cannot be read', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(null),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-query-number', {
+      content: 'https://static.example/counting-chain.gif?number=1',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(message.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 2,
+        lastMessageId: 'message-query-number',
+      },
+    });
+  });
+
+  it('does not treat ambiguous URL numbers as a valid game number', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(null),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-ambiguous-url', {
+      content: 'https://static.example/counting-chain-44-45.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(message.react).toHaveBeenCalledWith('⚠️');
+    expect(message.reply).toHaveBeenCalledWith('I could not read that image. Please try again.');
+    expect(state.state).toMatchObject({
+      countingChain: {
+        expectedNumber: 1,
+        lastProcessedMessageId: 'message-ambiguous-url',
+      },
+    });
+  });
+
   it('processes GIF-picker images from an unlisted provider', async () => {
     const state = new MemoryStateStore();
     const recognizer = {

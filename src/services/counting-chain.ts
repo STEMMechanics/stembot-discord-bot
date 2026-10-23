@@ -138,6 +138,28 @@ const REVIEW_REQUEST_REACTION = '🔎';
 const REVIEW_APPROVE_REACTION = '✅';
 const REVIEW_REJECT_REACTION = '❌';
 const IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
+const IMAGE_URL_NUMBER_WORDS = new Map<string, number>([
+  ['one', 1],
+  ['two', 2],
+  ['three', 3],
+  ['four', 4],
+  ['five', 5],
+  ['six', 6],
+  ['seven', 7],
+  ['eight', 8],
+  ['nine', 9],
+  ['ten', 10],
+  ['eleven', 11],
+  ['twelve', 12],
+  ['thirteen', 13],
+  ['fourteen', 14],
+  ['fifteen', 15],
+  ['sixteen', 16],
+  ['seventeen', 17],
+  ['eighteen', 18],
+  ['nineteen', 19],
+  ['twenty', 20],
+]);
 const MAX_IMAGE_REDIRECTS = 3;
 const BLOCKED_REMOTE_NETWORKS = new BlockList();
 
@@ -420,8 +442,7 @@ export class PersistentCountingChainService implements CountingChainService {
     }
 
     try {
-      const image = await this.downloadImage(imageSource);
-      const recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
+      const recognizedNumber = await this.recognizeNumberFromMessage(latestMessage, imageSource);
       if (recognizedNumber === null) {
         throw new Error('Counting chain history image could not be read');
       }
@@ -621,31 +642,7 @@ export class PersistentCountingChainService implements CountingChainService {
     const game = state.game ?? createInitialGameState(this.currentTime());
     const sameUser = message.authorId === game.lastAuthorId;
 
-    let recognizedNumber: number | null;
-    try {
-      const image = await this.downloadImage(imageSource);
-      recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
-    } catch (error: unknown) {
-      this.dependencies.logger.warn(
-        { err: error, channelId: message.channelId, messageId: message.id },
-        'Counting chain image could not be read; game state unchanged',
-      );
-      if (sameUser) {
-        await this.resetAfterRuleFailure(rootState, state, game, message, 'same-user', null);
-        return;
-      }
-      if (this.isReviewEnabled()) {
-        await this.createReviewRequest(message, undefined, 'unreadable');
-        return;
-      }
-      await this.giveFeedback(
-        message,
-        RECOGNITION_FAILURE_REACTION,
-        'I could not read that image. Please try again.',
-      );
-      await this.markMessageProcessed(message);
-      return;
-    }
+    const recognizedNumber = await this.recognizeNumberFromMessage(message, imageSource);
 
     if (recognizedNumber === null) {
       if (sameUser) {
@@ -1049,6 +1046,39 @@ export class PersistentCountingChainService implements CountingChainService {
 
     const data = await readResponseBody(response, this.dependencies.config.maxAttachmentBytes);
     return { data, contentType };
+  }
+
+  private async recognizeNumberFromMessage(
+    message: CountingChainMessage,
+    imageSource: CountingChainAttachment,
+  ): Promise<number | null> {
+    try {
+      const image = await this.downloadImage(imageSource);
+      const recognizedNumber = await this.dependencies.recognizer.recognizeNumber(image);
+      if (recognizedNumber !== null) {
+        return recognizedNumber;
+      }
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'Counting chain image recognition failed; trying the image URL fallback',
+      );
+    }
+
+    const urlNumber = inferNumberFromImageUrls(message);
+    if (urlNumber !== null) {
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          imageUrlNumber: urlNumber,
+        },
+        'Counting chain number recovered from image URL',
+      );
+      return urlNumber;
+    }
+
+    return null;
   }
 
   private async react(message: CountingChainMessage, emoji: string, force = false): Promise<void> {
@@ -1518,26 +1548,124 @@ function selectImageAttachment(
 }
 
 function selectImageSource(message: CountingChainMessage): CountingChainAttachment | undefined {
+  return selectImageSources(message)[0];
+}
+
+function selectImageSources(message: CountingChainMessage): CountingChainAttachment[] {
+  const sources: CountingChainAttachment[] = [];
   const attachment = selectImageAttachment(message.attachments);
   if (attachment) {
-    return attachment;
+    sources.push(attachment);
   }
 
   for (const url of extractImageUrls(message.content)) {
     const source = createImageUrlSource(url, true);
     if (source) {
-      return source;
+      sources.push(source);
     }
   }
 
   for (const url of message.imageUrls ?? []) {
     const source = createImageUrlSource(url, false);
     if (source) {
-      return source;
+      sources.push(source);
     }
   }
 
-  return undefined;
+  return deduplicateImageSources(sources);
+}
+
+function deduplicateImageSources(
+  sources: readonly CountingChainAttachment[],
+): CountingChainAttachment[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    if (seen.has(source.url)) {
+      return false;
+    }
+    seen.add(source.url);
+    return true;
+  });
+}
+
+function inferNumberFromImageUrls(message: CountingChainMessage): number | null {
+  const numbers = new Set<number>();
+  for (const source of selectImageSources(message)) {
+    for (const value of [source.url, source.name]) {
+      if (!value) {
+        continue;
+      }
+
+      const number = inferNumberFromImageUrl(value);
+      if (number !== null) {
+        numbers.add(number);
+      }
+    }
+  }
+
+  return resolveSingleNumber([...numbers]);
+}
+
+function inferNumberFromImageUrl(value: string): number | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return resolveSingleNumber(extractNumberCandidates(value));
+  }
+
+  const candidates: number[] = [];
+  for (const key of ['number', 'count', 'value']) {
+    const queryValue = url.searchParams.get(key);
+    if (queryValue) {
+      candidates.push(...extractNumberCandidates(queryValue));
+    }
+  }
+
+  const fileName = url.pathname.split('/').pop() ?? '';
+  candidates.push(...extractNumberCandidates(decodeUrlPart(fileName)));
+
+  return resolveSingleNumber(candidates);
+}
+
+function resolveSingleNumber(candidates: readonly number[]): number | null {
+  const uniqueCandidates = new Set(candidates);
+  return uniqueCandidates.size === 1 ? ([...uniqueCandidates][0] ?? null) : null;
+}
+
+function extractNumberCandidates(value: string): number[] {
+  const candidates: number[] = [];
+  const normalized = value.toLowerCase();
+  const numericMatches = normalized.match(/(?:^|[^a-z0-9])([1-9]\d{0,14})(?=$|[^a-z0-9])/g) ?? [];
+  for (const match of numericMatches) {
+    const digits = match.replace(/\D/g, '');
+    const number = Number(digits);
+    if (Number.isSafeInteger(number) && number > 0) {
+      candidates.push(number);
+    }
+  }
+
+  const words = normalized
+    .replace(/[^a-z]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  for (const word of words) {
+    const number = IMAGE_URL_NUMBER_WORDS.get(word);
+    if (number !== undefined) {
+      candidates.push(number);
+    }
+  }
+
+  return candidates;
+}
+
+function decodeUrlPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function extractImageUrls(content: string): string[] {

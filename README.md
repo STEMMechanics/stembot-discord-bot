@@ -89,7 +89,11 @@ the default HTTPS port, and pass redirect, image-type, timeout, and size checks.
 It stores the current number, score history and Discord IDs, but does not store
 the image. Recognition accepts digits, spelled-out number words, and clear
 corrective phrases such as `not one, but two!`; ambiguous or inferred values
-return no number.
+return no number. If image recognition returns no number, STEMBot checks the
+image filename and explicit `number`, `count` or `value` URL parameters for one
+unambiguous positive integer before it asks a moderator for review or asks the
+member to try again. Provider IDs, dimensions and URLs containing conflicting
+numbers are ignored.
 Discord GIF-picker embeds can arrive after the initial message event, so the
 bot checks message updates and recent channel history. Recent human posts are
 fed to the counting service in Discord message-ID order, and duplicate or older
