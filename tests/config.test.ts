@@ -421,25 +421,31 @@ describe('loadConfig', () => {
     });
   });
 
-  it('requires ask credentials and parses its abuse limits', () => {
+  it('requires ask credentials, permits any channel by default, and parses its abuse limits', () => {
     expect(() =>
       loadConfig({
         DISCORD_CLIENT_ID: '1234567890',
         DISCORD_GUILD_ID: '2234567890',
         DISCORD_TOKEN: 'test-token',
         STEM_ASK_ENABLED: 'true',
-      }),
-    ).toThrow(/STEM_ASK_CHANNEL_ID/);
-
-    expect(() =>
-      loadConfig({
-        DISCORD_CLIENT_ID: '1234567890',
-        DISCORD_GUILD_ID: '2234567890',
-        DISCORD_TOKEN: 'test-token',
-        STEM_ASK_ENABLED: 'true',
-        STEM_ASK_CHANNEL_ID: '7234567890',
       }),
     ).toThrow(/OPENAI_API_KEY/);
+
+    const unrestrictedConfig = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_ASK_ENABLED: 'true',
+    });
+
+    expect(unrestrictedConfig.ask).toEqual({
+      enabled: true,
+      maxQuestionLength: 500,
+      userCooldownMs: 30000,
+      userDailyLimit: 10,
+      globalDailyLimit: 100,
+    });
 
     const config = loadConfig({
       DISCORD_CLIENT_ID: '1234567890',
@@ -447,7 +453,6 @@ describe('loadConfig', () => {
       DISCORD_TOKEN: 'test-token',
       OPENAI_API_KEY: 'openai-test-key',
       STEM_ASK_ENABLED: 'true',
-      STEM_ASK_CHANNEL_ID: '7234567890',
       STEM_ASK_MAX_QUESTION_LENGTH: '800',
       STEM_ASK_USER_COOLDOWN_SECONDS: '45',
       STEM_ASK_USER_DAILY_LIMIT: '12',
@@ -456,7 +461,6 @@ describe('loadConfig', () => {
 
     expect(config.ask).toEqual({
       enabled: true,
-      channelId: '7234567890',
       maxQuestionLength: 800,
       userCooldownMs: 45000,
       userDailyLimit: 12,

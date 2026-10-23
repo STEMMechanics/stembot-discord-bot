@@ -4,7 +4,6 @@ import type { JsonState, StateStore } from '../state/state-store.js';
 
 export interface StemAskConfig {
   enabled: boolean;
-  channelId?: string;
   maxQuestionLength: number;
   userCooldownMs: number;
   userDailyLimit: number;
@@ -54,7 +53,7 @@ export class PersistentStemAskService implements StemAskService {
   }
 
   public async handleMessage(message: StemAskMessage): Promise<void> {
-    if (!this.isEnabled() || message.channelId !== this.dependencies.config.channelId) {
+    if (!this.isEnabled()) {
       return;
     }
 
@@ -161,7 +160,7 @@ export class PersistentStemAskService implements StemAskService {
   }
 
   private isEnabled(): boolean {
-    return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
+    return this.dependencies.config.enabled;
   }
 
   private async enqueue(work: () => Promise<void>): Promise<void> {

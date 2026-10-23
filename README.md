@@ -187,8 +187,10 @@ themes are Space, Biology, Chemistry, Technology and Physics.
 ### Mention-based STEM answers
 
 When `STEM_ASK_ENABLED=true`, members can mention STEMBot followed by a STEM
-question in `STEM_ASK_CHANNEL_ID`. STEMBot answers with the shared OpenAI model
-without storing the question text. Empty or oversized questions are ignored.
+question in any channel. STEMBot answers with the shared OpenAI model without
+storing the question text. Empty or oversized questions are ignored. A message
+that mentions STEMBot is excluded from counting, quiz, scramble and word-chain
+answer processing so the bot can answer it safely anywhere.
 The service allows one request per user every 30 seconds, ten requests per user
 per UTC day, and 100 requests across the bot per UTC day by default. Requests
 that reach a limit are ignored without calling OpenAI. The counters and recent
@@ -366,7 +368,6 @@ npm run validate
 | `STEM_WORD_CHAIN_CHANNEL_ID`                | When enabled        | Discord channel where the word chain runs.                                                   |
 | `STEM_WORD_CHAIN_RETRY_INTERVAL_MS`         | No                  | Retry interval when the word-chain prompt cannot be posted; defaults to 5 minutes.           |
 | `STEM_ASK_ENABLED`                          | No                  | Enable mention-based AI STEM answers; defaults to `false`.                                   |
-| `STEM_ASK_CHANNEL_ID`                       | When enabled        | Channel where members may mention STEMBot with questions.                                    |
 | `STEM_ASK_MAX_QUESTION_LENGTH`              | No                  | Maximum question length; defaults to 500 characters.                                         |
 | `STEM_ASK_USER_COOLDOWN_SECONDS`            | No                  | Minimum time between a user's questions; defaults to 30 seconds.                             |
 | `STEM_ASK_USER_DAILY_LIMIT`                 | No                  | Maximum questions per user per UTC day; defaults to `10`.                                    |

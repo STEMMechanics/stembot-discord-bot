@@ -154,7 +154,6 @@ const environmentSchema = z.object({
   STEM_WORD_CHAIN_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_CHAIN_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
-  STEM_ASK_CHANNEL_ID: optionalDiscordId,
   STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
   STEM_ASK_USER_COOLDOWN_SECONDS: positiveInteger(30, 86400),
   STEM_ASK_USER_DAILY_LIMIT: positiveInteger(10, 1000),
@@ -236,7 +235,6 @@ export interface AppConfig {
   };
   ask: {
     enabled: boolean;
-    channelId?: string;
     maxQuestionLength: number;
     userCooldownMs: number;
     userDailyLimit: number;
@@ -353,10 +351,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('STEM_WORD_CHAIN_CHANNEL_ID is required when STEM_WORD_CHAIN_ENABLED is true');
   }
 
-  if (values.STEM_ASK_ENABLED && !values.STEM_ASK_CHANNEL_ID) {
-    throw new Error('STEM_ASK_CHANNEL_ID is required when STEM_ASK_ENABLED is true');
-  }
-
   if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
   }
@@ -446,7 +440,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     ask: {
       enabled: values.STEM_ASK_ENABLED,
-      ...(values.STEM_ASK_CHANNEL_ID ? { channelId: values.STEM_ASK_CHANNEL_ID } : {}),
       maxQuestionLength: values.STEM_ASK_MAX_QUESTION_LENGTH,
       userCooldownMs: values.STEM_ASK_USER_COOLDOWN_SECONDS * 1000,
       userDailyLimit: values.STEM_ASK_USER_DAILY_LIMIT,

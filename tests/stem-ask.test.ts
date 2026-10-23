@@ -12,7 +12,6 @@ import type { JsonState, StateStore } from '../src/state/state-store.js';
 const logger = pino({ level: 'silent' });
 const config: StemAskConfig = {
   enabled: true,
-  channelId: 'ask-channel',
   maxQuestionLength: 100,
   userCooldownMs: 60_000,
   userDailyLimit: 2,
@@ -115,7 +114,7 @@ describe('STEM ask service', () => {
     expect(nextDay.reply).toHaveBeenCalledWith('Next day answer.');
   });
 
-  it('ignores bots, other channels, empty questions and oversized questions', async () => {
+  it('ignores bots, empty questions and oversized questions', async () => {
     const state = new MemoryStateStore();
     const answer = vi.fn<StemAskAnswerer['answer']>().mockResolvedValue('answer');
     const service = new PersistentStemAskService({
@@ -128,12 +127,34 @@ describe('STEM ask service', () => {
     await service.handleMessage(
       createMessage('bot-1', 'message-1', 'Question', { authorIsBot: true }),
     );
-    await service.handleMessage(
-      createMessage('user-1', 'message-2', 'Question', { channelId: 'other-channel' }),
-    );
     await service.handleMessage(createMessage('user-1', 'message-3', '   '));
     await service.handleMessage(createMessage('user-1', 'message-4', 'x'.repeat(101)));
 
     expect(answer).not.toHaveBeenCalled();
+  });
+
+  it('accepts mentions from any channel', async () => {
+    const state = new MemoryStateStore();
+    const answer = vi.fn<StemAskAnswerer['answer']>().mockResolvedValue('answer');
+    const service = new PersistentStemAskService({
+      config: {
+        enabled: config.enabled,
+        maxQuestionLength: config.maxQuestionLength,
+        userCooldownMs: config.userCooldownMs,
+        userDailyLimit: config.userDailyLimit,
+        globalDailyLimit: config.globalDailyLimit,
+      },
+      answerer: { answer },
+      state,
+      logger,
+    });
+
+    const message = createMessage('user-1', 'message-anywhere', 'What is gravity?', {
+      channelId: 'general-channel',
+    });
+    await service.handleMessage(message);
+
+    expect(answer).toHaveBeenCalledWith('What is gravity?');
+    expect(message.reply).toHaveBeenCalledWith('answer');
   });
 });

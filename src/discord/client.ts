@@ -276,7 +276,7 @@ export function createDiscordGateway(
         'Counting chain Discord message received',
       );
 
-      if (message.author.bot) {
+      if (message.author.bot || messageMentionsBot(message, client.user?.id)) {
         return;
       }
 
@@ -297,6 +297,9 @@ export function createDiscordGateway(
             );
             const candidates = new Map<string, CountingChainMessage>();
             for (const historyMessage of recentHistory) {
+              if (contentMentionsBot(historyMessage.content, client.user?.id)) {
+                continue;
+              }
               candidates.set(historyMessage.id, historyMessage);
             }
             candidates.set(message.id, toCountingChainMessage(message));
@@ -375,7 +378,7 @@ export function createDiscordGateway(
         return;
       }
 
-      if (message.author.bot) {
+      if (message.author.bot || messageMentionsBot(message, client.user?.id)) {
         return;
       }
 
@@ -403,7 +406,11 @@ export function createDiscordGateway(
 
   if (dependencies.scramble && config.scramble.enabled && config.scramble.channelId) {
     client.on(Events.MessageCreate, (message) => {
-      if (message.channelId !== config.scramble.channelId || message.author.bot) {
+      if (
+        message.channelId !== config.scramble.channelId ||
+        message.author.bot ||
+        messageMentionsBot(message, client.user?.id)
+      ) {
         return;
       }
 
@@ -431,7 +438,11 @@ export function createDiscordGateway(
 
   if (dependencies.wordChain && config.wordChain.enabled && config.wordChain.channelId) {
     client.on(Events.MessageCreate, (message) => {
-      if (message.channelId !== config.wordChain.channelId || message.author.bot) {
+      if (
+        message.channelId !== config.wordChain.channelId ||
+        message.author.bot ||
+        messageMentionsBot(message, client.user?.id)
+      ) {
         return;
       }
 
@@ -457,14 +468,9 @@ export function createDiscordGateway(
     });
   }
 
-  if (dependencies.ask && config.ask.enabled && config.ask.channelId) {
+  if (dependencies.ask && config.ask.enabled) {
     client.on(Events.MessageCreate, (message) => {
-      if (
-        message.channelId !== config.ask.channelId ||
-        message.author.bot ||
-        !client.user ||
-        !message.mentions.has(client.user)
-      ) {
+      if (message.author.bot || !client.user || !messageMentionsBot(message, client.user.id)) {
         return;
       }
 
@@ -753,6 +759,19 @@ function removeBotMentions(content: string, botUserId: string): string {
   return content.replace(new RegExp(`<@!?${botUserId}>`, 'g'), '').trim();
 }
 
+function messageMentionsBot(message: Message, botUserId: string | undefined): boolean {
+  return Boolean(
+    botUserId &&
+    (message.mentions.users.has(botUserId) || contentMentionsBot(message.content, botUserId)),
+  );
+}
+
+function contentMentionsBot(content: string, botUserId: string | undefined): boolean {
+  return Boolean(
+    botUserId && (content.includes(`<@${botUserId}>`) || content.includes(`<@!${botUserId}>`)),
+  );
+}
+
 function getCountingChainImageUrls(message: Message): string[] {
   return message.embeds.flatMap((embed) =>
     [embed.image?.url, embed.thumbnail?.url].filter(
@@ -818,7 +837,10 @@ async function fetchCountingChainHistory(
     before = oldestMessage.id;
   }
 
-  return messages.sort(compareMessagesNewestFirst).map(toCountingChainHistoryMessage);
+  return messages
+    .filter((message) => !messageMentionsBot(message, client.user?.id))
+    .sort(compareMessagesNewestFirst)
+    .map(toCountingChainHistoryMessage);
 }
 
 async function fetchCountingChainRecentHistory(
@@ -831,7 +853,10 @@ async function fetchCountingChainRecentHistory(
   }
 
   const messages = await channel.messages.fetch({ limit: 100 });
-  return [...messages.values()].sort(compareMessagesNewestFirst).map(toCountingChainHistoryMessage);
+  return [...messages.values()]
+    .filter((message) => !messageMentionsBot(message, client.user?.id))
+    .sort(compareMessagesNewestFirst)
+    .map(toCountingChainHistoryMessage);
 }
 
 async function requestCountingChainReviewFromDiscord(
