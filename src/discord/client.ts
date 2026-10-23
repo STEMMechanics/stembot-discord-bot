@@ -84,29 +84,34 @@ export function createDiscordGateway(
   configureNetworkDefaults();
 
   const intents = [GatewayIntentBits.Guilds];
+  const askMessageTrackingEnabled = Boolean(config.ask.enabled && dependencies.ask);
   const messageTrackingEnabled =
     (config.countingChain.enabled && dependencies.countingChain) ||
     (config.quiz.enabled && dependencies.quiz) ||
     (config.scramble.enabled && dependencies.scramble) ||
     (config.wordChain.enabled && dependencies.wordChain) ||
-    (config.ask.enabled && dependencies.ask) ||
+    askMessageTrackingEnabled ||
     (config.levels.enabled && dependencies.userLevels);
   const reactionTrackingEnabled =
     (config.countingChain.enabled && config.countingChain.reviewEnabled) || config.levels.enabled;
   if (messageTrackingEnabled) {
     intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
   }
+  if (askMessageTrackingEnabled) {
+    intents.push(GatewayIntentBits.DirectMessages);
+  }
   if (reactionTrackingEnabled) {
     intents.push(GatewayIntentBits.GuildMessageReactions);
   }
 
+  const partials = reactionTrackingEnabled
+    ? [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User]
+    : askMessageTrackingEnabled
+      ? [Partials.Channel]
+      : undefined;
   const clientOptions = {
     intents,
-    ...(reactionTrackingEnabled
-      ? {
-          partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
-        }
-      : {}),
+    ...(partials ? { partials } : {}),
   };
   const client = new Client(clientOptions);
   let countingChainEventQueue: Promise<void> = Promise.resolve();
