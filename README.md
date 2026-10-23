@@ -135,10 +135,14 @@ message receives `⚠️` and no attempt is counted, so the member can try again
 Generated questions are checked for accurate terminology and matching units.
 Minecraft questions distinguish blocks, metres, seconds, game ticks and
 redstone ticks; the generator is instructed to avoid uncertain or ambiguous
-questions in favour of a clearer question.
+questions in favour of a clearer question. STEMBot persists the last 20
+questions and answers, supplies them to the generator as exclusions, and
+regenerates an exact duplicate before it is posted. Near-equivalent questions
+are also discouraged by the generation prompt.
 
-The active question, wrong-attempt count, scores, question sequence and recent
-message IDs are persisted in the shared JSON state file. A restart keeps an
+The active question, wrong-attempt count, scores, question sequence, recent
+question history and recent message IDs are persisted in the shared JSON state
+file. A restart keeps an
 active question instead of generating a replacement. Question generation and
 natural-language answer checking use the existing `OPENAI_API_KEY`,
 `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT` and `OPENAI_TIMEOUT` settings. The

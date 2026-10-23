@@ -4,6 +4,8 @@ import type {
   StemQuizAnswerResult,
   StemQuizEngine,
   StemQuizQuestion,
+  StemQuizQuestionHistory,
+  StemQuizQuestionOptions,
 } from '../integrations/openai-quiz.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
@@ -53,6 +55,7 @@ interface StemQuizState {
   question: StemQuizQuestionState | null;
   scores: Record<string, number>;
   processedMessageIds: string[];
+  recentQuestions: StemQuizQuestionHistory[];
 }
 
 interface StemQuizServiceDependencies {
@@ -72,6 +75,8 @@ const WRONG_REACTION = '❌';
 const UNCLEAR_REACTION = '🤔';
 const EVALUATION_FAILURE_REACTION = '⚠️';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
+const MAX_RECENT_QUESTIONS = 20;
+const MAX_QUESTION_GENERATION_ATTEMPTS = 3;
 
 export class PersistentStemQuizService implements StemQuizService {
   private readonly currentTime: () => Date;
@@ -268,13 +273,18 @@ export class PersistentStemQuizService implements StemQuizService {
     leadIn?: string,
   ): Promise<void> {
     const olderPlayerChallenge = this.random() < this.dependencies.config.olderPlayerRate;
-    const question = await this.dependencies.engine.generateQuestion({
+    const questionOptions: StemQuizQuestionOptions = {
       topic: this.dependencies.config.topic,
       targetAgeMin: this.dependencies.config.targetAgeMin,
       targetAgeMax: this.dependencies.config.targetAgeMax,
       olderAgeMax: this.dependencies.config.olderAgeMax,
       olderPlayerChallenge,
-    });
+      ...(state.recentQuestions.length > 0 ? { avoidQuestions: state.recentQuestions } : {}),
+    };
+    const question = await this.generateQuestionAvoidingDuplicates(
+      questionOptions,
+      state.recentQuestions,
+    );
     const questionNumber = state.nextQuestionNumber;
     const questionId = this.idFactory();
     const messageId = await this.dependencies.publisher.send(
@@ -290,6 +300,7 @@ export class PersistentStemQuizService implements StemQuizService {
       wrongAttempts: 0,
       askedAt: now,
     };
+    state.recentQuestions = rememberQuestion(state.recentQuestions, question);
     state.nextQuestionNumber += 1;
     writeStemQuizState(rootState, state);
     await this.dependencies.state.save(rootState);
@@ -301,6 +312,31 @@ export class PersistentStemQuizService implements StemQuizService {
         olderPlayerChallenge,
       },
       'STEM quiz question posted',
+    );
+  }
+
+  private async generateQuestionAvoidingDuplicates(
+    options: StemQuizQuestionOptions,
+    recentQuestions: readonly StemQuizQuestionHistory[],
+  ): Promise<StemQuizQuestion> {
+    for (let attempt = 1; attempt <= MAX_QUESTION_GENERATION_ATTEMPTS; attempt += 1) {
+      const question = await this.dependencies.engine.generateQuestion(options);
+      if (!isDuplicateQuestion(question, recentQuestions)) {
+        return question;
+      }
+
+      this.dependencies.logger.warn(
+        {
+          attempt,
+          maxAttempts: MAX_QUESTION_GENERATION_ATTEMPTS,
+          questionPrompt: question.prompt,
+        },
+        'STEM quiz generated a recent question again; requesting a replacement',
+      );
+    }
+
+    throw new Error(
+      `STEM quiz generated a duplicate question ${MAX_QUESTION_GENERATION_ATTEMPTS} times`,
     );
   }
 
@@ -361,6 +397,13 @@ function readStemQuizState(value: unknown): StemQuizState {
         .filter((id): id is string => typeof id === 'string')
         .slice(-MAX_PROCESSED_MESSAGE_IDS)
     : [];
+  let recentQuestions = readRecentQuestions(value.recentQuestions);
+  if (question && !isDuplicateQuestion(question, recentQuestions)) {
+    recentQuestions = [
+      ...recentQuestions,
+      { prompt: question.prompt, answer: question.answer },
+    ].slice(-MAX_RECENT_QUESTIONS);
+  }
   const nextQuestionNumber =
     typeof value.nextQuestionNumber === 'number' &&
     Number.isInteger(value.nextQuestionNumber) &&
@@ -374,7 +417,32 @@ function readStemQuizState(value: unknown): StemQuizState {
     question,
     scores,
     processedMessageIds,
+    recentQuestions,
   };
+}
+
+function readRecentQuestions(value: unknown): StemQuizQuestionHistory[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isQuestionHistory)
+    .map((recentQuestion) => ({
+      prompt: recentQuestion.prompt,
+      answer: recentQuestion.answer,
+    }))
+    .slice(-MAX_RECENT_QUESTIONS);
+}
+
+function isQuestionHistory(value: unknown): value is StemQuizQuestionHistory {
+  return (
+    isRecord(value) &&
+    typeof value.prompt === 'string' &&
+    value.prompt.trim().length > 0 &&
+    typeof value.answer === 'string' &&
+    value.answer.trim().length > 0
+  );
 }
 
 function readQuestionState(value: unknown): StemQuizQuestionState | null {
@@ -419,6 +487,7 @@ function createInitialState(): StemQuizState {
     question: null,
     scores: {},
     processedMessageIds: [],
+    recentQuestions: [],
   };
 }
 
@@ -429,6 +498,25 @@ function writeStemQuizState(rootState: JsonState, state: StemQuizState): void {
 function rememberMessageId(messageIds: readonly string[], messageId: string): string[] {
   return [...messageIds.filter((id) => id !== messageId), messageId].slice(
     -MAX_PROCESSED_MESSAGE_IDS,
+  );
+}
+
+function rememberQuestion(
+  questions: readonly StemQuizQuestionHistory[],
+  question: StemQuizQuestion,
+): StemQuizQuestionHistory[] {
+  return [...questions, { prompt: question.prompt, answer: question.answer }].slice(
+    -MAX_RECENT_QUESTIONS,
+  );
+}
+
+function isDuplicateQuestion(
+  question: StemQuizQuestion,
+  recentQuestions: readonly StemQuizQuestionHistory[],
+): boolean {
+  const normalizedPrompt = normalizeQuizText(question.prompt);
+  return recentQuestions.some(
+    (recentQuestion) => normalizeQuizText(recentQuestion.prompt) === normalizedPrompt,
   );
 }
 

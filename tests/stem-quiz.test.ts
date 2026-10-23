@@ -159,10 +159,53 @@ describe('STEM quiz service', () => {
     });
   });
 
+  it('passes recent questions to the generator and regenerates an exact duplicate', async () => {
+    const state = new MemoryStateStore();
+    const generateQuestion = vi
+      .fn<StemQuizEngine['generateQuestion']>()
+      .mockResolvedValueOnce(question('water'))
+      .mockResolvedValueOnce(question('water'))
+      .mockResolvedValueOnce(question('gravity'));
+    const engine: StemQuizEngine = {
+      generateQuestion,
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('question-message-1')
+        .mockResolvedValueOnce('question-message-2'),
+    };
+    const service = createService(state, engine, publisher);
+
+    await service.initialize();
+    await service.handleMessage(createMessage('user-1', 'answer-1', 'water'));
+
+    expect(generateQuestion).toHaveBeenCalledTimes(3);
+    expect(generateQuestion.mock.calls[1]?.[0]).toMatchObject({
+      avoidQuestions: [{ prompt: 'What is the answer water?', answer: 'water' }],
+    });
+    expect(generateQuestion.mock.calls[2]?.[0]).toMatchObject({
+      avoidQuestions: [{ prompt: 'What is the answer water?', answer: 'water' }],
+    });
+    expect(state.state).toMatchObject({
+      stemQuiz: {
+        question: { answer: 'gravity' },
+        recentQuestions: [
+          { prompt: 'What is the answer water?', answer: 'water' },
+          { prompt: 'What is the answer gravity?', answer: 'gravity' },
+        ],
+      },
+    });
+  });
+
   it('uses AI evaluation for a natural-language answer and awards only once', async () => {
     const state = new MemoryStateStore();
     const engine: StemQuizEngine = {
-      generateQuestion: vi.fn().mockResolvedValue(question('observer')),
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(question('observer'))
+        .mockResolvedValueOnce(question('gravity')),
       evaluateAnswer: vi.fn().mockResolvedValue('correct'),
     };
     const publisher = { send: vi.fn().mockResolvedValue('question-message-1') };

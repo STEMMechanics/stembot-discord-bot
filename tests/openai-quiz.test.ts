@@ -47,6 +47,7 @@ describe('OpenAI STEM quiz engine', () => {
         targetAgeMax: 14,
         olderAgeMax: 18,
         olderPlayerChallenge: false,
+        avoidQuestions: [question],
       }),
     ).resolves.toEqual({
       prompt: 'Which force pulls objects towards Earth?',
@@ -71,6 +72,10 @@ describe('OpenAI STEM quiz engine', () => {
     expect(body.input[0]?.content[0]?.text).toContain('aged 8-14');
     expect(body.input[0]?.content[0]?.text).toContain('redstone ticks');
     expect(body.input[0]?.content[0]?.text).toContain('metres');
+    expect(body.input[0]?.content[0]?.text).toContain('Do not repeat any listed question');
+    expect(body.input[0]?.content[0]?.text).toContain(
+      '<recent-question-history>\nQuestion 1: What force pulls objects towards Earth?\nAnswer: gravity',
+    );
   });
 
   it('evaluates a member answer with a structured result', async () => {
