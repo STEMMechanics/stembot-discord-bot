@@ -105,7 +105,7 @@ describe('loadConfig', () => {
         enabled: false,
         host: '0.0.0.0',
         port: 8080,
-        path: '/minecraft/chat',
+        path: '/minecraft/event',
         maxBodyBytes: 65536,
       },
       levels: {
@@ -134,6 +134,18 @@ describe('loadConfig', () => {
       shutdownTimeoutMs: 30000,
       statePath: './data/state.json',
     });
+  });
+
+  it('normalises a trailing slash on the Minecraft event path', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      NODE_ENV: 'test',
+      CHAT_DISCORD_BRIDGE_PATH: '/minecraft/event/',
+    });
+
+    expect(config.chatDiscordBridge.path).toBe('/minecraft/event');
   });
 
   it('rejects missing credentials', () => {
