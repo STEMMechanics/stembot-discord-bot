@@ -99,6 +99,165 @@ describe('Minecraft chat Discord bridge', () => {
     );
   });
 
+  it('publishes structured Minecraft events as embeds with mentions disabled', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const publisher: ChatDiscordBridgePublisher = { send };
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43129),
+      publisher,
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const cases = [
+      {
+        event: 'minecraft.player_join',
+        payload: {
+          player: { name: 'Alex', uuid: 'player-1' },
+          data: { online_players: 12 },
+        },
+        title: 'Player joined',
+        description: '**Alex** joined the server.',
+        fields: [['Online players', '12']],
+      },
+      {
+        event: 'minecraft.player_quit',
+        payload: {
+          player: { name: 'Alex', uuid: 'player-1' },
+          data: { online_players: 11 },
+        },
+        title: 'Player left',
+        description: '**Alex** left the server.',
+        fields: [['Online players', '11']],
+      },
+      {
+        event: 'minecraft.player_death',
+        payload: {
+          player: { name: 'Alex', uuid: 'player-1' },
+          data: { killer: null, cause: 'fall', world: 'survival' },
+        },
+        title: 'Player death',
+        description: '**Alex** died.',
+        fields: [
+          ['Killer', 'Unknown'],
+          ['Cause', 'fall'],
+          ['World', 'survival'],
+        ],
+      },
+      {
+        event: 'minecraft.server_start',
+        payload: { data: {} },
+        title: 'Server started',
+        description: 'STEMCraft is online.',
+        fields: [],
+      },
+      {
+        event: 'minecraft.server_stop',
+        payload: { data: {} },
+        title: 'Server stopping',
+        description: 'STEMCraft is shutting down.',
+        fields: [],
+      },
+      {
+        event: 'minecraft.minigame_start',
+        payload: {
+          data: {
+            minigame: 'bedwars',
+            arena: { id: 'forest', name: 'Forest', world: 'bedwars_forest' },
+            status: 'running',
+            players: [{ name: 'Alex', uuid: 'player-1' }],
+            spectators: [],
+            teams: [],
+          },
+        },
+        title: 'Bedwars started',
+        description: 'A Bedwars match has started.',
+        fields: [
+          ['Arena', 'Forest'],
+          ['Status', 'running'],
+          ['Players', '1'],
+          ['Spectators', '0'],
+        ],
+      },
+      {
+        event: 'minecraft.minigame_end',
+        payload: {
+          data: {
+            minigame: 'bedwars',
+            arena: { id: 'forest', name: 'Forest', world: 'bedwars_forest' },
+            status: 'ending',
+            players: [{ name: 'Alex', uuid: 'player-1' }],
+            spectators: [],
+            teams: [],
+            winner: null,
+            winner_team: 'red',
+            winner_players: [{ name: 'Alex', uuid: 'player-1' }],
+          },
+        },
+        title: 'Bedwars ended',
+        description: 'A Bedwars match has ended.',
+        fields: [
+          ['Arena', 'Forest'],
+          ['Status', 'ending'],
+          ['Players', '1'],
+          ['Spectators', '0'],
+          ['Winner', 'red'],
+          ['Winning players', '1'],
+        ],
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const response = await request(
+        JSON.stringify({
+          event: testCase.event,
+          event_id: `structured-event-${index}`,
+          occurred_at: '2026-10-24T01:02:03Z',
+          server: 'survival',
+          channel: 'global',
+          ...testCase.payload,
+        }),
+        undefined,
+        43129,
+      );
+
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({ accepted: true, duplicate: false });
+
+      const call = send.mock.calls[index];
+      expect(call?.[0]).toBe('discord-channel');
+      const message = call?.[1];
+      if (!message || typeof message === 'string') {
+        throw new Error('Expected a structured Discord embed message');
+      }
+
+      const embed = message.embeds[0];
+      expect(embed).toMatchObject({
+        title: testCase.title,
+        description: testCase.description,
+        footer: { text: 'STEMCraft • survival' },
+        timestamp: '2026-10-24T01:02:03.000Z',
+      });
+      expect(message.allowedMentions).toEqual({ parse: [] });
+      const expectedFields = testCase.fields;
+      if (expectedFields.length === 0) {
+        expect(embed.fields ?? []).toHaveLength(0);
+      } else {
+        expect(embed.fields).toEqual(
+          expect.arrayContaining(
+            expectedFields.map(([name, value]) => expect.objectContaining({ name, value })),
+          ),
+        );
+      }
+    }
+
+    expect(send).toHaveBeenCalledTimes(cases.length);
+  });
+
   it('rejects missing or invalid bearer tokens before reading the event', async () => {
     const state = new MemoryStateStore();
     const publisher: ChatDiscordBridgePublisher = { send: vi.fn() };

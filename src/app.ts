@@ -359,17 +359,19 @@ export function createApplication(
       ? createChatDiscordBridge({
           config: config.chatDiscordBridge,
           publisher: {
-            send: (channelId, content) => {
+            send: (channelId, message) => {
               if (!discordGatewayRef.current) {
                 return Promise.reject(
                   new Error('Discord gateway is not ready for the Minecraft chat bridge'),
                 );
               }
 
-              return discordGatewayRef.current.sendChannelMessage(channelId, {
-                content,
-                allowedMentions: { parse: [] },
-              });
+              return discordGatewayRef.current.sendChannelMessage(
+                channelId,
+                typeof message === 'string'
+                  ? { content: message, allowedMentions: { parse: [] } }
+                  : message,
+              );
             },
           },
           state,

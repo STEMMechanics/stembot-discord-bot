@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
+import type { APIEmbed, MessageMentionOptions } from 'discord.js';
 import { z } from 'zod';
 
 import type { AppLogger } from '../logging/logger.js';
@@ -16,8 +17,13 @@ export interface ChatDiscordBridgeConfig {
   maxBodyBytes: number;
 }
 
+export interface ChatDiscordBridgeMessage {
+  embeds: APIEmbed[];
+  allowedMentions: MessageMentionOptions;
+}
+
 export interface ChatDiscordBridgePublisher {
-  send(channelId: string, content: string): Promise<string>;
+  send(channelId: string, message: string | ChatDiscordBridgeMessage): Promise<string>;
 }
 
 export interface ChatDiscordBridge {
@@ -33,15 +39,68 @@ interface ChatDiscordBridgeDependencies {
   serverFactory?: typeof createServer;
 }
 
-interface MinecraftChatEvent {
-  event: 'minecraft.chat';
-  event_id: string;
-  player: {
-    name: string;
-    uuid?: string | undefined;
-  };
-  message: string;
-}
+const minecraftPlayerSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  uuid: z.string().trim().max(100).optional(),
+});
+const minecraftEventBase = {
+  event_id: z.string().trim().min(1).max(200),
+  occurred_at: z.string().trim().max(100).optional(),
+  server: z.string().trim().max(100).optional(),
+  channel: z.string().trim().max(100).optional(),
+};
+const minecraftEventDataSchema = z.record(z.string(), z.unknown());
+
+const minecraftEventSchema = z.discriminatedUnion('event', [
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.chat'),
+    player: minecraftPlayerSchema,
+    message: z.string().trim().min(1).max(1800),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_join'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_quit'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_death'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.server_start'),
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.server_stop'),
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.minigame_start'),
+    data: minecraftEventDataSchema,
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.minigame_end'),
+    data: minecraftEventDataSchema,
+  }),
+]);
+
+type MinecraftEvent = z.infer<typeof minecraftEventSchema>;
+type MinecraftChatEvent = Extract<MinecraftEvent, { event: 'minecraft.chat' }>;
+type MinecraftStructuredEvent = Exclude<MinecraftEvent, MinecraftChatEvent>;
 
 interface ChatDiscordBridgeState {
   version: 1;
@@ -49,17 +108,6 @@ interface ChatDiscordBridgeState {
 }
 
 const MAX_PROCESSED_EVENT_IDS = 1000;
-const minecraftChatEventSchema = z.object({
-  event: z.literal('minecraft.chat'),
-  event_id: z.string().trim().min(1).max(200),
-  occurred_at: z.string().trim().max(100).optional(),
-  player: z.object({
-    name: z.string().trim().min(1).max(80),
-    uuid: z.string().trim().max(100).optional(),
-  }),
-  message: z.string().trim().min(1).max(1800),
-});
-
 export class HttpChatDiscordBridge implements ChatDiscordBridge {
   private readonly serverFactory: typeof createServer;
   private server: Server | undefined;
@@ -94,7 +142,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
             path: this.dependencies.config.path,
             channelId: this.dependencies.config.channelId,
           },
-          'Minecraft chat Discord bridge listening',
+          'Minecraft Discord bridge listening',
         );
         resolve();
       };
@@ -115,7 +163,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
-    this.dependencies.logger.info('Minecraft chat Discord bridge stopped');
+    this.dependencies.logger.info('Minecraft Discord bridge stopped');
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -144,7 +192,9 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
       !contentType.toLocaleLowerCase().startsWith('application/json')
     ) {
       request.resume();
-      writeJson(response, 415, { error: 'content_type_must_be_application_json' });
+      writeJson(response, 415, {
+        error: 'content_type_must_be_application_json',
+      });
       return;
     }
 
@@ -170,9 +220,9 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
       return;
     }
 
-    const result = minecraftChatEventSchema.safeParse(parsed);
+    const result = minecraftEventSchema.safeParse(parsed);
     if (!result.success) {
-      writeJson(response, 400, { error: 'invalid_minecraft_chat_event' });
+      writeJson(response, 400, { error: 'invalid_minecraft_event' });
       return;
     }
 
@@ -188,41 +238,55 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     } catch (error: unknown) {
       this.dependencies.logger.error(
         { err: error },
-        'Minecraft chat bridge could not publish event',
+        'Minecraft event bridge could not publish event',
       );
       writeJson(response, 502, { error: 'discord_publish_failed' });
     }
   }
 
-  private async publishEvent(event: MinecraftChatEvent): Promise<boolean> {
+  private async publishEvent(event: MinecraftEvent): Promise<boolean> {
     const rootState = await this.dependencies.state.load();
     const state = readBridgeState(rootState.chatDiscordBridge);
     if (state.processedEventIds.includes(event.event_id)) {
       this.dependencies.logger.info(
         { eventId: event.event_id },
-        'Duplicate Minecraft chat event ignored',
+        'Duplicate Minecraft event ignored',
       );
       return true;
     }
 
+    const message =
+      event.event === 'minecraft.chat'
+        ? `⛏️ **${event.player.name}**: ${event.message}`
+        : {
+            embeds: [buildMinecraftEventEmbed(event)],
+            allowedMentions: { parse: [] },
+          };
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
-      `⛏️ **${event.player.name}**: ${event.message}`,
+      message,
     );
     state.processedEventIds = [...state.processedEventIds, event.event_id].slice(
       -MAX_PROCESSED_EVENT_IDS,
     );
     rootState.chatDiscordBridge = state;
     await this.dependencies.state.save(rootState);
-    this.dependencies.logger.info(
-      {
-        eventId: event.event_id,
-        messageId,
-        player: event.player.name,
-        messageLength: event.message.length,
-      },
-      'Minecraft chat event published to Discord',
-    );
+    if (event.event === 'minecraft.chat') {
+      this.dependencies.logger.info(
+        {
+          eventId: event.event_id,
+          messageId,
+          player: event.player.name,
+          messageLength: event.message.length,
+        },
+        'Minecraft chat event published to Discord',
+      );
+    } else {
+      this.dependencies.logger.info(
+        { eventId: event.event_id, eventType: event.event, messageId },
+        'Minecraft event embed published to Discord',
+      );
+    }
     return false;
   }
 
@@ -234,6 +298,132 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     );
     return next;
   }
+}
+
+function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
+  const data: Record<string, unknown> = event.data ?? {};
+  const fields: NonNullable<APIEmbed['fields']> = [];
+  let title: string;
+  let description: string;
+  let color: number;
+
+  switch (event.event) {
+    case 'minecraft.player_join':
+      title = 'Player joined';
+      description = `**${event.player.name}** joined the server.`;
+      color = 0x2ecc71;
+      addEmbedField(fields, 'Online players', data.online_players);
+      break;
+    case 'minecraft.player_quit':
+      title = 'Player left';
+      description = `**${event.player.name}** left the server.`;
+      color = 0x95a5a6;
+      addEmbedField(fields, 'Online players', data.online_players);
+      break;
+    case 'minecraft.player_death':
+      title = 'Player death';
+      description = `**${event.player.name}** died.`;
+      color = 0xe74c3c;
+      addEmbedField(fields, 'Killer', data.killer ?? 'Unknown');
+      addEmbedField(fields, 'Cause', data.cause);
+      addEmbedField(fields, 'World', data.world);
+      break;
+    case 'minecraft.server_start':
+      title = 'Server started';
+      description = 'STEMCraft is online.';
+      color = 0x2ecc71;
+      break;
+    case 'minecraft.server_stop':
+      title = 'Server stopping';
+      description = 'STEMCraft is shutting down.';
+      color = 0xe67e22;
+      break;
+    case 'minecraft.minigame_start':
+    case 'minecraft.minigame_end': {
+      const minigame = humanize(data.minigame) || 'Minigame';
+      const started = event.event === 'minecraft.minigame_start';
+      title = `${minigame} ${started ? 'started' : 'ended'}`;
+      description = started ? `A ${minigame} match has started.` : `A ${minigame} match has ended.`;
+      color = started ? 0x2ecc71 : 0x5865f2;
+      const arena = isRecord(data.arena)
+        ? firstText(data.arena.name, data.arena.id)
+        : asText(data.arena);
+      addEmbedField(fields, 'Arena', arena);
+      addEmbedField(fields, 'Status', data.status);
+      addEmbedField(fields, 'Players', arrayLength(data.players));
+      addEmbedField(fields, 'Spectators', arrayLength(data.spectators));
+      addEmbedField(fields, 'Winner', firstText(data.winner, data.winner_team));
+      if (Array.isArray(data.winner_players) && data.winner_players.length > 0) {
+        addEmbedField(fields, 'Winning players', data.winner_players.length);
+      }
+      break;
+    }
+    default:
+      return assertNever(event);
+  }
+
+  const server = asText('server' in event ? event.server : undefined) || 'STEMCraft';
+  const occurredAt = asText('occurred_at' in event ? event.occurred_at : undefined);
+  const timestamp =
+    occurredAt && Number.isFinite(Date.parse(occurredAt))
+      ? new Date(occurredAt).toISOString()
+      : undefined;
+
+  return {
+    title,
+    description,
+    color,
+    footer: { text: `STEMCraft • ${server}` },
+    ...(timestamp ? { timestamp } : {}),
+    ...(fields.length > 0 ? { fields } : {}),
+  };
+}
+
+function addEmbedField(
+  fields: NonNullable<APIEmbed['fields']>,
+  name: string,
+  value: unknown,
+): void {
+  const text = asText(value);
+  if (!text) return;
+  fields.push({ name, value: text.slice(0, 1024), inline: true });
+}
+
+function asText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return String(value);
+  return undefined;
+}
+
+function firstText(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asText(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function humanize(value: unknown): string | undefined {
+  const text = asText(value);
+  if (!text) return undefined;
+  return text
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toLocaleUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function arrayLength(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled Minecraft event: ${JSON.stringify(value)}`);
 }
 
 export function createChatDiscordBridge(
