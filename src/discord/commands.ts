@@ -835,10 +835,19 @@ async function fetchDiscordAvatarDataUri(url: string): Promise<string | undefine
 }
 
 export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
-  const isOperational = status.overall === 'up';
-  const dot = isOperational ? '🟢' : '🔴';
+  const hasOfflineMonitor = status.monitors.some((monitor) => monitor.state === 'down');
+  const hasSoftIssue = status.monitors.some(
+    (monitor) => monitor.state === 'pending' || monitor.state === 'maintenance',
+  );
+  const isUnavailable =
+    Boolean(status.sourceError) ||
+    hasOfflineMonitor ||
+    (!hasSoftIssue && status.overall === 'down');
+  const isOperational = !isUnavailable && !hasSoftIssue && status.overall === 'up';
+  const isDegraded = !isUnavailable && !isOperational;
+  const dot = isOperational ? '🟢' : isDegraded ? '🟠' : '🔴';
   const serviceLines = status.monitors.map((monitor) => {
-    const monitorDot = monitor.state === 'up' ? '🟢' : '🔴';
+    const monitorDot = monitor.state === 'up' ? '🟢' : monitor.state === 'down' ? '🔴' : '🟠';
     const message = monitor.message ? ` · ${escapeEmbedText(monitor.message)}` : '';
     return `${monitorDot} **${escapeEmbedText(monitor.name)}** — ${formatMonitorState(monitor.state)}${message}`;
   });
@@ -851,12 +860,12 @@ export function buildUptimeStatusEmbed(status: UptimeKumaStatus): APIEmbed {
     ? `**Monitoring unavailable.** ${status.sourceError}`
     : isOperational
       ? 'All monitored services are online.'
-      : 'One or more monitored services require attention.';
+      : 'One or more monitored services are interrupted or under maintenance.';
 
   return {
     title: `${dot} ${status.title}`,
     url: status.statusPageUrl,
-    color: isOperational ? 0x2ecc71 : 0xe74c3c,
+    color: isOperational ? 0x2ecc71 : isDegraded ? 0xf39c12 : 0xe74c3c,
     description,
     fields: [
       {

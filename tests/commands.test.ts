@@ -292,6 +292,23 @@ describe('Discord commands', () => {
     expect(embed.fields?.[0]?.value).not.toContain('24h');
   });
 
+  it('uses a softer orange card when a monitor is pending or under maintenance', () => {
+    const embed = buildUptimeStatusEmbed({
+      overall: 'down',
+      title: 'STEMMechanics Status',
+      statusPageUrl: 'https://uptime.example.test/status/stem',
+      checkedAt: new Date('2026-10-23T00:00:00.000Z'),
+      monitors: [{ id: '1', name: 'Website', state: 'pending' }],
+    });
+
+    expect(embed.title).toBe('🟠 STEMMechanics Status');
+    expect(embed.color).toBe(0xf39c12);
+    expect(embed.description).toBe(
+      'One or more monitored services are interrupted or under maintenance.',
+    );
+    expect(embed.fields?.[0]?.value).toContain('🟠 **Website** — Pending');
+  });
+
   it('lets members with Manage Messages reset the scramble', async () => {
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
