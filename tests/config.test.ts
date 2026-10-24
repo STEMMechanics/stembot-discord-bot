@@ -116,6 +116,11 @@ describe('loadConfig', () => {
         messageCooldownMs: 60000,
         reactionCooldownMs: 30000,
       },
+      cakeDays: {
+        enabled: false,
+        checkIntervalMs: 60000,
+        hour: 8,
+      },
       workshops: {
         announcementsEnabled: true,
         announcementWindowMs: 2419200000,
@@ -176,6 +181,34 @@ describe('loadConfig', () => {
       reminderChannelId: '223456789012345678',
     });
     expect(config.stemcraft.token).toBe('status-token');
+  });
+
+  it('parses cake-day settings and requires an announcement channel when enabled', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      STEM_CAKE_DAYS_ENABLED: 'true',
+      STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID: '3234567890',
+      STEM_CAKE_DAYS_CHECK_INTERVAL_MS: '120000',
+      STEM_CAKE_DAYS_HOUR: '9',
+    });
+
+    expect(config.cakeDays).toEqual({
+      enabled: true,
+      announcementChannelId: '3234567890',
+      checkIntervalMs: 120000,
+      hour: 9,
+    });
+
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEM_CAKE_DAYS_ENABLED: 'true',
+      }),
+    ).toThrow(/STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID/);
   });
 
   it('requires the public status page and Discord channel when uptime status is enabled', () => {

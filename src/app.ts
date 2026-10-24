@@ -1,4 +1,5 @@
 import type { AppConfig } from './config/env.js';
+import { buildCakeDayCard } from './discord/cake-day-card.js';
 import {
   createDiscordGateway,
   type DiscordChannelMessage,
@@ -28,6 +29,11 @@ import {
   createCountingChainService,
   type CountingChainService,
 } from './services/counting-chain.js';
+import {
+  createCakeDayService,
+  type CakeDayAnnouncement,
+  type CakeDayService,
+} from './services/cake-days.js';
 import { createStemAskService, type StemAskService } from './services/stem-ask.js';
 import {
   createWorkshopNotificationService,
@@ -37,7 +43,11 @@ import { createStemScrambleService, type StemScrambleService } from './services/
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
 import { createStemWordChainService, type StemWordChainService } from './services/word-chain.js';
 import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
-import { createChatDiscordBridge, type ChatDiscordBridge } from './http/chat-discord-bridge.js';
+import {
+  createChatDiscordBridge,
+  type ChatDiscordBridge,
+  type ChatDiscordBridgeMessage,
+} from './http/chat-discord-bridge.js';
 import { createStemCodeFixService, type StemCodeFixService } from './services/code-fix.js';
 import { createStemWordRevealService, type StemWordRevealService } from './services/word-reveal.js';
 import {
@@ -71,6 +81,7 @@ export interface ApplicationDependencies {
   ask?: StemAskService;
   chatDiscordBridge?: ChatDiscordBridge;
   userLevels?: UserLevelService;
+  cakeDays?: CakeDayService;
   workshopNotifications: WorkshopNotificationService;
 }
 
@@ -353,23 +364,64 @@ export function createApplication(
       ...(uptime ? { uptime } : {}),
     });
   discordGatewayRef.current = discord;
+  const cakeDayAnnouncementChannelId = config.cakeDays.announcementChannelId;
+  const cakeDays =
+    dependencies?.cakeDays ??
+    (config.cakeDays.enabled && cakeDayAnnouncementChannelId
+      ? createCakeDayService({
+          config: config.cakeDays,
+          timeZone: config.workshops.timeZone,
+          state,
+          logger,
+          memberProvider: {
+            getMembers: async () => {
+              if (!discordGatewayRef.current) {
+                throw new Error('Discord gateway is not ready for cake-day checks');
+              }
+
+              return discordGatewayRef.current.getGuildMembers();
+            },
+          },
+          publisher: {
+            send: async (announcement: CakeDayAnnouncement): Promise<void> => {
+              if (!discordGatewayRef.current) {
+                throw new Error('Discord gateway is not ready for cake-day announcements');
+              }
+
+              const card = await buildCakeDayCard(announcement);
+              await discordGatewayRef.current.sendChannelMessage(announcement.channelId, {
+                content: announcement.content,
+                files: [{ attachment: card, name: 'stembot-cake-day.png' }],
+                ...(announcement.allowedUserIds.length > 0
+                  ? { allowedMentions: { users: [...announcement.allowedUserIds] } }
+                  : {}),
+              });
+            },
+          },
+        })
+      : undefined);
   const chatDiscordBridge =
     dependencies?.chatDiscordBridge ??
     (config.chatDiscordBridge.enabled
       ? createChatDiscordBridge({
           config: config.chatDiscordBridge,
           publisher: {
-            send: (channelId, content) => {
+            send: (channelId, message: string | ChatDiscordBridgeMessage) => {
               if (!discordGatewayRef.current) {
                 return Promise.reject(
                   new Error('Discord gateway is not ready for the Minecraft chat bridge'),
                 );
               }
 
-              return discordGatewayRef.current.sendChannelMessage(channelId, {
-                content,
-                allowedMentions: { parse: [] },
-              });
+              const discordMessage: DiscordChannelMessage =
+                typeof message === 'string'
+                  ? { content: message, allowedMentions: { parse: [] } }
+                  : {
+                      content: message.content,
+                      ...(message.embeds ? { embeds: message.embeds } : {}),
+                      allowedMentions: { parse: [] },
+                    };
+              return discordGatewayRef.current.sendChannelMessage(channelId, discordMessage);
             },
           },
           state,
@@ -406,6 +458,14 @@ export function createApplication(
     intervalMs: config.workshops.pollIntervalMs,
     run: () => workshopNotifications.synchronizeWorkshops(),
   });
+
+  if (cakeDays && config.cakeDays.enabled) {
+    scheduler.register({
+      name: 'cake-day-announcements',
+      intervalMs: config.cakeDays.checkIntervalMs,
+      run: () => cakeDays.check(),
+    });
+  }
 
   if (quiz && config.quiz.enabled) {
     scheduler.register({
@@ -510,6 +570,11 @@ export function createApplication(
         if (uptimeStatus && config.uptime.enabled) {
           void uptimeStatus.synchronize().catch((error: unknown) => {
             logger.error({ err: error }, 'Initial uptime status synchronization failed');
+          });
+        }
+        if (cakeDays && config.cakeDays.enabled) {
+          void cakeDays.check().catch((error: unknown) => {
+            logger.error({ err: error }, 'Initial cake-day check failed');
           });
         }
       } catch (error: unknown) {

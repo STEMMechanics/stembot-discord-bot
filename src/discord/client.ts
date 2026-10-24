@@ -49,6 +49,7 @@ export interface DiscordGateway {
   start(): Promise<void>;
   stop(): Promise<void>;
   getGatewayPing(): number;
+  getGuildMembers(): Promise<readonly DiscordGuildMember[]>;
   sendChannelMessage(channelId: string, message: DiscordChannelMessage | string): Promise<string>;
   editChannelMessage(
     channelId: string,
@@ -61,10 +62,20 @@ export interface DiscordChannelMessage {
   content?: string;
   embeds?: APIEmbed[];
   allowedMentions?: MessageMentionOptions;
+  files?: readonly { attachment: Buffer; name: string }[];
   /** Internal image URL that is downloaded and attached to the message. */
   heroImageUrl?: string;
   /** Publish the sent message to followers when this is an announcement-channel message. */
   crosspost?: boolean;
+}
+
+export interface DiscordGuildMember {
+  id: string;
+  username: string;
+  displayName: string;
+  bot: boolean;
+  joinedAt: Date | null;
+  avatarUrl?: string;
 }
 
 export interface DiscordCommandDependencies {
@@ -91,6 +102,9 @@ export function createDiscordGateway(
   configureNetworkDefaults();
 
   const intents = [GatewayIntentBits.Guilds];
+  if (config.cakeDays.enabled) {
+    intents.push(GatewayIntentBits.GuildMembers);
+  }
   const askMessageTrackingEnabled = Boolean(config.ask.enabled && dependencies.ask);
   const messageTrackingEnabled =
     (config.countingChain.enabled && dependencies.countingChain) ||
@@ -680,6 +694,19 @@ export function createDiscordGateway(
 
     getGatewayPing(): number {
       return client.ws.ping;
+    },
+
+    async getGuildMembers(): Promise<readonly DiscordGuildMember[]> {
+      const guild = await client.guilds.fetch(config.discord.guildId);
+      const members = await guild.members.fetch();
+      return [...members.values()].map((member) => ({
+        id: member.id,
+        username: member.user.username,
+        displayName: member.displayName,
+        bot: member.user.bot,
+        joinedAt: member.joinedAt,
+        avatarUrl: member.user.displayAvatarURL({ extension: 'png', size: 128 }),
+      }));
     },
 
     async sendChannelMessage(
