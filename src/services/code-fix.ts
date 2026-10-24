@@ -425,8 +425,13 @@ function normalizeCodeFixAnswer(value: string): string {
 }
 
 function stripCodeFence(value: string): string {
-  return value
-    .trim()
+  const trimmed = value.trim();
+  const firstCodeBlock = trimmed.match(/^```[^\r\n]*\r?\n([\s\S]*?)```/);
+  if (firstCodeBlock?.[1]) {
+    return firstCodeBlock[1].trim();
+  }
+
+  return trimmed
     .replace(/^```[a-zA-Z]*\s*/, '')
     .replace(/\s*```$/, '')
     .trim();

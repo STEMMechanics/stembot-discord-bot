@@ -81,6 +81,31 @@ describe('STEM Code Fix service', () => {
     expect(formatStemCodeFix(challenge(), 1)).toContain('What should be fixed?');
   });
 
+  it('keeps only the first code block when a generated sample includes duplicate fences', () => {
+    const duplicateCode = [
+      '```python',
+      'width = 5',
+      'height = 3',
+      'area = width + height',
+      'print(area)',
+      '```',
+      '',
+      '```python',
+      'width = 5',
+      'height = 3',
+      'area = width + height',
+      'print(area)',
+      '```',
+    ].join('\n');
+
+    const formatted = formatStemCodeFix({ ...challenge(), code: duplicateCode }, 1);
+
+    expect(formatted.match(/```python/g)).toHaveLength(1);
+    expect(formatted).toContain(
+      '```python\nwidth = 5\nheight = 3\narea = width + height\nprint(area)\n```',
+    );
+  });
+
   it('accepts an exact fix locally and records the solver', async () => {
     const state = new MemoryStateStore();
     const engine: CodeFixEngine = {
