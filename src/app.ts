@@ -9,6 +9,8 @@ import { createOpenAIStemAskAnswerer } from './integrations/openai-ask.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
 import { createOpenAIScrambleWordGenerator } from './integrations/openai-scramble.js';
 import { createOpenAIStemWordChainValidator } from './integrations/openai-word-chain.js';
+import { createOpenAIWordRevealGenerator } from './integrations/openai-word-reveal.js';
+import { createOpenAICodeFixEngine } from './integrations/openai-code-fix.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
 import {
   createUptimeKumaIntegration,
@@ -35,6 +37,9 @@ import { createStemScrambleService, type StemScrambleService } from './services/
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
 import { createStemWordChainService, type StemWordChainService } from './services/word-chain.js';
 import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
+import { createChatDiscordBridge, type ChatDiscordBridge } from './http/chat-discord-bridge.js';
+import { createStemCodeFixService, type StemCodeFixService } from './services/code-fix.js';
+import { createStemWordRevealService, type StemWordRevealService } from './services/word-reveal.js';
 import {
   createUserLevelService,
   type UserLevelAnnouncement,
@@ -60,8 +65,11 @@ export interface ApplicationDependencies {
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
   wordChain?: StemWordChainService;
+  wordReveal?: StemWordRevealService;
+  codeFix?: StemCodeFixService;
   reminders?: AdminReminderService;
   ask?: StemAskService;
+  chatDiscordBridge?: ChatDiscordBridge;
   userLevels?: UserLevelService;
   workshopNotifications: WorkshopNotificationService;
 }
@@ -259,6 +267,58 @@ export function createApplication(
           ...(userLevels ? { userLevels } : {}),
         })
       : undefined);
+  const wordReveal =
+    dependencies?.wordReveal ??
+    (config.wordReveal.enabled
+      ? createStemWordRevealService({
+          config: config.wordReveal,
+          generator: createOpenAIWordRevealGenerator({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Word Reveal'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
+  const codeFix =
+    dependencies?.codeFix ??
+    (config.codeFix.enabled
+      ? createStemCodeFixService({
+          config: config.codeFix,
+          engine: createOpenAICodeFixEngine({
+            apiKey: config.openai.apiKey!,
+            model: config.openai.model,
+            reasoningEffort: config.openai.reasoningEffort,
+            timeoutMs: config.openai.timeoutMs,
+            logger,
+          }),
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Code Fix'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
   const ask =
     dependencies?.ask ??
     (config.ask.enabled
@@ -285,12 +345,37 @@ export function createApplication(
       ...(quiz ? { quiz } : {}),
       ...(scramble ? { scramble } : {}),
       ...(wordChain ? { wordChain } : {}),
+      ...(wordReveal ? { wordReveal } : {}),
+      ...(codeFix ? { codeFix } : {}),
       ...(reminders ? { reminders } : {}),
       ...(ask ? { ask } : {}),
       ...(userLevels ? { userLevels } : {}),
       ...(uptime ? { uptime } : {}),
     });
   discordGatewayRef.current = discord;
+  const chatDiscordBridge =
+    dependencies?.chatDiscordBridge ??
+    (config.chatDiscordBridge.enabled
+      ? createChatDiscordBridge({
+          config: config.chatDiscordBridge,
+          publisher: {
+            send: (channelId, content) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for the Minecraft chat bridge'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                content,
+                allowedMentions: { parse: [] },
+              });
+            },
+          },
+          state,
+          logger,
+        })
+      : undefined);
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
   const uptimeStatus =
     dependencies?.uptimeStatus ??
@@ -355,6 +440,28 @@ export function createApplication(
     });
   }
 
+  if (wordReveal && config.wordReveal.enabled) {
+    scheduler.register({
+      name: 'stem-word-reveal-maintenance',
+      intervalMs: config.wordReveal.retryIntervalMs,
+      run: async () => {
+        await wordReveal.checkInactivity();
+        await wordReveal.ensureRound();
+      },
+    });
+  }
+
+  if (codeFix && config.codeFix.enabled) {
+    scheduler.register({
+      name: 'stem-code-fix-maintenance',
+      intervalMs: config.codeFix.retryIntervalMs,
+      run: async () => {
+        await codeFix.checkInactivity();
+        await codeFix.ensureChallenge();
+      },
+    });
+  }
+
   if (reminders && config.reminders.enabled) {
     scheduler.register({
       name: 'admin-reminder-delivery',
@@ -393,6 +500,7 @@ export function createApplication(
       try {
         await registerCommands(config, logger);
         await discord.start();
+        await chatDiscordBridge?.start();
         scheduler.start();
         started = true;
         logger.info('STEMBot application started');
@@ -417,6 +525,7 @@ export function createApplication(
 
       stopped = true;
       scheduler.stop();
+      await chatDiscordBridge?.stop();
       await discord.stop();
       logger.info('STEMBot application stopped');
     },

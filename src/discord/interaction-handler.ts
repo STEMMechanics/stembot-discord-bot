@@ -6,6 +6,8 @@ import type { UptimeKumaIntegration } from '../integrations/uptime-kuma.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
 import type { StemScrambleService } from '../services/scramble.js';
+import type { StemCodeFixService } from '../services/code-fix.js';
+import type { StemWordRevealService } from '../services/word-reveal.js';
 import { commands, type CommandContext } from './commands.js';
 
 const INTERACTION_DEDUPLICATION_WINDOW_MS = 10 * 60 * 1000;
@@ -16,6 +18,8 @@ export interface InteractionHandlerContext extends CommandContext {
   website?: WebsiteIntegration;
   stemcraft?: StemCraftIntegration;
   scramble?: StemScrambleService;
+  wordReveal?: StemWordRevealService;
+  codeFix?: StemCodeFixService;
   uptime?: UptimeKumaIntegration;
   timeZone?: string;
 }
@@ -56,6 +60,8 @@ export async function handleInteraction(
     ...(context.website ? { website: context.website } : {}),
     ...(context.stemcraft ? { stemcraft: context.stemcraft } : {}),
     ...(context.scramble ? { scramble: context.scramble } : {}),
+    ...(context.wordReveal ? { wordReveal: context.wordReveal } : {}),
+    ...(context.codeFix ? { codeFix: context.codeFix } : {}),
     ...(context.uptime ? { uptime: context.uptime } : {}),
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
     ...(context.userLevels ? { userLevels: context.userLevels } : {}),

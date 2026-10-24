@@ -53,6 +53,8 @@ describe('Discord commands', () => {
       'level',
       'status',
       'scramble',
+      'word-reveal',
+      'code-fix',
       'leaderboard',
       'review',
       'counting-chain',

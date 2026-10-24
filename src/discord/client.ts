@@ -21,6 +21,7 @@ import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
 import type { AdminReminderService } from '../services/admin-reminders.js';
+import type { StemCodeFixMessage, StemCodeFixService } from '../services/code-fix.js';
 import type {
   CountingChainGameStatus,
   CountingChainHistoryMessage,
@@ -32,6 +33,7 @@ import type {
 import type { StemAskMessage, StemAskService } from '../services/stem-ask.js';
 import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
 import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
+import type { StemWordRevealMessage, StemWordRevealService } from '../services/word-reveal.js';
 import type {
   MinigameLeaderboardEntry,
   MinigameLeaderboardProvider,
@@ -73,6 +75,8 @@ export interface DiscordCommandDependencies {
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
   wordChain?: StemWordChainService;
+  wordReveal?: StemWordRevealService;
+  codeFix?: StemCodeFixService;
   ask?: StemAskService;
   userLevels?: UserLevelService;
   uptime?: UptimeKumaIntegration;
@@ -93,6 +97,8 @@ export function createDiscordGateway(
     (config.quiz.enabled && dependencies.quiz) ||
     (config.scramble.enabled && dependencies.scramble) ||
     (config.wordChain.enabled && dependencies.wordChain) ||
+    (config.wordReveal.enabled && dependencies.wordReveal) ||
+    (config.codeFix.enabled && dependencies.codeFix) ||
     askMessageTrackingEnabled ||
     (config.levels.enabled && dependencies.userLevels);
   const reactionTrackingEnabled =
@@ -182,6 +188,8 @@ export function createDiscordGateway(
             dependencies.quiz,
             dependencies.scramble,
             dependencies.wordChain,
+            dependencies.wordReveal,
+            dependencies.codeFix,
           )
         : undefined;
       refreshMinigameDashboard = infoPublisher?.refresh;
@@ -234,6 +242,28 @@ export function createDiscordGateway(
       );
     }
 
+    if (dependencies.wordReveal && config.wordReveal.enabled && config.wordReveal.channelId) {
+      initializationTasks.push(
+        dependencies.wordReveal.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.wordReveal.channelId },
+            'STEM word reveal startup initialization failed',
+          );
+        }),
+      );
+    }
+
+    if (dependencies.codeFix && config.codeFix.enabled && config.codeFix.channelId) {
+      initializationTasks.push(
+        dependencies.codeFix.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.codeFix.channelId },
+            'STEM code-fix startup initialization failed',
+          );
+        }),
+      );
+    }
+
     void Promise.all(initializationTasks).finally(() => {
       resolveClientReady();
     });
@@ -270,6 +300,8 @@ export function createDiscordGateway(
       ...(dependencies.uptime ? { uptime: dependencies.uptime } : {}),
       timeZone: dependencies.timeZone,
       ...(dependencies.countingChain ? { countingChain: dependencies.countingChain } : {}),
+      ...(dependencies.wordReveal ? { wordReveal: dependencies.wordReveal } : {}),
+      ...(dependencies.codeFix ? { codeFix: dependencies.codeFix } : {}),
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
       ...(dependencies.reminders ? { reminders: dependencies.reminders } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
@@ -496,6 +528,70 @@ export function createDiscordGateway(
     });
   }
 
+  if (dependencies.wordReveal && config.wordReveal.enabled && config.wordReveal.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (
+        message.channelId !== config.wordReveal.channelId ||
+        message.author.bot ||
+        messageMentionsBot(message, client.user?.id)
+      ) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'STEM word reveal Discord message received',
+      );
+
+      void dependencies
+        .wordReveal!.handleMessage(toStemWordRevealMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM word reveal message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
+
+  if (dependencies.codeFix && config.codeFix.enabled && config.codeFix.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (
+        message.channelId !== config.codeFix.channelId ||
+        message.author.bot ||
+        messageMentionsBot(message, client.user?.id)
+      ) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'STEM code-fix Discord message received',
+      );
+
+      void dependencies
+        .codeFix!.handleMessage(toStemCodeFixMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'STEM code-fix message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
+
   if (dependencies.ask && config.ask.enabled) {
     client.on(Events.MessageCreate, (message) => {
       if (message.author.bot || !client.user || !messageMentionsBot(message, client.user.id)) {
@@ -505,8 +601,13 @@ export function createDiscordGateway(
       const question = removeBotMentions(message.content, client.user.id);
       const isMinigameChannel =
         message.channelId === config.scramble.channelId ||
+        message.channelId === config.wordChain.channelId ||
+        message.channelId === config.wordReveal.channelId ||
+        message.channelId === config.codeFix.channelId;
+      const supportsHintRequests =
+        message.channelId === config.scramble.channelId ||
         message.channelId === config.wordChain.channelId;
-      if (isMinigameChannel && isMinigameHintRequest(question)) {
+      if (isMinigameChannel && (!supportsHintRequests || isMinigameHintRequest(question))) {
         return;
       }
 
@@ -786,6 +887,38 @@ function toStemWordChainMessage(message: Message, botUserId?: string): StemWordC
         content,
         allowedMentions: { parse: [] },
       });
+    },
+  };
+}
+
+function toStemWordRevealMessage(message: Message): StemWordRevealMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
+    },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
+    },
+  };
+}
+
+function toStemCodeFixMessage(message: Message): StemCodeFixMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    react: async (emoji: string): Promise<void> => {
+      await message.react(emoji);
     },
   };
 }
@@ -1085,6 +1218,8 @@ function createCountingChainInfoPublisher(
   quiz: StemQuizService | undefined,
   scramble: StemScrambleService | undefined,
   wordChain: StemWordChainService | undefined,
+  wordReveal: StemWordRevealService | undefined,
+  codeFix: StemCodeFixService | undefined,
 ): CountingChainInfoPublisher & { refresh(): Promise<void> } {
   let messageId = configuredMessageId;
   let latestStatus: CountingChainGameStatus | undefined;
@@ -1124,18 +1259,28 @@ function createCountingChainInfoPublisher(
       );
     }
 
-    const [countingLeaderboard, quizLeaderboard, scrambleLeaderboard, wordChainLeaderboard] =
-      await Promise.all([
-        readMinigameLeaderboard(countingChain, providedCountingLeaderboard),
-        readMinigameLeaderboard(quiz),
-        readMinigameLeaderboard(scramble),
-        readMinigameLeaderboard(wordChain),
-      ]);
+    const [
+      countingLeaderboard,
+      quizLeaderboard,
+      scrambleLeaderboard,
+      wordChainLeaderboard,
+      wordRevealLeaderboard,
+      codeFixLeaderboard,
+    ] = await Promise.all([
+      readMinigameLeaderboard(countingChain, providedCountingLeaderboard),
+      readMinigameLeaderboard(quiz),
+      readMinigameLeaderboard(scramble),
+      readMinigameLeaderboard(wordChain),
+      readMinigameLeaderboard(wordReveal),
+      readMinigameLeaderboard(codeFix),
+    ]);
     const embed = buildMinigameInfoEmbed(status, timeZone, {
       counting: countingChain ? countingLeaderboard : undefined,
       quiz: quiz ? quizLeaderboard : undefined,
       scramble: scramble ? scrambleLeaderboard : undefined,
       wordChain: wordChain ? wordChainLeaderboard : undefined,
+      wordReveal: wordReveal ? wordRevealLeaderboard : undefined,
+      codeFix: codeFix ? codeFixLeaderboard : undefined,
     });
     if (infoMessage) {
       await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
@@ -1192,7 +1337,7 @@ export function buildMinigameInfoEmbed(
       'Post a GIF or picture containing the next number.',
       '',
       '**Other games**',
-      'Answer the STEM quiz, solve the scramble, or keep the themed word chain going.',
+      'Answer Trivia, solve Word Scramble, keep the themed Word Chain going, reveal a hidden STEM word, or fix a small code bug.',
       '',
       'Each game has its own top-three record leaderboard.',
     ].join('\n'),
@@ -1246,6 +1391,26 @@ export function buildMinigameInfoEmbed(
         ),
         inline: false,
       },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: 'Word Reveal · solved rounds',
+        value: formatMinigameLeaderboard(
+          leaderboards.wordReveal,
+          'solved rounds',
+          'Word Reveal is not enabled.',
+        ),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: 'Code Fix · correct fixes',
+        value: formatMinigameLeaderboard(
+          leaderboards.codeFix,
+          'correct fixes',
+          'Code Fix is not enabled.',
+        ),
+        inline: false,
+      },
       {
         name: 'Last counting round',
         value: formatCountingChainStat(
@@ -1266,6 +1431,8 @@ interface MinigameLeaderboards {
   quiz: readonly MinigameLeaderboardEntry[] | undefined;
   scramble: readonly MinigameLeaderboardEntry[] | undefined;
   wordChain: readonly MinigameLeaderboardEntry[] | undefined;
+  wordReveal?: readonly MinigameLeaderboardEntry[] | undefined;
+  codeFix?: readonly MinigameLeaderboardEntry[] | undefined;
 }
 
 async function readMinigameLeaderboard(

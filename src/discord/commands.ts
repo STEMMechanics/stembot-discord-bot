@@ -32,6 +32,8 @@ import type { StemScrambleService } from '../services/scramble.js';
 import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/uptime-kuma.js';
 import type { CountingChainService } from '../services/counting-chain.js';
 import { parseReminderDuration, type AdminReminderService } from '../services/admin-reminders.js';
+import type { StemCodeFixService } from '../services/code-fix.js';
+import type { StemWordRevealService } from '../services/word-reveal.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -45,6 +47,8 @@ export interface CommandContext {
   scramble?: StemScrambleService;
   uptime?: UptimeKumaIntegration;
   reminders?: AdminReminderService;
+  wordReveal?: StemWordRevealService;
+  codeFix?: StemCodeFixService;
 }
 
 export interface DiscordCommand {
@@ -356,6 +360,80 @@ export const leaderboardCommand: DiscordCommand = {
   },
 };
 
+export const wordRevealCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('word-reveal')
+    .setDescription('Manage the STEM Word Reveal game.')
+    .addSubcommand((subcommand) =>
+      subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const wordReveal = context.wordReveal;
+    if (!wordReveal) {
+      await interaction.reply({
+        content: 'The Word Reveal game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to reset Word Reveal.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const previousWord = await wordReveal.resetRound();
+    await interaction.editReply({
+      content: previousWord
+        ? `Word Reveal reset. The previous answer was **${previousWord}**.`
+        : 'No active Word Reveal round was found; a new one has been started.',
+    });
+  },
+};
+
+export const codeFixCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('code-fix')
+    .setDescription('Manage the STEM Code Fix game.')
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('reset')
+        .setDescription('Reset the current challenge and start a new one.'),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const codeFix = context.codeFix;
+    if (!codeFix) {
+      await interaction.reply({
+        content: 'The Code Fix game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to reset Code Fix.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const previousTitle = await codeFix.resetChallenge();
+    await interaction.editReply({
+      content: previousTitle
+        ? `Code Fix reset. The previous challenge was **${previousTitle}**.`
+        : 'No active Code Fix challenge was found; a new one has been started.',
+    });
+  },
+};
+
 export const reviewCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('review')
@@ -547,6 +625,8 @@ export const commands: readonly DiscordCommand[] = [
   levelCommand,
   statusCommand,
   scrambleCommand,
+  wordRevealCommand,
+  codeFixCommand,
   leaderboardCommand,
   reviewCommand,
   countingChainCommand,

@@ -69,6 +69,25 @@ describe('loadConfig', () => {
         retryIntervalMs: 300000,
         idleTimeoutMs: 259200000,
       },
+      wordReveal: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        topic:
+          'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+        targetAgeMin: 8,
+        targetAgeMax: 14,
+        maxWrongGuesses: 8,
+        idleTimeoutMs: 259200000,
+      },
+      codeFix: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        topic: 'beginner programming, debugging, algorithms, robotics and simple STEM projects',
+        targetAgeMin: 8,
+        targetAgeMax: 14,
+        maxWrongAnswers: 5,
+        idleTimeoutMs: 259200000,
+      },
       reminders: {
         enabled: false,
         checkIntervalMs: 60000,
@@ -79,6 +98,13 @@ describe('loadConfig', () => {
         userCooldownMs: 30000,
         userDailyLimit: 10,
         globalDailyLimit: 100,
+      },
+      chatDiscordBridge: {
+        enabled: false,
+        host: '0.0.0.0',
+        port: 8080,
+        path: '/minecraft/chat',
+        maxBodyBytes: 65536,
       },
       levels: {
         enabled: false,
@@ -538,6 +564,68 @@ describe('loadConfig', () => {
       userCooldownMs: 45000,
       userDailyLimit: 12,
       globalDailyLimit: 250,
+    });
+  });
+
+  it('parses Word Reveal, Code Fix and the authenticated chat bridge settings', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_WORD_REVEAL_ENABLED: 'true',
+      STEM_WORD_REVEAL_CHANNEL_ID: '3234567890',
+      STEM_WORD_REVEAL_TOPIC: 'space science',
+      STEM_WORD_REVEAL_TARGET_AGE_MIN: '10',
+      STEM_WORD_REVEAL_TARGET_AGE_MAX: '16',
+      STEM_WORD_REVEAL_MAX_WRONG_GUESSES: '6',
+      STEM_WORD_REVEAL_RETRY_INTERVAL_MS: '60000',
+      STEM_WORD_REVEAL_IDLE_TIMEOUT_MS: '120000',
+      STEM_CODE_FIX_ENABLED: 'true',
+      STEM_CODE_FIX_CHANNEL_ID: '4234567890',
+      STEM_CODE_FIX_TOPIC: 'robotics code',
+      STEM_CODE_FIX_TARGET_AGE_MIN: '12',
+      STEM_CODE_FIX_TARGET_AGE_MAX: '18',
+      STEM_CODE_FIX_MAX_WRONG_ANSWERS: '4',
+      STEM_CODE_FIX_RETRY_INTERVAL_MS: '90000',
+      STEM_CODE_FIX_IDLE_TIMEOUT_MS: '180000',
+      CHAT_DISCORD_BRIDGE_ENABLED: 'true',
+      CHAT_DISCORD_BRIDGE_HOST: '127.0.0.1',
+      CHAT_DISCORD_BRIDGE_PORT: '18080',
+      CHAT_DISCORD_BRIDGE_PATH: '/bridge/minecraft',
+      CHAT_DISCORD_BRIDGE_BEARER_TOKEN: 'bridge-token',
+      CHAT_DISCORD_BRIDGE_CHANNEL_ID: '5234567890',
+      CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: '100000',
+    });
+
+    expect(config.wordReveal).toEqual({
+      enabled: true,
+      channelId: '3234567890',
+      retryIntervalMs: 60000,
+      topic: 'space science',
+      targetAgeMin: 10,
+      targetAgeMax: 16,
+      maxWrongGuesses: 6,
+      idleTimeoutMs: 120000,
+    });
+    expect(config.codeFix).toEqual({
+      enabled: true,
+      channelId: '4234567890',
+      retryIntervalMs: 90000,
+      topic: 'robotics code',
+      targetAgeMin: 12,
+      targetAgeMax: 18,
+      maxWrongAnswers: 4,
+      idleTimeoutMs: 180000,
+    });
+    expect(config.chatDiscordBridge).toEqual({
+      enabled: true,
+      host: '127.0.0.1',
+      port: 18080,
+      path: '/bridge/minecraft',
+      bearerToken: 'bridge-token',
+      channelId: '5234567890',
+      maxBodyBytes: 100000,
     });
   });
 });

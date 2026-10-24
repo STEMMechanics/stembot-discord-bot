@@ -22,6 +22,8 @@ describe('STEM minigame dashboard', () => {
       quiz: [{ userId: 'quiz-user', score: 12 }],
       scramble: [{ userId: 'scramble-user', score: 5 }],
       wordChain: [{ userId: 'word-user', score: 6 }],
+      wordReveal: [{ userId: 'reveal-user', score: 4 }],
+      codeFix: [{ userId: 'code-user', score: 3 }],
     });
 
     expect(embed.fields).toEqual(
@@ -42,11 +44,19 @@ describe('STEM minigame dashboard', () => {
           name: 'Word chain · best round streak',
           value: expect.stringContaining('<@word-user> · **6** correct guesses in one round'),
         }),
+        expect.objectContaining({
+          name: 'Word Reveal · solved rounds',
+          value: expect.stringContaining('<@reveal-user> · **4** solved rounds'),
+        }),
+        expect.objectContaining({
+          name: 'Code Fix · correct fixes',
+          value: expect.stringContaining('<@code-user> · **3** correct fixes'),
+        }),
       ]),
     );
     expect(embed.fields?.some((field) => field.name === 'Minigame leaderboard')).toBe(false);
     expect(
       embed.fields?.filter((field) => field.name === '\u200b' && field.value === '\u200b'),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
   });
 });

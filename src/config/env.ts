@@ -157,9 +157,42 @@ const environmentSchema = z.object({
   STEM_WORD_CHAIN_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_CHAIN_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
   STEM_WORD_CHAIN_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_WORD_REVEAL_ENABLED: booleanFromEnvironment(false),
+  STEM_WORD_REVEAL_CHANNEL_ID: optionalDiscordId,
+  STEM_WORD_REVEAL_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_WORD_REVEAL_TOPIC: z
+    .string()
+    .trim()
+    .min(1)
+    .default(
+      'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
+    ),
+  STEM_WORD_REVEAL_TARGET_AGE_MIN: positiveInteger(8, 18),
+  STEM_WORD_REVEAL_TARGET_AGE_MAX: positiveInteger(14, 18),
+  STEM_WORD_REVEAL_MAX_WRONG_GUESSES: positiveInteger(8, 50),
+  STEM_WORD_REVEAL_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_CODE_FIX_ENABLED: booleanFromEnvironment(false),
+  STEM_CODE_FIX_CHANNEL_ID: optionalDiscordId,
+  STEM_CODE_FIX_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_CODE_FIX_TOPIC: z
+    .string()
+    .trim()
+    .min(1)
+    .default('beginner programming, debugging, algorithms, robotics and simple STEM projects'),
+  STEM_CODE_FIX_TARGET_AGE_MIN: positiveInteger(8, 18),
+  STEM_CODE_FIX_TARGET_AGE_MAX: positiveInteger(14, 18),
+  STEM_CODE_FIX_MAX_WRONG_ANSWERS: positiveInteger(5, 50),
+  STEM_CODE_FIX_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_REMINDERS_ENABLED: booleanFromEnvironment(false),
   STEM_REMINDERS_CHANNEL_ID: optionalDiscordId,
   STEM_REMINDERS_CHECK_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
+  CHAT_DISCORD_BRIDGE_ENABLED: booleanFromEnvironment(false),
+  CHAT_DISCORD_BRIDGE_HOST: z.string().trim().min(1).default('0.0.0.0'),
+  CHAT_DISCORD_BRIDGE_PORT: positiveInteger(8080, 65535),
+  CHAT_DISCORD_BRIDGE_PATH: z.string().trim().min(1).default('/minecraft/chat'),
+  CHAT_DISCORD_BRIDGE_BEARER_TOKEN: optionalSecret,
+  CHAT_DISCORD_BRIDGE_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: positiveInteger(64 * 1024, 2 * 1024 * 1024),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
   STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
   STEM_ASK_USER_COOLDOWN_SECONDS: positiveInteger(30, 86400),
@@ -244,6 +277,26 @@ export interface AppConfig {
     retryIntervalMs: number;
     idleTimeoutMs: number;
   };
+  wordReveal: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+    topic: string;
+    targetAgeMin: number;
+    targetAgeMax: number;
+    maxWrongGuesses: number;
+    idleTimeoutMs: number;
+  };
+  codeFix: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+    topic: string;
+    targetAgeMin: number;
+    targetAgeMax: number;
+    maxWrongAnswers: number;
+    idleTimeoutMs: number;
+  };
   reminders: {
     enabled: boolean;
     channelId?: string;
@@ -255,6 +308,15 @@ export interface AppConfig {
     userCooldownMs: number;
     userDailyLimit: number;
     globalDailyLimit: number;
+  };
+  chatDiscordBridge: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    path: string;
+    bearerToken?: string;
+    channelId?: string;
+    maxBodyBytes: number;
   };
   levels: {
     enabled: boolean;
@@ -371,12 +433,58 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('OPENAI_API_KEY is required when STEM_WORD_CHAIN_ENABLED is true');
   }
 
+  if (values.STEM_WORD_REVEAL_ENABLED && !values.STEM_WORD_REVEAL_CHANNEL_ID) {
+    throw new Error(
+      'STEM_WORD_REVEAL_CHANNEL_ID is required when STEM_WORD_REVEAL_ENABLED is true',
+    );
+  }
+
+  if (values.STEM_WORD_REVEAL_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_WORD_REVEAL_ENABLED is true');
+  }
+
+  if (values.STEM_WORD_REVEAL_TARGET_AGE_MIN > values.STEM_WORD_REVEAL_TARGET_AGE_MAX) {
+    throw new Error(
+      'STEM_WORD_REVEAL_TARGET_AGE_MIN cannot be greater than STEM_WORD_REVEAL_TARGET_AGE_MAX',
+    );
+  }
+
+  if (values.STEM_CODE_FIX_ENABLED && !values.STEM_CODE_FIX_CHANNEL_ID) {
+    throw new Error('STEM_CODE_FIX_CHANNEL_ID is required when STEM_CODE_FIX_ENABLED is true');
+  }
+
+  if (values.STEM_CODE_FIX_ENABLED && !values.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when STEM_CODE_FIX_ENABLED is true');
+  }
+
+  if (values.STEM_CODE_FIX_TARGET_AGE_MIN > values.STEM_CODE_FIX_TARGET_AGE_MAX) {
+    throw new Error(
+      'STEM_CODE_FIX_TARGET_AGE_MIN cannot be greater than STEM_CODE_FIX_TARGET_AGE_MAX',
+    );
+  }
+
   if (values.STEM_REMINDERS_ENABLED && !values.STEM_REMINDERS_CHANNEL_ID) {
     throw new Error('STEM_REMINDERS_CHANNEL_ID is required when STEM_REMINDERS_ENABLED is true');
   }
 
   if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
+  }
+
+  if (values.CHAT_DISCORD_BRIDGE_ENABLED && !values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN) {
+    throw new Error(
+      'CHAT_DISCORD_BRIDGE_BEARER_TOKEN is required when CHAT_DISCORD_BRIDGE_ENABLED is true',
+    );
+  }
+
+  if (values.CHAT_DISCORD_BRIDGE_ENABLED && !values.CHAT_DISCORD_BRIDGE_CHANNEL_ID) {
+    throw new Error(
+      'CHAT_DISCORD_BRIDGE_CHANNEL_ID is required when CHAT_DISCORD_BRIDGE_ENABLED is true',
+    );
+  }
+
+  if (!values.CHAT_DISCORD_BRIDGE_PATH.startsWith('/')) {
+    throw new Error('CHAT_DISCORD_BRIDGE_PATH must start with /');
   }
 
   try {
@@ -466,6 +574,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       retryIntervalMs: values.STEM_WORD_CHAIN_RETRY_INTERVAL_MS,
       idleTimeoutMs: values.STEM_WORD_CHAIN_IDLE_TIMEOUT_MS,
     },
+    wordReveal: {
+      enabled: values.STEM_WORD_REVEAL_ENABLED,
+      ...(values.STEM_WORD_REVEAL_CHANNEL_ID
+        ? { channelId: values.STEM_WORD_REVEAL_CHANNEL_ID }
+        : {}),
+      retryIntervalMs: values.STEM_WORD_REVEAL_RETRY_INTERVAL_MS,
+      topic: values.STEM_WORD_REVEAL_TOPIC,
+      targetAgeMin: values.STEM_WORD_REVEAL_TARGET_AGE_MIN,
+      targetAgeMax: values.STEM_WORD_REVEAL_TARGET_AGE_MAX,
+      maxWrongGuesses: values.STEM_WORD_REVEAL_MAX_WRONG_GUESSES,
+      idleTimeoutMs: values.STEM_WORD_REVEAL_IDLE_TIMEOUT_MS,
+    },
+    codeFix: {
+      enabled: values.STEM_CODE_FIX_ENABLED,
+      ...(values.STEM_CODE_FIX_CHANNEL_ID ? { channelId: values.STEM_CODE_FIX_CHANNEL_ID } : {}),
+      retryIntervalMs: values.STEM_CODE_FIX_RETRY_INTERVAL_MS,
+      topic: values.STEM_CODE_FIX_TOPIC,
+      targetAgeMin: values.STEM_CODE_FIX_TARGET_AGE_MIN,
+      targetAgeMax: values.STEM_CODE_FIX_TARGET_AGE_MAX,
+      maxWrongAnswers: values.STEM_CODE_FIX_MAX_WRONG_ANSWERS,
+      idleTimeoutMs: values.STEM_CODE_FIX_IDLE_TIMEOUT_MS,
+    },
     reminders: {
       enabled: values.STEM_REMINDERS_ENABLED,
       ...(values.STEM_REMINDERS_CHANNEL_ID ? { channelId: values.STEM_REMINDERS_CHANNEL_ID } : {}),
@@ -477,6 +607,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       userCooldownMs: values.STEM_ASK_USER_COOLDOWN_SECONDS * 1000,
       userDailyLimit: values.STEM_ASK_USER_DAILY_LIMIT,
       globalDailyLimit: values.STEM_ASK_GLOBAL_DAILY_LIMIT,
+    },
+    chatDiscordBridge: {
+      enabled: values.CHAT_DISCORD_BRIDGE_ENABLED,
+      host: values.CHAT_DISCORD_BRIDGE_HOST,
+      port: values.CHAT_DISCORD_BRIDGE_PORT,
+      path: values.CHAT_DISCORD_BRIDGE_PATH,
+      ...(values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN
+        ? { bearerToken: values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_CHANNEL_ID
+        ? { channelId: values.CHAT_DISCORD_BRIDGE_CHANNEL_ID }
+        : {}),
+      maxBodyBytes: values.CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES,
     },
     levels: {
       enabled: values.STEM_LEVELS_ENABLED,

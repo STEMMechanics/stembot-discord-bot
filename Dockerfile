@@ -15,6 +15,8 @@ FROM node:24-bookworm-slim
 ENV NODE_ENV=production
 ENV STATE_PATH=/app/data/state.json
 
+EXPOSE 8080
+
 WORKDIR /app
 
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
