@@ -167,7 +167,9 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.url?.split('?')[0] !== this.dependencies.config.path) {
+    const requestPath = normalizeHttpPath(request.url?.split('?')[0] ?? '');
+    const configuredPath = normalizeHttpPath(this.dependencies.config.path);
+    if (requestPath !== configuredPath) {
       request.resume();
       writeJson(response, 404, { error: 'not_found' });
       return;
@@ -496,6 +498,12 @@ function writeJson(response: ServerResponse, statusCode: number, payload: unknow
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('Content-Length', Buffer.byteLength(body));
   response.end(body);
+}
+
+function normalizeHttpPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === '/') return trimmed;
+  return trimmed.replace(/\/+$/, '') || '/';
 }
 
 function readBridgeState(value: unknown): ChatDiscordBridgeState {

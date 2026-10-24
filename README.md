@@ -332,11 +332,14 @@ Global chat remains a plain text announcement. Player join/quit/death, minigame
 start/end, and server start/stop events are rendered as Discord embeds. Embed
 mentions are disabled; each event includes its server name in the footer, and
 valid `occurred_at` timestamps appear in the embed timestamp.
+The recommended path is `/minecraft/event`; requests with a trailing slash are
+accepted as well. Existing deployments can keep `/minecraft/chat` when that
+path is explicitly configured in both the bot and the Minecraft plugin.
 
 The plugin can send:
 
 ```http
-POST /minecraft/chat
+POST /minecraft/event
 Authorization: Bearer replace-with-long-random-token
 Content-Type: application/json; charset=utf-8
 X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
@@ -520,7 +523,7 @@ npm run validate
 | `CHAT_DISCORD_BRIDGE_ENABLED`               | No                  | Enable the bearer-authenticated Minecraft chat HTTP bridge; defaults to `false`.            |
 | `CHAT_DISCORD_BRIDGE_HOST`                  | No                  | HTTP bind host; defaults to `0.0.0.0`.                                                      |
 | `CHAT_DISCORD_BRIDGE_PORT`                  | No                  | HTTP bind port; defaults to `8080`.                                                         |
-| `CHAT_DISCORD_BRIDGE_PATH`                  | No                  | HTTP path; defaults to `/minecraft/chat`.                                                   |
+| `CHAT_DISCORD_BRIDGE_PATH`                  | No                  | HTTP path; defaults to `/minecraft/event`.                                                  |
 | `CHAT_DISCORD_BRIDGE_BEARER_TOKEN`          | When enabled        | Bearer token required by the Minecraft plugin.                                              |
 | `CHAT_DISCORD_BRIDGE_CHANNEL_ID`            | When enabled        | Discord channel receiving accepted Minecraft chat messages.                                 |
 | `CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES`        | No                  | Maximum request size; defaults to 64 KiB.                                                   |

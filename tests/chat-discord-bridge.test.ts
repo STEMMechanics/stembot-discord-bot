@@ -34,7 +34,7 @@ function config(port = 43127): ChatDiscordBridgeConfig {
     enabled: true,
     host: '127.0.0.1',
     port,
-    path: '/minecraft/chat',
+    path: '/minecraft/event',
     bearerToken: 'test-token',
     channelId: 'discord-channel',
     maxBodyBytes: 65536,
@@ -48,8 +48,9 @@ async function request(
     'content-type': 'application/json',
   },
   port = 43127,
+  path = '/minecraft/event',
 ): Promise<{ status: number; body: string }> {
-  const response = await fetch(`http://127.0.0.1:${port}/minecraft/chat`, {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: 'POST',
     headers,
     body,
@@ -58,6 +59,20 @@ async function request(
 }
 
 describe('Minecraft chat Discord bridge', () => {
+  it('accepts a trailing slash without changing the configured event endpoint', async () => {
+    const state = new MemoryStateStore();
+    const publisher: ChatDiscordBridgePublisher = { send: vi.fn() };
+    const bridge = new HttpChatDiscordBridge({ config: config(43126), publisher, state, logger });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const response = await request('{}', undefined, 43126, '/minecraft/event/');
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: 'invalid_minecraft_event' });
+    expect(publisher.send).not.toHaveBeenCalled();
+  });
+
   it('authenticates, publishes the message, ignores routing fields, and deduplicates events', async () => {
     const state = new MemoryStateStore();
     const publisher: ChatDiscordBridgePublisher = {
