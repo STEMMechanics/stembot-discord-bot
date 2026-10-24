@@ -317,15 +317,20 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
         difficulty: this.dependencies.config.difficulty,
         avoidChallenges: state.recentChallenges,
       });
+      const normalizedCandidate = {
+        ...candidate,
+        code: normalizeCodeSample(candidate.code),
+      };
       if (
-        candidate.code.trim().length > 0 &&
-        candidate.prompt.trim().length > 0 &&
+        normalizedCandidate.code.length > 0 &&
+        normalizedCandidate.prompt.trim().length > 0 &&
         !state.recentChallenges.some(
           (recent) =>
-            normalizeCodeFixAnswer(recent.title) === normalizeCodeFixAnswer(candidate.title),
+            normalizeCodeFixAnswer(recent.title) ===
+            normalizeCodeFixAnswer(normalizedCandidate.title),
         )
       ) {
-        challenge = candidate;
+        challenge = normalizedCandidate;
         break;
       }
 
@@ -411,7 +416,7 @@ export function formatStemCodeFix(
   challengeNumber: number,
   leadIn?: string,
 ): string {
-  const code = stripCodeFence(challenge.code);
+  const code = normalizeCodeSample(challenge.code);
   return [
     leadIn,
     `💻 **Code Fix ${challengeNumber}** · ${challenge.title}`,
@@ -427,17 +432,53 @@ function normalizeCodeFixAnswer(value: string): string {
   return value.toLocaleLowerCase().replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function stripCodeFence(value: string): string {
+function normalizeCodeSample(value: string): string {
   const trimmed = value.trim();
-  const firstCodeBlock = trimmed.match(/^```[^\r\n]*\r?\n([\s\S]*?)```/);
-  if (firstCodeBlock?.[1]) {
-    return firstCodeBlock[1].trim();
+
+  // Models occasionally return a Markdown block even when the structured
+  // output asks for raw code. Keep only the first block before adding our own
+  // Discord fence in formatStemCodeFix.
+  for (const delimiter of ['`', '"']) {
+    const delimiterPattern = delimiter === '`' ? '`{3,}' : '"{3,}';
+    const fencedBlock = trimmed.match(
+      new RegExp(`^(${delimiterPattern})[^\\r\\n]*\\r?\\n([\\s\\S]*?)\\1`),
+    );
+    if (fencedBlock?.[2]) {
+      return fencedBlock[2].trim();
+    }
   }
 
-  return trimmed
+  // If a malformed wrapper is missing its closing delimiter, still remove
+  // the opening line when it clearly identifies a language.
+  const openingLine = trimmed.match(/^(`{3,}|"{3,})([^\r\n]*)\r?\n([\s\S]*)$/);
+  const openingLanguage = openingLine?.[2];
+  const openingContent = openingLine?.[3];
+  if (
+    openingLanguage !== undefined &&
+    openingContent !== undefined &&
+    isCodeLanguageLabel(openingLanguage)
+  ) {
+    return openingContent.trim();
+  }
+
+  const withoutTrailingFence = trimmed
     .replace(/^```[a-zA-Z]*\s*/, '')
+    .replace(/^"""[a-zA-Z]*\s*/, '')
     .replace(/\s*```$/, '')
+    .replace(/\s*"""$/, '')
     .trim();
+
+  const lines = withoutTrailingFence.split(/\r?\n/);
+  const firstLine = lines[0];
+  if (lines.length > 1 && firstLine !== undefined && isCodeLanguageLabel(firstLine)) {
+    return lines.slice(1).join('\n').trim();
+  }
+
+  return withoutTrailingFence;
+}
+
+function isCodeLanguageLabel(value: string): boolean {
+  return /^(python|javascript|typescript)$/i.test(value.trim());
 }
 
 function readStemCodeFixState(value: unknown): StemCodeFixState {

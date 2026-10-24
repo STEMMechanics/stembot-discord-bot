@@ -107,6 +107,24 @@ describe('STEM Code Fix service', () => {
     );
   });
 
+  it('converts triple-quoted generated code into one Discord code block', () => {
+    const quotedCode = [
+      '"""python',
+      'width = 5',
+      'height = 3',
+      'area = width + height',
+      'print(area)',
+      '"""',
+    ].join('\n');
+
+    const formatted = formatStemCodeFix({ ...challenge(), code: quotedCode }, 1);
+
+    expect(formatted).toContain(
+      '```python\nwidth = 5\nheight = 3\narea = width + height\nprint(area)\n```',
+    );
+    expect(formatted).not.toContain('"""');
+  });
+
   it('accepts an exact fix locally and records the solver', async () => {
     const state = new MemoryStateStore();
     const engine: CodeFixEngine = {
