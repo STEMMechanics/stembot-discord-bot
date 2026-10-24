@@ -44,8 +44,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/counting-chain number:<number>` — set the next counting-chain number; requires Manage Messages.
-- `/minecraft` — server availability, player count, capacity, maintenance state, and version.
-- `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
+- `/minecraft` — server availability, player count, capacity, maintenance state, version, and online Minecraft usernames. If the configured STEMCraft response has no permitted player list, it reports that names are unavailable.
 - `/level` — your persisted XP, level and activity counts, or the public level card for another member.
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
@@ -394,7 +393,7 @@ The Website adapter reads `title`, `link`, `guid`, `description`, `pubDate`, `en
 
 The adapter keeps dates with their supplied offsets, skips malformed items, and retains a narrow compatibility fallback for older escaped XML declarations. `sm:statusCode` drives visibility, cancellation, and reminder decisions; `sm:status` is retained for display compatibility. Missing feed items are left in persistent state and are never treated as cancellations. Discord commands and workshop notifications include type-appropriate registration links or calls to action.
 
-The STEMCraft adapter supports the deployed response (`online`, `players_online`, `max_players`, `version`, `maintenance`, `message`, `players`, `checked_at`). The live endpoint currently supplies a username-only `players` array when `web-server.status.players.enabled` is enabled. Older responses without that array remain supported; `/players` reports that names are unavailable in that case. UUIDs and other identity fields are discarded.
+The STEMCraft adapter supports the deployed response (`online`, `players_online`, `max_players`, `version`, `maintenance`, `message`, `players`, `checked_at`). The live endpoint currently supplies a username-only `players` array when `web-server.status.players.enabled` is enabled. Older responses without that array remain supported; `/minecraft` reports that names are unavailable in that case. UUIDs and other identity fields are discarded.
 
 ## Requirements and local development
 
@@ -692,7 +691,7 @@ in CI.
 
 The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame, AI quiz, scramble, mention-based AI answers or user levels additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review or user levels also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
-The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
+The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/minecraft` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. Player data contains usernames only.
 
 ## Next phase
 

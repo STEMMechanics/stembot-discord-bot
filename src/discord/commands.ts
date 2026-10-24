@@ -575,46 +575,26 @@ export const remindCommand: DiscordCommand = {
 export const minecraftCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('minecraft')
-    .setDescription('Show the STEMCraft server status and player count.'),
+    .setDescription('Show STEMCraft status, player count, and online usernames.'),
 
   async execute(interaction, context): Promise<void> {
     await interaction.deferReply();
     const stemcraft = requireStemCraft(context);
     const status = await stemcraft.getServerStatus();
+
+    let players: readonly MinecraftPlayer[] | undefined;
+    try {
+      players = await stemcraft.getOnlinePlayers();
+    } catch (error: unknown) {
+      if (!(error instanceof PlayerListUnavailableError)) {
+        throw error;
+      }
+    }
+
     await interaction.editReply({
-      content: formatMinecraftStatus(status),
+      content: formatMinecraftStatus(status, players),
       allowedMentions: { parse: [] },
     });
-  },
-};
-
-/** This command intentionally has no role or permission gate. It returns usernames only. */
-export const playersCommand: DiscordCommand = {
-  data: new SlashCommandBuilder()
-    .setName('players')
-    .setDescription('List online STEMCraft usernames.'),
-
-  async execute(interaction, context): Promise<void> {
-    await interaction.deferReply();
-    const stemcraft = requireStemCraft(context);
-
-    try {
-      const players = await stemcraft.getOnlinePlayers();
-      await interaction.editReply({
-        content: formatPlayers(players),
-        allowedMentions: { parse: [] },
-      });
-    } catch (error: unknown) {
-      if (error instanceof PlayerListUnavailableError) {
-        await interaction.editReply({
-          content: 'Online Minecraft usernames are not available from STEMCraft right now.',
-          allowedMentions: { parse: [] },
-        });
-        return;
-      }
-
-      throw error;
-    }
   },
 };
 
@@ -632,7 +612,6 @@ export const commands: readonly DiscordCommand[] = [
   countingChainCommand,
   remindCommand,
   minecraftCommand,
-  playersCommand,
 ];
 
 export function getCommandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
@@ -675,7 +654,10 @@ export function formatWorkshopList(
   return truncateDiscordMessage(`${heading}\n${lines.join('\n')}${suffix}`);
 }
 
-export function formatMinecraftStatus(status: MinecraftServerStatus): string {
+export function formatMinecraftStatus(
+  status: MinecraftServerStatus,
+  players?: readonly MinecraftPlayer[],
+): string {
   const state = status.maintenance ? 'under maintenance' : status.online ? 'online' : 'offline';
   const capacity =
     status.maxPlayers === undefined
@@ -683,8 +665,11 @@ export function formatMinecraftStatus(status: MinecraftServerStatus): string {
       : `${status.playerCount}/${status.maxPlayers} players online`;
   const version = status.version ? ` · version ${status.version}` : '';
   const message = status.message ? `\n${status.message}` : '';
+  const playerList = players
+    ? formatPlayers(players)
+    : 'Online Minecraft usernames are not available from STEMCraft right now.';
 
-  return `STEMCraft is **${state}** — ${capacity}${version}.${message}`;
+  return `STEMCraft is **${state}** — ${capacity}${version}.${message}\n\n${playerList}`;
 }
 
 export function formatPlayers(players: readonly MinecraftPlayer[]): string {
@@ -988,7 +973,7 @@ function formatMonitorState(state: UptimeKumaStatus['monitors'][number]['state']
     {
       up: 'Online',
       down: 'Offline',
-      pending: 'Pending',
+      pending: 'Issue',
       maintenance: 'Maintenance',
     }[state] ?? 'Unknown'
   );
