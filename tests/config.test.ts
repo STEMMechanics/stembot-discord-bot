@@ -82,6 +82,7 @@ describe('loadConfig', () => {
       codeFix: {
         enabled: false,
         retryIntervalMs: 300000,
+        difficulty: 'intermediate',
         topic: 'beginner programming, debugging, algorithms, robotics and simple STEM projects',
         targetAgeMin: 8,
         targetAgeMax: 14,
@@ -583,6 +584,7 @@ describe('loadConfig', () => {
       STEM_WORD_REVEAL_IDLE_TIMEOUT_MS: '120000',
       STEM_CODE_FIX_ENABLED: 'true',
       STEM_CODE_FIX_CHANNEL_ID: '4234567890',
+      STEM_CODE_FIX_DIFFICULTY: 'advanced',
       STEM_CODE_FIX_TOPIC: 'robotics code',
       STEM_CODE_FIX_TARGET_AGE_MIN: '12',
       STEM_CODE_FIX_TARGET_AGE_MAX: '18',
@@ -612,6 +614,7 @@ describe('loadConfig', () => {
       enabled: true,
       channelId: '4234567890',
       retryIntervalMs: 90000,
+      difficulty: 'advanced',
       topic: 'robotics code',
       targetAgeMin: 12,
       targetAgeMax: 18,

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AppLogger } from '../logging/logger.js';
 
 export type CodeFixLanguage = 'python' | 'javascript' | 'typescript';
+export type CodeFixDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export interface CodeFixChallenge {
   language: CodeFixLanguage;
@@ -18,6 +19,7 @@ export interface CodeFixChallengeOptions {
   topic: string;
   targetAgeMin: number;
   targetAgeMax: number;
+  difficulty: CodeFixDifficulty;
   avoidChallenges?: readonly Pick<CodeFixChallenge, 'title' | 'answer'>[];
 }
 
@@ -53,6 +55,14 @@ const evaluationSchema = z.object({
 const FALLBACK_REASONING_EFFORT = 'low';
 const CHALLENGE_OUTPUT_TOKENS = 1200;
 const EVALUATION_OUTPUT_TOKENS = 300;
+const DIFFICULTY_GUIDANCE: Record<CodeFixDifficulty, string> = {
+  beginner:
+    'Use a short 5-12 line sample with a straightforward variable, operator, or simple condition bug.',
+  intermediate:
+    'Use an 8-20 line sample with a small function, loop, conditional, accumulator, or collection transformation. Make the solver trace the logic instead of spotting a trivial typo.',
+  advanced:
+    'Use a 12-28 line sample with a multi-step function, nested or stateful logic, indexing, filtering, or a small data-structure operation. The solver should need to trace two or three steps, but there must still be exactly one clear bug and no obscure library knowledge.',
+};
 
 export class OpenAICodeFixEngine implements CodeFixEngine {
   private readonly fetchImplementation: typeof fetch;
@@ -77,7 +87,8 @@ export class OpenAICodeFixEngine implements CodeFixEngine {
       'Create one small, family-friendly code-fixing challenge for a Discord STEM minigame.',
       `Use this topic guidance: ${options.topic}.`,
       `The main audience is children aged ${options.targetAgeMin}-${options.targetAgeMax}.`,
-      'Use Python, JavaScript, or TypeScript and choose one short code sample with exactly one clear bug or incorrect expression.',
+      `Difficulty: ${options.difficulty}. ${DIFFICULTY_GUIDANCE[options.difficulty]}`,
+      'Use Python, JavaScript, or TypeScript and choose one code sample with exactly one clear bug or incorrect expression.',
       'The code should be safe, self-contained, easy to read, and short enough for a Discord message. Avoid network access, files, secrets, external packages, and mature topics.',
       'Return exactly one raw code sample in the code field without Markdown fences, language labels, explanations, or duplicate copies.',
       'Explain what the code is intended to do, but do not reveal the fix in the prompt.',

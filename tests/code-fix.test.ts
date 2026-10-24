@@ -19,6 +19,7 @@ const config: StemCodeFixConfig = {
   topic: 'beginner programming',
   targetAgeMin: 8,
   targetAgeMax: 14,
+  difficulty: 'intermediate',
   maxWrongAnswers: 2,
 };
 

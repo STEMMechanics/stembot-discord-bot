@@ -2,6 +2,8 @@ import 'dotenv/config';
 
 import { z } from 'zod';
 
+import type { CodeFixDifficulty } from '../integrations/openai-code-fix.js';
+
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
 const ENVIRONMENTS = ['development', 'test', 'production'] as const;
 
@@ -221,6 +223,9 @@ const environmentSchema = z.object({
   STEM_CODE_FIX_ENABLED: booleanFromEnvironment(false),
   STEM_CODE_FIX_CHANNEL_ID: optionalDiscordId,
   STEM_CODE_FIX_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_CODE_FIX_DIFFICULTY: z
+    .enum(['beginner', 'intermediate', 'advanced'])
+    .default('intermediate'),
   STEM_CODE_FIX_TOPIC: z
     .string()
     .trim()
@@ -338,6 +343,7 @@ export interface AppConfig {
     enabled: boolean;
     channelId?: string;
     retryIntervalMs: number;
+    difficulty: CodeFixDifficulty;
     topic: string;
     targetAgeMin: number;
     targetAgeMax: number;
@@ -648,6 +654,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       enabled: values.STEM_CODE_FIX_ENABLED,
       ...(values.STEM_CODE_FIX_CHANNEL_ID ? { channelId: values.STEM_CODE_FIX_CHANNEL_ID } : {}),
       retryIntervalMs: values.STEM_CODE_FIX_RETRY_INTERVAL_MS,
+      difficulty: values.STEM_CODE_FIX_DIFFICULTY,
       topic: values.STEM_CODE_FIX_TOPIC,
       targetAgeMin: values.STEM_CODE_FIX_TARGET_AGE_MIN,
       targetAgeMax: values.STEM_CODE_FIX_TARGET_AGE_MAX,

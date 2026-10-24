@@ -226,8 +226,12 @@ restarted.
 
 ### Code Fix
 
-When `STEM_CODE_FIX_ENABLED=true`, STEMBot posts a short Python, JavaScript or
-TypeScript example with one clear bug and asks what should be fixed. Exact
+When `STEM_CODE_FIX_ENABLED=true`, STEMBot posts a child-friendly Python,
+JavaScript or TypeScript example with one clear bug and asks what should be
+fixed. `STEM_CODE_FIX_DIFFICULTY` defaults to `intermediate`, using small
+functions, loops, conditions and collection logic instead of only one-line
+operator mistakes; set it to `advanced` for longer multi-step tracing
+challenges. Exact
 canonical answers and equivalent variants are accepted locally; other
 natural-language explanations are sent to OpenAI for a structured
 `correct`, `incorrect` or `unclear` decision. Unclear answers do not consume an
@@ -475,6 +479,7 @@ npm run validate
 | `STEM_CODE_FIX_ENABLED`                     | No                  | Enable the AI code debugging minigame; defaults to `false`.                                 |
 | `STEM_CODE_FIX_CHANNEL_ID`                  | When enabled        | Discord channel where Code Fix runs.                                                        |
 | `STEM_CODE_FIX_RETRY_INTERVAL_MS`           | No                  | Retry interval when a Code Fix challenge cannot be generated; defaults to 5 minutes.        |
+| `STEM_CODE_FIX_DIFFICULTY`                  | No                  | Challenge difficulty: `beginner`, `intermediate` or `advanced`; defaults to `intermediate`. |
 | `STEM_CODE_FIX_TOPIC`                       | No                  | Topic guidance for Code Fix challenge generation.                                           |
 | `STEM_CODE_FIX_TARGET_AGE_MIN`              | No                  | Lower end of the Code Fix age range; defaults to `8`.                                       |
 | `STEM_CODE_FIX_TARGET_AGE_MAX`              | No                  | Upper end of the Code Fix age range; defaults to `14`.                                      |

@@ -92,6 +92,7 @@ describe('OpenAI Code Fix engine', () => {
       topic: 'beginner programming',
       targetAgeMin: 8,
       targetAgeMax: 14,
+      difficulty: 'advanced',
     });
     await expect(engine.evaluateAnswer(challenge, 'Multiply the width and height.')).resolves.toBe(
       'correct',
@@ -99,12 +100,14 @@ describe('OpenAI Code Fix engine', () => {
 
     const generationBody = JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)) as {
       text: { format: { name: string } };
+      input: Array<{ content: Array<{ text?: string }> }>;
     };
     const evaluationBody = JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)) as {
       text: { format: { name: string } };
       input: Array<{ content: Array<{ text?: string }> }>;
     };
     expect(generationBody.text.format.name).toBe('stem_code_fix_challenge');
+    expect(generationBody.input[0]?.content[0]?.text).toContain('Difficulty: advanced');
     expect(evaluationBody.text.format.name).toBe('stem_code_fix_answer');
     expect(evaluationBody.input[0]?.content[0]?.text).toContain('Change + to *');
     expect(evaluationBody.input[0]?.content[0]?.text).toContain('Multiply the width and height.');

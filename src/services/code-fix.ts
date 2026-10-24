@@ -4,6 +4,7 @@ import type {
   CodeFixAnswerResult,
   CodeFixChallenge,
   CodeFixEngine,
+  CodeFixDifficulty,
 } from '../integrations/openai-code-fix.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
@@ -22,6 +23,7 @@ export interface StemCodeFixConfig {
   topic: string;
   targetAgeMin: number;
   targetAgeMax: number;
+  difficulty: CodeFixDifficulty;
   maxWrongAnswers: number;
   idleTimeoutMs?: number;
 }
@@ -312,6 +314,7 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
         topic: this.dependencies.config.topic,
         targetAgeMin: this.dependencies.config.targetAgeMin,
         targetAgeMax: this.dependencies.config.targetAgeMax,
+        difficulty: this.dependencies.config.difficulty,
         avoidChallenges: state.recentChallenges,
       });
       if (
