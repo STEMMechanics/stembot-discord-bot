@@ -1,16 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
+import { timingSafeEqual } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
-import type { APIEmbed, MessageMentionOptions } from "discord.js";
-import { z } from "zod";
+import type { APIEmbed, MessageMentionOptions } from 'discord.js';
+import { z } from 'zod';
 
-import type { AppLogger } from "../logging/logger.js";
-import type { JsonState, StateStore } from "../state/state-store.js";
+import type { AppLogger } from '../logging/logger.js';
+import type { JsonState, StateStore } from '../state/state-store.js';
 
 export interface ChatDiscordBridgeConfig {
   enabled: boolean;
@@ -28,10 +23,7 @@ export interface ChatDiscordBridgeMessage {
 }
 
 export interface ChatDiscordBridgePublisher {
-  send(
-    channelId: string,
-    message: string | ChatDiscordBridgeMessage,
-  ): Promise<string>;
+  send(channelId: string, message: string | ChatDiscordBridgeMessage): Promise<string>;
 }
 
 export interface ChatDiscordBridge {
@@ -59,55 +51,55 @@ const minecraftEventBase = {
 };
 const minecraftEventDataSchema = z.record(z.string(), z.unknown());
 
-const minecraftEventSchema = z.discriminatedUnion("event", [
+const minecraftEventSchema = z.discriminatedUnion('event', [
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.chat"),
+    event: z.literal('minecraft.chat'),
     player: minecraftPlayerSchema,
     message: z.string().trim().min(1).max(1800),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.player_join"),
+    event: z.literal('minecraft.player_join'),
     player: minecraftPlayerSchema,
     data: minecraftEventDataSchema.optional(),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.player_quit"),
+    event: z.literal('minecraft.player_quit'),
     player: minecraftPlayerSchema,
     data: minecraftEventDataSchema.optional(),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.player_death"),
+    event: z.literal('minecraft.player_death'),
     player: minecraftPlayerSchema,
     data: minecraftEventDataSchema.optional(),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.server_start"),
+    event: z.literal('minecraft.server_start'),
     data: minecraftEventDataSchema.optional(),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.server_stop"),
+    event: z.literal('minecraft.server_stop'),
     data: minecraftEventDataSchema.optional(),
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.minigame_start"),
+    event: z.literal('minecraft.minigame_start'),
     data: minecraftEventDataSchema,
   }),
   z.object({
     ...minecraftEventBase,
-    event: z.literal("minecraft.minigame_end"),
+    event: z.literal('minecraft.minigame_end'),
     data: minecraftEventDataSchema,
   }),
 ]);
 
 type MinecraftEvent = z.infer<typeof minecraftEventSchema>;
-type MinecraftChatEvent = Extract<MinecraftEvent, { event: "minecraft.chat" }>;
+type MinecraftChatEvent = Extract<MinecraftEvent, { event: 'minecraft.chat' }>;
 type MinecraftStructuredEvent = Exclude<MinecraftEvent, MinecraftChatEvent>;
 
 interface ChatDiscordBridgeState {
@@ -121,9 +113,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
   private server: Server | undefined;
   private eventQueue: Promise<void> = Promise.resolve();
 
-  public constructor(
-    private readonly dependencies: ChatDiscordBridgeDependencies,
-  ) {
+  public constructor(private readonly dependencies: ChatDiscordBridgeDependencies) {
     this.serverFactory = dependencies.serverFactory ?? createServer;
   }
 
@@ -139,12 +129,12 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
 
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => {
-        server.off("listening", onListening);
+        server.off('listening', onListening);
         this.server = undefined;
         reject(error);
       };
       const onListening = (): void => {
-        server.off("error", onError);
+        server.off('error', onError);
         this.dependencies.logger.info(
           {
             host: this.dependencies.config.host,
@@ -152,17 +142,14 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
             path: this.dependencies.config.path,
             channelId: this.dependencies.config.channelId,
           },
-          "Minecraft Discord bridge listening",
+          'Minecraft Discord bridge listening',
         );
         resolve();
       };
 
-      server.once("error", onError);
-      server.once("listening", onListening);
-      server.listen(
-        this.dependencies.config.port,
-        this.dependencies.config.host,
-      );
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(this.dependencies.config.port, this.dependencies.config.host);
     });
   }
 
@@ -176,66 +163,52 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
-    this.dependencies.logger.info("Minecraft Discord bridge stopped");
+    this.dependencies.logger.info('Minecraft Discord bridge stopped');
   }
 
-  private async handleRequest(
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    if (request.url?.split("?")[0] !== this.dependencies.config.path) {
+  private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (request.url?.split('?')[0] !== this.dependencies.config.path) {
       request.resume();
-      writeJson(response, 404, { error: "not_found" });
+      writeJson(response, 404, { error: 'not_found' });
       return;
     }
 
-    if (request.method !== "POST") {
+    if (request.method !== 'POST') {
       request.resume();
-      response.setHeader("Allow", "POST");
-      writeJson(response, 405, { error: "method_not_allowed" });
+      response.setHeader('Allow', 'POST');
+      writeJson(response, 405, { error: 'method_not_allowed' });
       return;
     }
 
+    if (!hasBearerToken(request.headers.authorization, this.dependencies.config.bearerToken)) {
+      request.resume();
+      writeJson(response, 401, { error: 'unauthorized' });
+      return;
+    }
+
+    const contentType = request.headers['content-type'];
     if (
-      !hasBearerToken(
-        request.headers.authorization,
-        this.dependencies.config.bearerToken,
-      )
-    ) {
-      request.resume();
-      writeJson(response, 401, { error: "unauthorized" });
-      return;
-    }
-
-    const contentType = request.headers["content-type"];
-    if (
-      typeof contentType !== "string" ||
-      !contentType.toLocaleLowerCase().startsWith("application/json")
+      typeof contentType !== 'string' ||
+      !contentType.toLocaleLowerCase().startsWith('application/json')
     ) {
       request.resume();
       writeJson(response, 415, {
-        error: "content_type_must_be_application_json",
+        error: 'content_type_must_be_application_json',
       });
       return;
     }
 
     let body: string;
     try {
-      body = await readRequestBody(
-        request,
-        this.dependencies.config.maxBodyBytes,
-      );
+      body = await readRequestBody(request, this.dependencies.config.maxBodyBytes);
     } catch (error: unknown) {
       if (error instanceof RequestBodyTooLargeError) {
-        writeJson(response, 413, { error: "request_body_too_large" });
+        writeJson(response, 413, { error: 'request_body_too_large' });
         return;
       }
 
-      this.dependencies.logger.warn(
-        { err: error },
-        "Minecraft chat bridge request body failed",
-      );
-      writeJson(response, 400, { error: "invalid_request_body" });
+      this.dependencies.logger.warn({ err: error }, 'Minecraft chat bridge request body failed');
+      writeJson(response, 400, { error: 'invalid_request_body' });
       return;
     }
 
@@ -243,35 +216,31 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     try {
       parsed = JSON.parse(body);
     } catch {
-      writeJson(response, 400, { error: "invalid_json" });
+      writeJson(response, 400, { error: 'invalid_json' });
       return;
     }
 
     const result = minecraftEventSchema.safeParse(parsed);
     if (!result.success) {
-      writeJson(response, 400, { error: "invalid_minecraft_event" });
+      writeJson(response, 400, { error: 'invalid_minecraft_event' });
       return;
     }
 
-    const headerEventId = readHeaderValue(
-      request.headers["x-stemcraft-event-id"],
-    );
+    const headerEventId = readHeaderValue(request.headers['x-stemcraft-event-id']);
     if (headerEventId && headerEventId !== result.data.event_id) {
-      writeJson(response, 400, { error: "event_id_mismatch" });
+      writeJson(response, 400, { error: 'event_id_mismatch' });
       return;
     }
 
     try {
-      const duplicate = await this.enqueue(() =>
-        this.publishEvent(result.data),
-      );
+      const duplicate = await this.enqueue(() => this.publishEvent(result.data));
       writeJson(response, 200, { accepted: true, duplicate });
     } catch (error: unknown) {
       this.dependencies.logger.error(
         { err: error },
-        "Minecraft event bridge could not publish event",
+        'Minecraft event bridge could not publish event',
       );
-      writeJson(response, 502, { error: "discord_publish_failed" });
+      writeJson(response, 502, { error: 'discord_publish_failed' });
     }
   }
 
@@ -281,13 +250,13 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     if (state.processedEventIds.includes(event.event_id)) {
       this.dependencies.logger.info(
         { eventId: event.event_id },
-        "Duplicate Minecraft event ignored",
+        'Duplicate Minecraft event ignored',
       );
       return true;
     }
 
     const message =
-      event.event === "minecraft.chat"
+      event.event === 'minecraft.chat'
         ? `⛏️ **${event.player.name}**: ${event.message}`
         : {
             embeds: [buildMinecraftEventEmbed(event)],
@@ -297,13 +266,12 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
       this.dependencies.config.channelId!,
       message,
     );
-    state.processedEventIds = [
-      ...state.processedEventIds,
-      event.event_id,
-    ].slice(-MAX_PROCESSED_EVENT_IDS);
+    state.processedEventIds = [...state.processedEventIds, event.event_id].slice(
+      -MAX_PROCESSED_EVENT_IDS,
+    );
     rootState.chatDiscordBridge = state;
     await this.dependencies.state.save(rootState);
-    if (event.event === "minecraft.chat") {
+    if (event.event === 'minecraft.chat') {
       this.dependencies.logger.info(
         {
           eventId: event.event_id,
@@ -311,12 +279,12 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
           player: event.player.name,
           messageLength: event.message.length,
         },
-        "Minecraft chat event published to Discord",
+        'Minecraft chat event published to Discord',
       );
     } else {
       this.dependencies.logger.info(
         { eventId: event.event_id, eventType: event.event, messageId },
-        "Minecraft event embed published to Discord",
+        'Minecraft event embed published to Discord',
       );
     }
     return false;
@@ -334,64 +302,59 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
 
 function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
   const data: Record<string, unknown> = event.data ?? {};
-  const fields: NonNullable<APIEmbed["fields"]> = [];
+  const fields: NonNullable<APIEmbed['fields']> = [];
   let title: string;
   let description: string;
   let color: number;
 
   switch (event.event) {
-    case "minecraft.player_join":
-      title = "Player joined";
+    case 'minecraft.player_join':
+      title = 'Player joined';
       description = `**${event.player.name}** joined the server.`;
       color = 0x2ecc71;
-      addEmbedField(fields, "Online players", data.online_players);
+      addEmbedField(fields, 'Online players', data.online_players);
       break;
-    case "minecraft.player_quit":
-      title = "Player left";
+    case 'minecraft.player_quit':
+      title = 'Player left';
       description = `**${event.player.name}** left the server.`;
       color = 0x95a5a6;
-      addEmbedField(fields, "Online players", data.online_players);
+      addEmbedField(fields, 'Online players', data.online_players);
       break;
-    case "minecraft.player_death":
-      title = "Player death";
+    case 'minecraft.player_death':
+      title = 'Player death';
       description = `**${event.player.name}** died.`;
       color = 0xe74c3c;
-      addEmbedField(fields, "Killer", data.killer ?? "Unknown");
-      addEmbedField(fields, "Cause", data.cause);
-      addEmbedField(fields, "World", data.world);
+      addEmbedField(fields, 'Killer', data.killer ?? 'Unknown');
+      addEmbedField(fields, 'Cause', data.cause);
+      addEmbedField(fields, 'World', data.world);
       break;
-    case "minecraft.server_start":
-      title = "Server started";
-      description = "STEMCraft is online.";
+    case 'minecraft.server_start':
+      title = 'Server started';
+      description = 'STEMCraft is online.';
       color = 0x2ecc71;
       break;
-    case "minecraft.server_stop":
-      title = "Server stopping";
-      description = "STEMCraft is shutting down.";
+    case 'minecraft.server_stop':
+      title = 'Server stopping';
+      description = 'STEMCraft is shutting down.';
       color = 0xe67e22;
       break;
-    case "minecraft.minigame_start":
-    case "minecraft.minigame_end": {
-      const minigame = humanize(data.minigame) || "Minigame";
-      const started = event.event === "minecraft.minigame_start";
-      title = `${minigame} ${started ? "started" : "ended"}`;
-      description = started
-        ? `A ${minigame} match has started.`
-        : `A ${minigame} match has ended.`;
+    case 'minecraft.minigame_start':
+    case 'minecraft.minigame_end': {
+      const minigame = humanize(data.minigame) || 'Minigame';
+      const started = event.event === 'minecraft.minigame_start';
+      title = `${minigame} ${started ? 'started' : 'ended'}`;
+      description = started ? `A ${minigame} match has started.` : `A ${minigame} match has ended.`;
       color = started ? 0x2ecc71 : 0x5865f2;
       const arena = isRecord(data.arena)
         ? firstText(data.arena.name, data.arena.id)
         : asText(data.arena);
-      addEmbedField(fields, "Arena", arena);
-      addEmbedField(fields, "Status", data.status);
-      addEmbedField(fields, "Players", arrayLength(data.players));
-      addEmbedField(fields, "Spectators", arrayLength(data.spectators));
-      addEmbedField(fields, "Winner", firstText(data.winner, data.winner_team));
-      if (
-        Array.isArray(data.winner_players) &&
-        data.winner_players.length > 0
-      ) {
-        addEmbedField(fields, "Winning players", data.winner_players.length);
+      addEmbedField(fields, 'Arena', arena);
+      addEmbedField(fields, 'Status', data.status);
+      addEmbedField(fields, 'Players', arrayLength(data.players));
+      addEmbedField(fields, 'Spectators', arrayLength(data.spectators));
+      addEmbedField(fields, 'Winner', firstText(data.winner, data.winner_team));
+      if (Array.isArray(data.winner_players) && data.winner_players.length > 0) {
+        addEmbedField(fields, 'Winning players', data.winner_players.length);
       }
       break;
     }
@@ -399,11 +362,8 @@ function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
       return assertNever(event);
   }
 
-  const server =
-    asText("server" in event ? event.server : undefined) || "STEMCraft";
-  const occurredAt = asText(
-    "occurred_at" in event ? event.occurred_at : undefined,
-  );
+  const server = asText('server' in event ? event.server : undefined) || 'STEMCraft';
+  const occurredAt = asText('occurred_at' in event ? event.occurred_at : undefined);
   const timestamp =
     occurredAt && Number.isFinite(Date.parse(occurredAt))
       ? new Date(occurredAt).toISOString()
@@ -420,7 +380,7 @@ function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
 }
 
 function addEmbedField(
-  fields: NonNullable<APIEmbed["fields"]>,
+  fields: NonNullable<APIEmbed['fields']>,
   name: string,
   value: unknown,
 ): void {
@@ -430,9 +390,9 @@ function addEmbedField(
 }
 
 function asText(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (typeof value === "boolean") return String(value);
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return String(value);
   return undefined;
 }
 
@@ -451,7 +411,7 @@ function humanize(value: unknown): string | undefined {
     .split(/[_\s-]+/)
     .filter(Boolean)
     .map((part) => part[0]!.toLocaleUpperCase() + part.slice(1))
-    .join(" ");
+    .join(' ');
 }
 
 function arrayLength(value: unknown): number | undefined {
@@ -459,7 +419,7 @@ function arrayLength(value: unknown): number | undefined {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function assertNever(value: never): never {
@@ -474,15 +434,12 @@ export function createChatDiscordBridge(
 
 export class RequestBodyTooLargeError extends Error {
   public constructor() {
-    super("Request body is too large");
-    this.name = "RequestBodyTooLargeError";
+    super('Request body is too large');
+    this.name = 'RequestBodyTooLargeError';
   }
 }
 
-function readRequestBody(
-  request: IncomingMessage,
-  maxBytes: number,
-): Promise<string> {
+function readRequestBody(request: IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let byteLength = 0;
@@ -495,7 +452,7 @@ function readRequestBody(
       }
     };
 
-    request.on("data", (chunk: Buffer | string) => {
+    request.on('data', (chunk: Buffer | string) => {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       byteLength += buffer.length;
       if (byteLength > maxBytes) {
@@ -506,13 +463,13 @@ function readRequestBody(
 
       chunks.push(buffer);
     });
-    request.on("end", () => {
+    request.on('end', () => {
       if (!settled) {
         settled = true;
-        resolve(Buffer.concat(chunks).toString("utf8"));
+        resolve(Buffer.concat(chunks).toString('utf8'));
       }
     });
-    request.on("error", (error) => fail(error));
+    request.on('error', (error) => fail(error));
   });
 }
 
@@ -520,47 +477,41 @@ function hasBearerToken(
   value: string | string[] | undefined,
   expected: string | undefined,
 ): boolean {
-  if (!expected || typeof value !== "string" || !value.startsWith("Bearer ")) {
+  if (!expected || typeof value !== 'string' || !value.startsWith('Bearer ')) {
     return false;
   }
 
-  const actual = Buffer.from(value.slice("Bearer ".length), "utf8");
-  const required = Buffer.from(expected, "utf8");
+  const actual = Buffer.from(value.slice('Bearer '.length), 'utf8');
+  const required = Buffer.from(expected, 'utf8');
   return actual.length === required.length && timingSafeEqual(actual, required);
 }
 
-function readHeaderValue(
-  value: string | string[] | undefined,
-): string | undefined {
-  return typeof value === "string" ? value.trim() || undefined : undefined;
+function readHeaderValue(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value.trim() || undefined : undefined;
 }
 
-function writeJson(
-  response: ServerResponse,
-  statusCode: number,
-  payload: unknown,
-): void {
+function writeJson(response: ServerResponse, statusCode: number, payload: unknown): void {
   const body = JSON.stringify(payload);
   response.statusCode = statusCode;
-  response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.setHeader("Content-Length", Buffer.byteLength(body));
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  response.setHeader('Content-Length', Buffer.byteLength(body));
   response.end(body);
 }
 
 function readBridgeState(value: unknown): ChatDiscordBridgeState {
   if (
-    typeof value === "object" &&
+    typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
-    "version" in value &&
+    'version' in value &&
     value.version === 1 &&
-    "processedEventIds" in value &&
+    'processedEventIds' in value &&
     Array.isArray(value.processedEventIds)
   ) {
     return {
       version: 1,
       processedEventIds: value.processedEventIds
-        .filter((eventId): eventId is string => typeof eventId === "string")
+        .filter((eventId): eventId is string => typeof eventId === 'string')
         .slice(-MAX_PROCESSED_EVENT_IDS),
     };
   }
