@@ -60,7 +60,7 @@ describe('Discord command synchronization', () => {
       'level',
       'status',
       'scramble',
-      'word-reveal',
+      'mystery-lab',
       'code-fix',
       'leaderboard',
       'review',

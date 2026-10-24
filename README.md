@@ -50,7 +50,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
 - `/scramble reset` — reset the active word scramble and start a new round; requires Manage Messages.
-- `/word-reveal reset` — reset the active Mystery Lab round and start a new one; requires Manage Messages.
+- `/mystery-lab reset` — reset the active Mystery Lab round and start a new one; requires Manage Messages.
 - `/code-fix reset` — reset the active Code Fix challenge and start a new one; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
@@ -224,7 +224,7 @@ repeats the clue so it stays visible during a busy round. A completed word
 records the member's solved-round score and starts the next word. After the
 idle timeout, the answer is revealed and the game advances without changing the
 leaderboard.
-`/word-reveal reset` is available to moderators when a round needs to be
+`/mystery-lab reset` is available to moderators when a round needs to be
 restarted.
 
 ### Code Fix

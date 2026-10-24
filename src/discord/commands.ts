@@ -360,9 +360,9 @@ export const leaderboardCommand: DiscordCommand = {
   },
 };
 
-export const wordRevealCommand: DiscordCommand = {
+export const mysteryLabCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
-    .setName('word-reveal')
+    .setName('mystery-lab')
     .setDescription('Manage the Mystery Lab game.')
     .addSubcommand((subcommand) =>
       subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
@@ -625,7 +625,7 @@ export const commands: readonly DiscordCommand[] = [
   levelCommand,
   statusCommand,
   scrambleCommand,
-  wordRevealCommand,
+  mysteryLabCommand,
   codeFixCommand,
   leaderboardCommand,
   reviewCommand,
