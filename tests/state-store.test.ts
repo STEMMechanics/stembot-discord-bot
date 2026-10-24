@@ -26,4 +26,32 @@ describe('JSON state store', () => {
       await rm(temporaryDirectory, { force: true, recursive: true });
     }
   });
+
+  it('merges independent top-level updates from stale loads', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'stembot-state-'));
+    const statePath = join(temporaryDirectory, 'state.json');
+    const logger = pino({ level: 'silent' });
+
+    try {
+      const firstStore = createJsonFileStateStore(statePath, logger);
+      const secondStore = createJsonFileStateStore(statePath, logger);
+      await firstStore.save({ base: true });
+
+      const firstState = await firstStore.load();
+      const secondState = await secondStore.load();
+      firstState.userLevels = { version: 1 };
+      secondState.workshops = { version: 2 };
+
+      await firstStore.save(firstState);
+      await secondStore.save(secondState);
+
+      await expect(firstStore.load()).resolves.toEqual({
+        base: true,
+        userLevels: { version: 1 },
+        workshops: { version: 2 },
+      });
+    } finally {
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  });
 });
