@@ -74,7 +74,7 @@ describe('STEM Word Reveal service', () => {
     expect(
       formatStemWordReveal(challenge('atom', 'It is the smallest unit of an element.'), 1),
     ).toBe(
-      '🔎 **Word Reveal 1**\n\nWord: ＿ ＿ ＿ ＿\n\nHint: It is the smallest unit of an element.\n\nGuess one letter or the whole word.',
+      '🧪 **STEM Mystery Lab · Round 1**\n\nA hidden STEM word is waiting to be discovered!\n\n🔐 **Mystery word:** `＿ ＿ ＿ ＿`\n\n💡 **Hint:** It is the smallest unit of an element.\n\n🛡️ **Attempts:** 🟩🟩🟩🟩🟩🟩🟩🟩 `0/8 wrong`\n\n📝 **Checked letters:** `none`\n\n🎯 Send one letter or try the whole word!',
     );
   });
 
@@ -132,7 +132,7 @@ describe('STEM Word Reveal service', () => {
     await service.handleMessage(createMessage('wrong-1', 'z'));
     await service.handleMessage(createMessage('wrong-2', 'q'));
 
-    expect(publisher.send.mock.calls[1]?.[1]).toContain('The answer was **atom**.');
+    expect(publisher.send.mock.calls[1]?.[1]).toContain('The answer was **ATOM**.');
     expect(state.state).toMatchObject({ stemWordReveal: { round: { word: 'mars' } } });
   });
 });

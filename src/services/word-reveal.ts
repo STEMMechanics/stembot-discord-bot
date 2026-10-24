@@ -86,6 +86,7 @@ const MAX_RECENT_WORDS = 50;
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_GENERATION_ATTEMPTS = 3;
 const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
+const DEFAULT_MAX_WRONG_GUESSES = 8;
 
 export class PersistentStemWordRevealService implements StemWordRevealService {
   private readonly currentTime: () => Date;
@@ -142,7 +143,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.publishNextRound(
         rootState,
         state,
-        `⏰ This word stayed hidden for too long. The answer was **${round.word}**.`,
+        `⏰ The STEM Mystery Lab timed out. The answer was **${round.word.toUpperCase()}**.`,
       );
       this.dependencies.logger.info(
         { channelId: this.dependencies.config.channelId, roundNumber: round.roundNumber },
@@ -166,7 +167,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.publishNextRound(
         rootState,
         state,
-        '🔄 The previous Word Reveal round was reset by a moderator.',
+        '🔄 A moderator reset the STEM Mystery Lab. A fresh mystery is ready!',
       );
       return previousWord;
     });
@@ -217,7 +218,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, UNCLEAR_REACTION);
-      await this.replySafely(message, '🤔 Guess one letter or the whole word.');
+      await this.replySafely(message, '🤔 Send one letter or the whole word to make a guess.');
       return;
     }
 
@@ -244,7 +245,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.react(message, UNCLEAR_REACTION);
       await this.replySafely(
         message,
-        `🤔 The letter **${guess.toUpperCase()}** has already been tried.`,
+        `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.`,
       );
       return;
     }
@@ -272,7 +273,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.react(message, PASS_REACTION);
     await this.replySafely(
       message,
-      `✅ **${guess.toUpperCase()}** is in the word.\n\n${formatWordRevealProgress(round)}`,
+      `✅ **${guess.toUpperCase()}** is in the mystery word!\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}\n\nKeep investigating!`,
     );
   }
 
@@ -292,7 +293,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.publishNextRound(
         rootState,
         state,
-        `${feedback}\n\nThe answer was **${round.word}**.`,
+        `${feedback}\n\n💥 The mystery is over! The answer was **${round.word.toUpperCase()}**.`,
       );
       return;
     }
@@ -302,7 +303,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.react(message, WRONG_REACTION);
     await this.replySafely(
       message,
-      `❌ ${feedback} ${this.dependencies.config.maxWrongGuesses - round.wrongGuesses} wrong ${this.dependencies.config.maxWrongGuesses - round.wrongGuesses === 1 ? 'guess' : 'guesses'} left.\n\n${formatWordRevealProgress(round)}`,
+      `❌ ${feedback}\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}\n\n${this.dependencies.config.maxWrongGuesses - round.wrongGuesses} wrong ${this.dependencies.config.maxWrongGuesses - round.wrongGuesses === 1 ? 'guess' : 'guesses'} left.`,
     );
   }
 
@@ -321,7 +322,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.publishNextRound(
       rootState,
       state,
-      `🎉 <@${message.authorId}> revealed the word! It was **${round.word}**.`,
+      `🎉 <@${message.authorId}> solved the STEM mystery! The word was **${round.word.toUpperCase()}**.\n🏆 +1 solved round!`,
     );
   }
 
@@ -363,7 +364,12 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     const roundNumber = state.nextRoundNumber;
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
-      formatStemWordReveal(challenge, roundNumber, leadIn),
+      formatStemWordReveal(
+        challenge,
+        roundNumber,
+        leadIn,
+        this.dependencies.config.maxWrongGuesses,
+      ),
     );
     state.round = {
       ...challenge,
@@ -441,26 +447,44 @@ export function formatStemWordReveal(
   challenge: WordRevealChallenge,
   roundNumber: number,
   leadIn?: string,
+  maxWrongGuesses = DEFAULT_MAX_WRONG_GUESSES,
 ): string {
   const word = normalizeWordRevealWord(challenge.word);
   const maskedWord = [...word].map(() => '＿').join(' ');
   return [
     leadIn,
-    `🔎 **Word Reveal ${roundNumber}**`,
-    `Word: ${maskedWord}`,
-    `Hint: ${challenge.hint}`,
-    'Guess one letter or the whole word.',
+    `🧪 **STEM Mystery Lab · Round ${roundNumber}**`,
+    'A hidden STEM word is waiting to be discovered!',
+    `🔐 **Mystery word:** \`${maskedWord}\``,
+    `💡 **Hint:** ${challenge.hint}`,
+    `🛡️ **Attempts:** ${formatAttemptMeter(0, maxWrongGuesses)}`,
+    '📝 **Checked letters:** `none`',
+    '🎯 Send one letter or try the whole word!',
   ]
     .filter((section): section is string => Boolean(section))
     .join('\n\n');
 }
 
-function formatWordRevealProgress(round: StemWordRevealRoundState): string {
+function formatWordRevealProgress(
+  round: StemWordRevealRoundState,
+  maxWrongGuesses: number,
+): string {
   const word = normalizeWordRevealWord(round.word);
   const displayed = [...word]
     .map((letter) => (round.revealedLetters.includes(letter) ? letter.toUpperCase() : '＿'))
     .join(' ');
-  return `Word: ${displayed}\nTried letters: ${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}`;
+  return [
+    `🔐 **Mystery word:** \`${displayed}\``,
+    `🛡️ **Attempts:** ${formatAttemptMeter(round.wrongGuesses, maxWrongGuesses)}`,
+    `📝 **Checked letters:** \`${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}\``,
+  ].join('\n');
+}
+
+function formatAttemptMeter(wrongGuesses: number, maxWrongGuesses: number): string {
+  const total = Math.max(1, maxWrongGuesses);
+  const used = Math.min(Math.max(0, wrongGuesses), total);
+  const remaining = total - used;
+  return `${'🟩'.repeat(remaining)}${'🟥'.repeat(used)} \`${used}/${total} wrong\``;
 }
 
 function normalizeWordRevealGuess(value: string): string | undefined {

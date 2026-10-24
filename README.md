@@ -214,12 +214,13 @@ wrong-answer penalty or an extra round change.
 
 ### STEM Word Reveal
 
-When `STEM_WORD_REVEAL_ENABLED=true`, STEMBot posts one age-appropriate STEM
-word with one hint and shows it as masked letters. Members can submit one
-letter or the whole word. Correct letters reveal their positions; incorrect
-letters use one of the configured wrong guesses. A completed word records the
-member's solved-round score and starts the next word. After the idle timeout,
-the answer is revealed and the game advances without changing the leaderboard.
+When `STEM_WORD_REVEAL_ENABLED=true`, STEMBot opens a colourful STEM Mystery
+Lab round with one age-appropriate STEM word and one hint, shown as masked
+letters with an attempts meter. Members can submit one letter or the whole
+word. Correct letters reveal their positions; incorrect letters use one of the
+configured wrong guesses. A completed word records the member's solved-round
+score and starts the next word. After the idle timeout, the answer is revealed
+and the game advances without changing the leaderboard.
 `/word-reveal reset` is available to moderators when a round needs to be
 restarted.
 
