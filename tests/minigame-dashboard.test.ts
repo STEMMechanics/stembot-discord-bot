@@ -45,7 +45,7 @@ describe('STEM minigame dashboard', () => {
           value: expect.stringContaining('<@word-user> · **6** correct guesses in one round'),
         }),
         expect.objectContaining({
-          name: 'Word Reveal · solved rounds',
+          name: 'STEM Mystery Lab · solved rounds',
           value: expect.stringContaining('<@reveal-user> · **4** solved rounds'),
         }),
         expect.objectContaining({

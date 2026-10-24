@@ -50,7 +50,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
 - `/scramble reset` — reset the active word scramble and start a new round; requires Manage Messages.
-- `/word-reveal reset` — reset the active Word Reveal round and start a new one; requires Manage Messages.
+- `/word-reveal reset` — reset the active STEM Mystery Lab round and start a new one; requires Manage Messages.
 - `/code-fix reset` — reset the active Code Fix challenge and start a new one; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
@@ -212,9 +212,9 @@ prompt message ID. If someone submitted an answer before STEMBot posted the
 replacement prompt, that answer is marked as handled and skipped without a
 wrong-answer penalty or an extra round change.
 
-### STEM Word Reveal
+### STEM Mystery Lab
 
-When `STEM_WORD_REVEAL_ENABLED=true`, STEMBot opens a colourful STEM Mystery
+When `STEM_MYSTERY_LAB_ENABLED=true`, STEMBot opens a colourful STEM Mystery
 Lab round with one age-appropriate STEM word and one hint, shown as masked
 letters with an attempts meter. Members can submit one letter or the whole
 word. Correct letters reveal their positions; incorrect letters use one of the
@@ -242,7 +242,7 @@ When `STEM_ASK_ENABLED=true`, members can mention STEMBot followed by a STEM
 question in any channel. STEMBot answers with the shared OpenAI model without
 storing the question text. Empty or oversized questions are ignored. A message
 that mentions STEMBot is excluded from counting, quiz, scramble, word-chain,
-Word Reveal and Code Fix answer processing so the bot can answer it safely
+STEM Mystery Lab and Code Fix answer processing so the bot can answer it safely
 anywhere. In the scramble and word-chain channels, `@STEMBot hint` continues
 to route to the game hint
 behavior.
@@ -278,11 +278,11 @@ Discord Developer Portal.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single STEMBot minigame
 dashboard embed with the counting streak, best counting streak, a separate
-top-three record leaderboard for counting, quiz, scramble, word chain, Word
-Reveal and Code Fix, plus the last counting round. The counting record is each
+top-three record leaderboard for counting, quiz, scramble, word chain, STEM
+Mystery Lab and Code Fix, plus the last counting round. The counting record is each
 member's highest number,
 quiz records correct answers, scramble records solved rounds, and word chain
-records a member's best correct-guess streak in one round. Word Reveal records
+records a member's best correct-guess streak in one round. STEM Mystery Lab records
 solved rounds and Code Fix records correct fixes. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
 edited. If the message ID is omitted, STEMBot searches the most recent 100
@@ -464,14 +464,14 @@ npm run validate
 | `STEM_WORD_CHAIN_ENABLED`                   | No                  | Enable the themed STEM word chain; defaults to `false`.                                     |
 | `STEM_WORD_CHAIN_CHANNEL_ID`                | When enabled        | Discord channel where the word chain runs.                                                  |
 | `STEM_WORD_CHAIN_RETRY_INTERVAL_MS`         | No                  | Retry interval when the word-chain prompt cannot be posted; defaults to 5 minutes.          |
-| `STEM_WORD_REVEAL_ENABLED`                  | No                  | Enable the masked-word letter guessing game; defaults to `false`.                           |
-| `STEM_WORD_REVEAL_CHANNEL_ID`               | When enabled        | Discord channel where Word Reveal runs.                                                     |
-| `STEM_WORD_REVEAL_RETRY_INTERVAL_MS`        | No                  | Retry interval when a Word Reveal word cannot be generated; defaults to 5 minutes.          |
-| `STEM_WORD_REVEAL_TOPIC`                    | No                  | Topic guidance for Word Reveal word generation.                                             |
-| `STEM_WORD_REVEAL_TARGET_AGE_MIN`           | No                  | Lower end of the Word Reveal age range; defaults to `8`.                                    |
-| `STEM_WORD_REVEAL_TARGET_AGE_MAX`           | No                  | Upper end of the Word Reveal age range; defaults to `14`.                                   |
-| `STEM_WORD_REVEAL_MAX_WRONG_GUESSES`        | No                  | Wrong letters or whole-word guesses before the answer is shown; defaults to `8`.            |
-| `STEM_WORD_REVEAL_IDLE_TIMEOUT_MS`          | No                  | Time before an unanswered word is revealed; defaults to 3 days.                             |
+| `STEM_MYSTERY_LAB_ENABLED`                  | No                  | Enable the masked-word letter guessing game; defaults to `false`.                           |
+| `STEM_MYSTERY_LAB_CHANNEL_ID`               | When enabled        | Discord channel where STEM Mystery Lab runs.                                                |
+| `STEM_MYSTERY_LAB_RETRY_INTERVAL_MS`        | No                  | Retry interval when a Mystery Lab word cannot be generated; defaults to 5 minutes.          |
+| `STEM_MYSTERY_LAB_TOPIC`                    | No                  | Topic guidance for STEM Mystery Lab word generation.                                        |
+| `STEM_MYSTERY_LAB_TARGET_AGE_MIN`           | No                  | Lower end of the Mystery Lab age range; defaults to `8`.                                    |
+| `STEM_MYSTERY_LAB_TARGET_AGE_MAX`           | No                  | Upper end of the Mystery Lab age range; defaults to `14`.                                   |
+| `STEM_MYSTERY_LAB_MAX_WRONG_GUESSES`        | No                  | Wrong letters or whole-word guesses before the answer is shown; defaults to `8`.            |
+| `STEM_MYSTERY_LAB_IDLE_TIMEOUT_MS`          | No                  | Time before an unanswered mystery is revealed; defaults to 3 days.                          |
 | `STEM_CODE_FIX_ENABLED`                     | No                  | Enable the AI code debugging minigame; defaults to `false`.                                 |
 | `STEM_CODE_FIX_CHANNEL_ID`                  | When enabled        | Discord channel where Code Fix runs.                                                        |
 | `STEM_CODE_FIX_RETRY_INTERVAL_MS`           | No                  | Retry interval when a Code Fix challenge cannot be generated; defaults to 5 minutes.        |
@@ -518,6 +518,7 @@ npm run validate
 | `NODE_ENV`                                  | No                  | `development`, `test`, or `production`; defaults to `production`.                           |
 | `LOG_LEVEL`                                 | No                  | Pino level; defaults to `info`.                                                             |
 
+The previous `STEM_WORD_REVEAL_*` environment names remain accepted as legacy aliases during migration.
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
 ## Announcements, reminders, and state
@@ -526,7 +527,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Word Reveal state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft bridge event IDs and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, STEM Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft bridge event IDs and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:

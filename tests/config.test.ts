@@ -628,4 +628,32 @@ describe('loadConfig', () => {
       maxBodyBytes: 100000,
     });
   });
+
+  it('accepts the STEM Mystery Lab environment names', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      OPENAI_API_KEY: 'openai-test-key',
+      STEM_MYSTERY_LAB_ENABLED: 'true',
+      STEM_MYSTERY_LAB_CHANNEL_ID: '3234567890',
+      STEM_MYSTERY_LAB_TOPIC: 'space science',
+      STEM_MYSTERY_LAB_TARGET_AGE_MIN: '10',
+      STEM_MYSTERY_LAB_TARGET_AGE_MAX: '16',
+      STEM_MYSTERY_LAB_MAX_WRONG_GUESSES: '6',
+      STEM_MYSTERY_LAB_RETRY_INTERVAL_MS: '60000',
+      STEM_MYSTERY_LAB_IDLE_TIMEOUT_MS: '120000',
+    });
+
+    expect(config.wordReveal).toEqual({
+      enabled: true,
+      channelId: '3234567890',
+      retryIntervalMs: 60000,
+      topic: 'space science',
+      targetAgeMin: 10,
+      targetAgeMax: 16,
+      maxWrongGuesses: 6,
+      idleTimeoutMs: 120000,
+    });
+  });
 });

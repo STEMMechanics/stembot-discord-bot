@@ -282,7 +282,9 @@ export function createApplication(
           publisher: {
             send: (channelId, content) => {
               if (!discordGatewayRef.current) {
-                return Promise.reject(new Error('Discord gateway is not ready for Word Reveal'));
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for STEM Mystery Lab'),
+                );
               }
 
               return discordGatewayRef.current.sendChannelMessage(channelId, content);

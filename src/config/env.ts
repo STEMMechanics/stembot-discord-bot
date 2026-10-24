@@ -45,6 +45,31 @@ function booleanFromEnvironment(defaultValue: boolean) {
   }, z.boolean());
 }
 
+function optionalBooleanFromEnvironment() {
+  return z.preprocess((value) => {
+    if (value === undefined || value === '') {
+      return undefined;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+      }
+
+      if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+      }
+    }
+
+    return value;
+  }, z.boolean().optional());
+}
+
 function positiveMilliseconds(defaultValue: number, maximum: number) {
   return z.preprocess(
     (value) => (value === undefined || value === '' ? defaultValue : value),
@@ -70,6 +95,20 @@ function positiveInteger(defaultValue: number, maximum: number) {
   return z.preprocess(
     (value) => (value === undefined || value === '' ? defaultValue : value),
     z.coerce.number().int().positive().max(maximum),
+  );
+}
+
+function optionalPositiveInteger(maximum: number) {
+  return z.preprocess(
+    (value) => (value === undefined || value === '' ? undefined : value),
+    z.coerce.number().int().positive().max(maximum).optional(),
+  );
+}
+
+function optionalEnvironmentString() {
+  return z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).optional(),
   );
 }
 
@@ -157,6 +196,14 @@ const environmentSchema = z.object({
   STEM_WORD_CHAIN_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_CHAIN_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
   STEM_WORD_CHAIN_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_MYSTERY_LAB_ENABLED: optionalBooleanFromEnvironment(),
+  STEM_MYSTERY_LAB_CHANNEL_ID: optionalDiscordId,
+  STEM_MYSTERY_LAB_RETRY_INTERVAL_MS: optionalPositiveMilliseconds(86400000),
+  STEM_MYSTERY_LAB_TOPIC: optionalEnvironmentString(),
+  STEM_MYSTERY_LAB_TARGET_AGE_MIN: optionalPositiveInteger(18),
+  STEM_MYSTERY_LAB_TARGET_AGE_MAX: optionalPositiveInteger(18),
+  STEM_MYSTERY_LAB_MAX_WRONG_GUESSES: optionalPositiveInteger(50),
+  STEM_MYSTERY_LAB_IDLE_TIMEOUT_MS: optionalPositiveMilliseconds(31536000000),
   STEM_WORD_REVEAL_ENABLED: booleanFromEnvironment(false),
   STEM_WORD_REVEAL_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_REVEAL_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
@@ -359,6 +406,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const values = result.data;
+  const mysteryLab = {
+    enabled: values.STEM_MYSTERY_LAB_ENABLED ?? values.STEM_WORD_REVEAL_ENABLED,
+    channelId: values.STEM_MYSTERY_LAB_CHANNEL_ID ?? values.STEM_WORD_REVEAL_CHANNEL_ID,
+    retryIntervalMs:
+      values.STEM_MYSTERY_LAB_RETRY_INTERVAL_MS ?? values.STEM_WORD_REVEAL_RETRY_INTERVAL_MS,
+    topic: values.STEM_MYSTERY_LAB_TOPIC ?? values.STEM_WORD_REVEAL_TOPIC,
+    targetAgeMin: values.STEM_MYSTERY_LAB_TARGET_AGE_MIN ?? values.STEM_WORD_REVEAL_TARGET_AGE_MIN,
+    targetAgeMax: values.STEM_MYSTERY_LAB_TARGET_AGE_MAX ?? values.STEM_WORD_REVEAL_TARGET_AGE_MAX,
+    maxWrongGuesses:
+      values.STEM_MYSTERY_LAB_MAX_WRONG_GUESSES ?? values.STEM_WORD_REVEAL_MAX_WRONG_GUESSES,
+    idleTimeoutMs:
+      values.STEM_MYSTERY_LAB_IDLE_TIMEOUT_MS ?? values.STEM_WORD_REVEAL_IDLE_TIMEOUT_MS,
+  };
   const announcementWindowMs = values.WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const announcementDelayMs =
     values.WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES !== undefined
@@ -433,19 +493,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('OPENAI_API_KEY is required when STEM_WORD_CHAIN_ENABLED is true');
   }
 
-  if (values.STEM_WORD_REVEAL_ENABLED && !values.STEM_WORD_REVEAL_CHANNEL_ID) {
+  if (mysteryLab.enabled && !mysteryLab.channelId) {
     throw new Error(
-      'STEM_WORD_REVEAL_CHANNEL_ID is required when STEM_WORD_REVEAL_ENABLED is true',
+      'STEM_MYSTERY_LAB_CHANNEL_ID is required when STEM_MYSTERY_LAB_ENABLED is true',
     );
   }
 
-  if (values.STEM_WORD_REVEAL_ENABLED && !values.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required when STEM_WORD_REVEAL_ENABLED is true');
+  if (mysteryLab.enabled && !values.OPENAI_API_KEY) {
+    throw new Error('STEM_MYSTERY_LAB_ENABLED requires OPENAI_API_KEY');
   }
 
-  if (values.STEM_WORD_REVEAL_TARGET_AGE_MIN > values.STEM_WORD_REVEAL_TARGET_AGE_MAX) {
+  if (mysteryLab.targetAgeMin > mysteryLab.targetAgeMax) {
     throw new Error(
-      'STEM_WORD_REVEAL_TARGET_AGE_MIN cannot be greater than STEM_WORD_REVEAL_TARGET_AGE_MAX',
+      'STEM_MYSTERY_LAB_TARGET_AGE_MIN cannot be greater than STEM_MYSTERY_LAB_TARGET_AGE_MAX',
     );
   }
 
@@ -575,16 +635,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       idleTimeoutMs: values.STEM_WORD_CHAIN_IDLE_TIMEOUT_MS,
     },
     wordReveal: {
-      enabled: values.STEM_WORD_REVEAL_ENABLED,
-      ...(values.STEM_WORD_REVEAL_CHANNEL_ID
-        ? { channelId: values.STEM_WORD_REVEAL_CHANNEL_ID }
-        : {}),
-      retryIntervalMs: values.STEM_WORD_REVEAL_RETRY_INTERVAL_MS,
-      topic: values.STEM_WORD_REVEAL_TOPIC,
-      targetAgeMin: values.STEM_WORD_REVEAL_TARGET_AGE_MIN,
-      targetAgeMax: values.STEM_WORD_REVEAL_TARGET_AGE_MAX,
-      maxWrongGuesses: values.STEM_WORD_REVEAL_MAX_WRONG_GUESSES,
-      idleTimeoutMs: values.STEM_WORD_REVEAL_IDLE_TIMEOUT_MS,
+      enabled: mysteryLab.enabled,
+      ...(mysteryLab.channelId ? { channelId: mysteryLab.channelId } : {}),
+      retryIntervalMs: mysteryLab.retryIntervalMs,
+      topic: mysteryLab.topic,
+      targetAgeMin: mysteryLab.targetAgeMin,
+      targetAgeMax: mysteryLab.targetAgeMax,
+      maxWrongGuesses: mysteryLab.maxWrongGuesses,
+      idleTimeoutMs: mysteryLab.idleTimeoutMs,
     },
     codeFix: {
       enabled: values.STEM_CODE_FIX_ENABLED,
