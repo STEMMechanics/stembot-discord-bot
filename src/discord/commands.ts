@@ -363,7 +363,7 @@ export const leaderboardCommand: DiscordCommand = {
 export const wordRevealCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('word-reveal')
-    .setDescription('Manage the STEM Mystery Lab game.')
+    .setDescription('Manage the Mystery Lab game.')
     .addSubcommand((subcommand) =>
       subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
     ),
@@ -372,7 +372,7 @@ export const wordRevealCommand: DiscordCommand = {
     const wordReveal = context.wordReveal;
     if (!wordReveal) {
       await interaction.reply({
-        content: 'The STEM Mystery Lab game is not enabled.',
+        content: 'The Mystery Lab game is not enabled.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -380,7 +380,7 @@ export const wordRevealCommand: DiscordCommand = {
 
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
       await interaction.reply({
-        content: 'You need Manage Messages permission to reset STEM Mystery Lab.',
+        content: 'You need Manage Messages permission to reset Mystery Lab.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -390,8 +390,8 @@ export const wordRevealCommand: DiscordCommand = {
     const previousWord = await wordReveal.resetRound();
     await interaction.editReply({
       content: previousWord
-        ? `STEM Mystery Lab reset. The previous answer was **${previousWord}**.`
-        : 'No active STEM Mystery Lab round was found; a new one has been started.',
+        ? `Mystery Lab reset. The previous answer was **${previousWord}**.`
+        : 'No active Mystery Lab round was found; a new one has been started.',
     });
   },
 };

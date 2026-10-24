@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   WordRevealChallenge,
+  WordRevealDifficulty,
   WordRevealGenerator,
 } from '../integrations/openai-word-reveal.js';
 import type { AppLogger } from '../logging/logger.js';
@@ -21,6 +22,7 @@ export interface StemWordRevealConfig {
   topic: string;
   targetAgeMin: number;
   targetAgeMax: number;
+  difficulty: WordRevealDifficulty;
   maxWrongGuesses: number;
   idleTimeoutMs?: number;
 }
@@ -143,7 +145,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.publishNextRound(
         rootState,
         state,
-        `⏰ The STEM Mystery Lab timed out. The answer was **${round.word.toUpperCase()}**.`,
+        `⏰ This mystery went quiet for too long. The answer was **${round.word.toUpperCase()}**.`,
       );
       this.dependencies.logger.info(
         { channelId: this.dependencies.config.channelId, roundNumber: round.roundNumber },
@@ -167,7 +169,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.publishNextRound(
         rootState,
         state,
-        '🔄 A moderator reset the STEM Mystery Lab. A fresh mystery is ready!',
+        '🔄 A moderator reset the Mystery Lab. A fresh mystery is ready!',
       );
       return previousWord;
     });
@@ -218,7 +220,10 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, UNCLEAR_REACTION);
-      await this.replySafely(message, '🤔 Send one letter or the whole word to make a guess.');
+      await this.replySafely(
+        message,
+        `🤔 Send one letter or the whole word to make a guess.\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}`,
+      );
       return;
     }
 
@@ -245,7 +250,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       await this.react(message, UNCLEAR_REACTION);
       await this.replySafely(
         message,
-        `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.`,
+        `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}`,
       );
       return;
     }
@@ -322,7 +327,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.publishNextRound(
       rootState,
       state,
-      `🎉 <@${message.authorId}> solved the STEM mystery! The word was **${round.word.toUpperCase()}**.\n🏆 +1 solved round!`,
+      `🎉 <@${message.authorId}> solved the mystery! The word was **${round.word.toUpperCase()}**.\n🏆 +1 solved round!`,
     );
   }
 
@@ -338,11 +343,12 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
         topic: this.dependencies.config.topic,
         targetAgeMin: this.dependencies.config.targetAgeMin,
         targetAgeMax: this.dependencies.config.targetAgeMax,
+        difficulty: this.dependencies.config.difficulty,
         avoidWords,
       });
       const word = normalizeWordRevealWord(candidate.word);
       if (
-        /^[a-z]{4,14}$/.test(word) &&
+        isValidWordRevealWord(word, this.dependencies.config.difficulty) &&
         !avoidWords.includes(word) &&
         candidate.hint.trim().length > 0 &&
         !containsWholeWord(candidate.hint, word)
@@ -453,13 +459,13 @@ export function formatStemWordReveal(
   const maskedWord = [...word].map(() => '＿').join(' ');
   return [
     leadIn,
-    `🧪 **STEM Mystery Lab · Round ${roundNumber}**`,
-    'A hidden STEM word is waiting to be discovered!',
-    `🔐 **Mystery word:** \`${maskedWord}\``,
-    `💡 **Hint:** ${challenge.hint}`,
-    `🛡️ **Attempts:** ${formatAttemptMeter(0, maxWrongGuesses)}`,
-    '📝 **Checked letters:** `none`',
-    '🎯 Send one letter or try the whole word!',
+    `🕵️ **Mystery Lab · Round ${roundNumber}**`,
+    'A mystery word is hidden in plain sight. Reveal it one letter at a time!',
+    `🧩 **Hidden word:** \`${maskedWord}\``,
+    `💡 **Clue:** ${challenge.hint}`,
+    `❤️ **Wrong guesses:** ${formatAttemptMeter(0, maxWrongGuesses)}`,
+    '🔎 **Tried letters:** `none`',
+    '✏️ Guess one letter or the whole word!',
   ]
     .filter((section): section is string => Boolean(section))
     .join('\n\n');
@@ -474,9 +480,10 @@ function formatWordRevealProgress(
     .map((letter) => (round.revealedLetters.includes(letter) ? letter.toUpperCase() : '＿'))
     .join(' ');
   return [
-    `🔐 **Mystery word:** \`${displayed}\``,
-    `🛡️ **Attempts:** ${formatAttemptMeter(round.wrongGuesses, maxWrongGuesses)}`,
-    `📝 **Checked letters:** \`${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}\``,
+    `🧩 **Hidden word:** \`${displayed}\``,
+    `❤️ **Wrong guesses:** ${formatAttemptMeter(round.wrongGuesses, maxWrongGuesses)}`,
+    `🔎 **Tried letters:** \`${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}\``,
+    `💡 **Clue:** ${round.hint}`,
   ].join('\n');
 }
 
@@ -484,7 +491,7 @@ function formatAttemptMeter(wrongGuesses: number, maxWrongGuesses: number): stri
   const total = Math.max(1, maxWrongGuesses);
   const used = Math.min(Math.max(0, wrongGuesses), total);
   const remaining = total - used;
-  return `${'🟩'.repeat(remaining)}${'🟥'.repeat(used)} \`${used}/${total} wrong\``;
+  return `${'🟢'.repeat(remaining)}${'⚫'.repeat(used)} \`${used}/${total} wrong\``;
 }
 
 function normalizeWordRevealGuess(value: string): string | undefined {
@@ -494,6 +501,14 @@ function normalizeWordRevealGuess(value: string): string | undefined {
 
 function normalizeWordRevealWord(value: string): string {
   return value.trim().toLocaleLowerCase();
+}
+
+function isValidWordRevealWord(word: string, difficulty: WordRevealDifficulty): boolean {
+  if (!/^[a-z]{4,16}$/.test(word)) {
+    return false;
+  }
+
+  return difficulty !== 'challenging' || word.length >= 6;
 }
 
 function containsWholeWord(value: string, word: string): boolean {
@@ -511,7 +526,7 @@ function readStemWordRevealState(value: unknown): StemWordRevealState {
     ? value.recentWords
         .filter((word): word is string => typeof word === 'string')
         .map(normalizeWordRevealWord)
-        .filter((word) => /^[a-z]{4,14}$/.test(word))
+        .filter((word) => /^[a-z]{4,16}$/.test(word))
         .slice(-MAX_RECENT_WORDS)
     : [];
   const processedMessageIds = Array.isArray(value.processedMessageIds)
@@ -549,7 +564,7 @@ function readRoundState(value: unknown): StemWordRevealRoundState | null {
     typeof value.roundNumber !== 'number' ||
     !Number.isSafeInteger(value.roundNumber) ||
     value.roundNumber < 1 ||
-    !/^[a-z]{4,14}$/.test(word) ||
+    !/^[a-z]{4,16}$/.test(word) ||
     hint.length === 0 ||
     typeof value.startedAt !== 'string'
   ) {

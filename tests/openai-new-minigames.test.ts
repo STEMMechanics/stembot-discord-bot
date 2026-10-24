@@ -33,6 +33,7 @@ describe('OpenAI Word Reveal generator', () => {
         topic: 'space science',
         targetAgeMin: 8,
         targetAgeMax: 14,
+        difficulty: 'challenging',
         avoidWords: ['planet', 'gravity'],
       }),
     ).resolves.toEqual({
@@ -49,6 +50,8 @@ describe('OpenAI Word Reveal generator', () => {
     expect(body.store).toBe(false);
     expect(body.text.format.name).toBe('stem_word_reveal_challenge');
     expect(body.input[0]?.content[0]?.text).toContain('aged 8-14');
+    expect(body.input[0]?.content[0]?.text).toContain('Difficulty: challenging');
+    expect(body.input[0]?.content[0]?.text).toContain('It does not need to be STEM-related.');
     expect(body.input[0]?.content[0]?.text).toContain('<recent-word-reveal-answers>');
     expect(body.input[0]?.content[0]?.text).toContain('gravity');
   });

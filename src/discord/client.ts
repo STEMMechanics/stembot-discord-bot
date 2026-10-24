@@ -1337,7 +1337,7 @@ export function buildMinigameInfoEmbed(
       'Post a GIF or picture containing the next number.',
       '',
       '**Other games**',
-      'Answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore STEM Mystery Lab, or fix a small code bug.',
+      'Answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore Mystery Lab, or fix a small code bug.',
       '',
       'Each game has its own top-three record leaderboard.',
     ].join('\n'),
@@ -1393,11 +1393,11 @@ export function buildMinigameInfoEmbed(
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: 'STEM Mystery Lab · solved rounds',
+        name: 'Mystery Lab · solved rounds',
         value: formatMinigameLeaderboard(
           leaderboards.wordReveal,
           'solved rounds',
-          'STEM Mystery Lab is not enabled.',
+          'Mystery Lab is not enabled.',
         ),
         inline: false,
       },

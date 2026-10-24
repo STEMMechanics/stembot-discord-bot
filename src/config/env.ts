@@ -3,9 +3,12 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 import type { CodeFixDifficulty } from '../integrations/openai-code-fix.js';
+import type { WordRevealDifficulty } from '../integrations/openai-word-reveal.js';
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
 const ENVIRONMENTS = ['development', 'test', 'production'] as const;
+const DEFAULT_MYSTERY_LAB_TOPIC =
+  'a varied mix of animals, nature, food, places, everyday objects, hobbies, stories, music, sport, inventions, science and technology';
 
 const optionalDiscordId = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -114,6 +117,13 @@ function optionalEnvironmentString() {
   );
 }
 
+function optionalWordRevealDifficulty() {
+  return z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['standard', 'challenging']).optional(),
+  );
+}
+
 const environmentSchema = z.object({
   DISCORD_TOKEN: z.string().trim().min(1, 'is required'),
   DISCORD_CLIENT_ID: z.string().trim().regex(/^\d+$/, 'must be a Discord application ID'),
@@ -202,6 +212,7 @@ const environmentSchema = z.object({
   STEM_MYSTERY_LAB_CHANNEL_ID: optionalDiscordId,
   STEM_MYSTERY_LAB_RETRY_INTERVAL_MS: optionalPositiveMilliseconds(86400000),
   STEM_MYSTERY_LAB_TOPIC: optionalEnvironmentString(),
+  STEM_MYSTERY_LAB_DIFFICULTY: optionalWordRevealDifficulty(),
   STEM_MYSTERY_LAB_TARGET_AGE_MIN: optionalPositiveInteger(18),
   STEM_MYSTERY_LAB_TARGET_AGE_MAX: optionalPositiveInteger(18),
   STEM_MYSTERY_LAB_MAX_WRONG_GUESSES: optionalPositiveInteger(50),
@@ -209,13 +220,8 @@ const environmentSchema = z.object({
   STEM_WORD_REVEAL_ENABLED: booleanFromEnvironment(false),
   STEM_WORD_REVEAL_CHANNEL_ID: optionalDiscordId,
   STEM_WORD_REVEAL_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
-  STEM_WORD_REVEAL_TOPIC: z
-    .string()
-    .trim()
-    .min(1)
-    .default(
-      'a balanced mix of science, technology, engineering, mathematics, space, nature, robotics and computing',
-    ),
+  STEM_WORD_REVEAL_DIFFICULTY: optionalWordRevealDifficulty(),
+  STEM_WORD_REVEAL_TOPIC: z.string().trim().min(1).default(DEFAULT_MYSTERY_LAB_TOPIC),
   STEM_WORD_REVEAL_TARGET_AGE_MIN: positiveInteger(8, 18),
   STEM_WORD_REVEAL_TARGET_AGE_MAX: positiveInteger(14, 18),
   STEM_WORD_REVEAL_MAX_WRONG_GUESSES: positiveInteger(8, 50),
@@ -334,6 +340,7 @@ export interface AppConfig {
     channelId?: string;
     retryIntervalMs: number;
     topic: string;
+    difficulty: WordRevealDifficulty;
     targetAgeMin: number;
     targetAgeMax: number;
     maxWrongGuesses: number;
@@ -418,6 +425,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     retryIntervalMs:
       values.STEM_MYSTERY_LAB_RETRY_INTERVAL_MS ?? values.STEM_WORD_REVEAL_RETRY_INTERVAL_MS,
     topic: values.STEM_MYSTERY_LAB_TOPIC ?? values.STEM_WORD_REVEAL_TOPIC,
+    difficulty: (values.STEM_MYSTERY_LAB_DIFFICULTY ??
+      values.STEM_WORD_REVEAL_DIFFICULTY ??
+      'challenging') as WordRevealDifficulty,
     targetAgeMin: values.STEM_MYSTERY_LAB_TARGET_AGE_MIN ?? values.STEM_WORD_REVEAL_TARGET_AGE_MIN,
     targetAgeMax: values.STEM_MYSTERY_LAB_TARGET_AGE_MAX ?? values.STEM_WORD_REVEAL_TARGET_AGE_MAX,
     maxWrongGuesses:
@@ -645,6 +655,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ...(mysteryLab.channelId ? { channelId: mysteryLab.channelId } : {}),
       retryIntervalMs: mysteryLab.retryIntervalMs,
       topic: mysteryLab.topic,
+      difficulty: mysteryLab.difficulty,
       targetAgeMin: mysteryLab.targetAgeMin,
       targetAgeMax: mysteryLab.targetAgeMax,
       maxWrongGuesses: mysteryLab.maxWrongGuesses,

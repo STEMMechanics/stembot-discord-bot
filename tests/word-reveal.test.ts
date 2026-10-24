@@ -20,6 +20,7 @@ const config: StemWordRevealConfig = {
   channelId: 'word-reveal-channel',
   retryIntervalMs: 300000,
   topic: 'mixed STEM',
+  difficulty: 'standard',
   targetAgeMin: 8,
   targetAgeMax: 14,
   maxWrongGuesses: 2,
@@ -74,7 +75,7 @@ describe('STEM Word Reveal service', () => {
     expect(
       formatStemWordReveal(challenge('atom', 'It is the smallest unit of an element.'), 1),
     ).toBe(
-      '🧪 **STEM Mystery Lab · Round 1**\n\nA hidden STEM word is waiting to be discovered!\n\n🔐 **Mystery word:** `＿ ＿ ＿ ＿`\n\n💡 **Hint:** It is the smallest unit of an element.\n\n🛡️ **Attempts:** 🟩🟩🟩🟩🟩🟩🟩🟩 `0/8 wrong`\n\n📝 **Checked letters:** `none`\n\n🎯 Send one letter or try the whole word!',
+      '🕵️ **Mystery Lab · Round 1**\n\nA mystery word is hidden in plain sight. Reveal it one letter at a time!\n\n🧩 **Hidden word:** `＿ ＿ ＿ ＿`\n\n💡 **Clue:** It is the smallest unit of an element.\n\n❤️ **Wrong guesses:** 🟢🟢🟢🟢🟢🟢🟢🟢 `0/8 wrong`\n\n🔎 **Tried letters:** `none`\n\n✏️ Guess one letter or the whole word!',
     );
   });
 
