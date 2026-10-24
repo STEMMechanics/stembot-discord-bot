@@ -124,6 +124,7 @@ describe('loadConfig', () => {
         pollIntervalMs: 300000,
         reminder1HourEnabled: true,
         reminder24HoursEnabled: true,
+        reminderLocations: ['STEMCraft'],
         remindersEnabled: true,
         timeZone: 'Australia/Brisbane',
       },
@@ -160,6 +161,7 @@ describe('loadConfig', () => {
       WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS: '14',
       WORKSHOP_POLL_INTERVAL_MS: '60000',
       WORKSHOP_REMINDER_1H_ENABLED: '0',
+      WORKSHOP_REMINDER_LOCATIONS: 'stemcraft, Online',
       WORKSHOP_TIME_ZONE: 'UTC',
     });
 
@@ -168,6 +170,7 @@ describe('loadConfig', () => {
       announcementWindowMs: 1209600000,
       pollIntervalMs: 60000,
       reminder1HourEnabled: false,
+      reminderLocations: ['stemcraft', 'Online'],
       timeZone: 'UTC',
       announcementChannelId: '123456789012345678',
       reminderChannelId: '223456789012345678',

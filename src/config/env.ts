@@ -117,6 +117,26 @@ function optionalEnvironmentString() {
   );
 }
 
+function commaSeparatedEnvironmentStrings(defaultValue: readonly string[]) {
+  return z.preprocess(
+    (value) => {
+      if (value === undefined || value === '') {
+        return [...defaultValue];
+      }
+
+      if (typeof value === 'string') {
+        return value
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+      }
+
+      return value;
+    },
+    z.array(z.string().min(1)),
+  );
+}
+
 function optionalWordRevealDifficulty() {
   return z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -159,6 +179,7 @@ const environmentSchema = z.object({
   WORKSHOP_REMINDERS_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_24H_ENABLED: booleanFromEnvironment(true),
   WORKSHOP_REMINDER_1H_ENABLED: booleanFromEnvironment(true),
+  WORKSHOP_REMINDER_LOCATIONS: commaSeparatedEnvironmentStrings(['STEMCraft']),
   WORKSHOP_ANNOUNCE_INITIAL_SYNC: booleanFromEnvironment(false),
   STREAMING_NOTIFICATIONS_ENABLED: booleanFromEnvironment(false),
   DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID: optionalDiscordId,
@@ -396,6 +417,7 @@ export interface AppConfig {
     remindersEnabled: boolean;
     reminder24HoursEnabled: boolean;
     reminder1HourEnabled: boolean;
+    reminderLocations: string[];
     announceInitialSync: boolean;
     announcementChannelId?: string;
     reminderChannelId?: string;
@@ -717,6 +739,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       remindersEnabled: values.WORKSHOP_REMINDERS_ENABLED,
       reminder24HoursEnabled: values.WORKSHOP_REMINDER_24H_ENABLED,
       reminder1HourEnabled: values.WORKSHOP_REMINDER_1H_ENABLED,
+      reminderLocations: values.WORKSHOP_REMINDER_LOCATIONS,
       announceInitialSync: values.WORKSHOP_ANNOUNCE_INITIAL_SYNC,
       ...(values.DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID
         ? { announcementChannelId: values.DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID }

@@ -517,6 +517,7 @@ npm run validate
 | `WORKSHOP_REMINDERS_ENABLED`                | No                  | Enable workshop reminders; defaults to `true`.                                              |
 | `WORKSHOP_REMINDER_24H_ENABLED`             | No                  | Enable the 24-hour reminder; defaults to `true`.                                            |
 | `WORKSHOP_REMINDER_1H_ENABLED`              | No                  | Enable the 1-hour reminder; defaults to `true`.                                             |
+| `WORKSHOP_REMINDER_LOCATIONS`               | No                  | Case-insensitive comma-separated locations; defaults to `STEMCraft`. Use `*` for all.       |
 | `WORKSHOP_ANNOUNCE_INITIAL_SYNC`            | No                  | Announce all feed items on the first sync; defaults to `false` to avoid startup spam.       |
 | `DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID`  | No                  | Channel for workshop lifecycle announcements.                                               |
 | `DISCORD_WORKSHOP_REMINDER_CHANNEL_ID`      | No                  | Channel for 24-hour and 1-hour reminders.                                                   |
@@ -609,7 +610,7 @@ recovery to the most recent 50 messages. `historyRecoveryPending` is written
 when Discord history or reconciliation cannot complete; it causes the next
 startup to retry while retaining the last durable game state.
 
-Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled workshops do not receive reminders. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
+Reminders are due when polling observes the configured lead time and the workshop has not started. A late poll after downtime still sends a reminder if the workshop is still in the future. Cancelled, private, and hidden workshops do not receive reminders, and `WORKSHOP_REMINDER_LOCATIONS` filters reminders by case-insensitive location without affecting lifecycle announcements. A small process failure window remains between a Discord send and the following state write; the state marker is written immediately after each successful delivery.
 
 Streaming scheduling/trigger commands are still a placeholder. The configuration flag and channel are reserved until the Discord workflow and voice-link policy are agreed.
 

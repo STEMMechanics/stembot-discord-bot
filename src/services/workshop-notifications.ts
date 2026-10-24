@@ -23,6 +23,7 @@ export interface WorkshopNotificationConfig {
   remindersEnabled: boolean;
   reminder24HoursEnabled: boolean;
   reminder1HourEnabled: boolean;
+  reminderLocations: readonly string[];
   announceInitialSync: boolean;
   announcementChannelId?: string;
   reminderChannelId?: string;
@@ -338,6 +339,10 @@ export class PersistentWorkshopNotificationService implements WorkshopNotificati
       return;
     }
 
+    if (!isReminderLocationAllowed(workshop.location, this.dependencies.config.reminderLocations)) {
+      return;
+    }
+
     const now = this.currentTime().getTime();
     const startsAt = workshop.startsAt.getTime();
     if (startsAt <= now) {
@@ -458,6 +463,25 @@ function hashWorkshopFingerprint(workshop: WorkshopRecord, includeDescription: b
   });
 
   return createHash('sha256').update(canonical).digest('hex');
+}
+
+function isReminderLocationAllowed(
+  location: string | undefined,
+  filters: readonly string[],
+): boolean {
+  if (filters.length === 0 || filters.some((filter) => filter.trim() === '*')) {
+    return true;
+  }
+
+  const normalizedLocation = normalizeReminderLocation(location);
+  return (
+    normalizedLocation.length > 0 &&
+    filters.some((filter) => normalizeReminderLocation(filter) === normalizedLocation)
+  );
+}
+
+function normalizeReminderLocation(value: string | undefined): string {
+  return value?.trim().toLocaleLowerCase() ?? '';
 }
 
 export function formatWorkshopAnnouncement(

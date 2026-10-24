@@ -26,6 +26,7 @@ const config: WorkshopNotificationConfig = {
   remindersEnabled: true,
   reminder24HoursEnabled: true,
   reminder1HourEnabled: true,
+  reminderLocations: ['STEMCraft'],
   announceInitialSync: true,
   announcementChannelId: 'announcement-channel',
   reminderChannelId: 'reminder-channel',
@@ -303,6 +304,45 @@ describe('persistent workshop notifications', () => {
     expect(state.state).toMatchObject({
       workshopNotifications: {
         reminders: { 'redstone-1:24-hours': expect.any(String) },
+      },
+    });
+  });
+
+  it('filters reminders by location without filtering lifecycle announcements', async () => {
+    const matchingWorkshop = workshop({
+      location: 'stemcraft',
+      startsAt: new Date('2026-10-22T23:00:00.000Z'),
+      endsAt: new Date('2026-10-23T00:00:00.000Z'),
+    });
+    const filteredWorkshop = workshop({
+      externalId: 'online-1',
+      title: 'Online Design Challenge',
+      location: 'Online',
+      startsAt: new Date('2026-10-22T23:00:00.000Z'),
+      endsAt: new Date('2026-10-23T00:00:00.000Z'),
+    });
+    const website: WebsiteIntegration = {
+      getWorkshops: vi.fn().mockResolvedValue([matchingWorkshop, filteredWorkshop]),
+    };
+    const state = new MemoryStateStore();
+    const sendChannelMessage = vi.fn<SendChannelPayload>().mockResolvedValue('message-1');
+
+    await createService(website, state, sendChannelMessage).synchronizeWorkshops();
+
+    expect(
+      sendChannelMessage.mock.calls.filter((call) => call[0] === 'announcement-channel'),
+    ).toHaveLength(2);
+    expect(
+      sendChannelMessage.mock.calls.filter((call) => call[0] === 'reminder-channel'),
+    ).toHaveLength(1);
+    expect(state.state).toMatchObject({
+      workshopNotifications: {
+        reminders: { 'redstone-1:24-hours': expect.any(String) },
+      },
+    });
+    expect(state.state).not.toMatchObject({
+      workshopNotifications: {
+        reminders: { 'online-1:24-hours': expect.any(String) },
       },
     });
   });
