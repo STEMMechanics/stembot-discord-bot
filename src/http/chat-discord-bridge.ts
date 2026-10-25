@@ -14,7 +14,15 @@ export interface ChatDiscordBridgeConfig {
   path: string;
   bearerToken?: string;
   channelId?: string;
+  minecraftUrl?: string;
   maxBodyBytes: number;
+}
+
+export interface DiscordChatMessage {
+  messageId: string;
+  username: string;
+  displayName: string;
+  message: string;
 }
 
 export interface ChatDiscordBridgeMessage {
@@ -29,6 +37,7 @@ export interface ChatDiscordBridgePublisher {
 export interface ChatDiscordBridge {
   start(): Promise<void>;
   stop(): Promise<void>;
+  forwardDiscordMessage(message: DiscordChatMessage): Promise<void>;
 }
 
 interface ChatDiscordBridgeDependencies {
@@ -37,6 +46,7 @@ interface ChatDiscordBridgeDependencies {
   state: StateStore<JsonState>;
   logger: AppLogger;
   serverFactory?: typeof createServer;
+  fetchImplementation?: typeof fetch;
 }
 
 const minecraftPlayerSchema = z.object({
@@ -121,13 +131,18 @@ interface ChatDiscordBridgeState {
 }
 
 const MAX_PROCESSED_EVENT_IDS = 1000;
+const DISCORD_TO_MINECRAFT_TIMEOUT_MS = 5_000;
+const DISCORD_TO_MINECRAFT_MAX_RETRIES = 3;
 export class HttpChatDiscordBridge implements ChatDiscordBridge {
   private readonly serverFactory: typeof createServer;
+  private readonly fetchImplementation: typeof fetch;
   private server: Server | undefined;
   private eventQueue: Promise<void> = Promise.resolve();
+  private discordMessageQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: ChatDiscordBridgeDependencies) {
     this.serverFactory = dependencies.serverFactory ?? createServer;
+    this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
   }
 
   public async start(): Promise<void> {
@@ -177,6 +192,93 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
       server.close((error) => (error ? reject(error) : resolve()));
     });
     this.dependencies.logger.info('Minecraft Discord bridge stopped');
+  }
+
+  public forwardDiscordMessage(message: DiscordChatMessage): Promise<void> {
+    const next = this.discordMessageQueue
+      .catch(() => undefined)
+      .then(() => this.postDiscordMessageToMinecraft(message));
+    this.discordMessageQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async postDiscordMessageToMinecraft(message: DiscordChatMessage): Promise<void> {
+    const targetUrl = this.dependencies.config.minecraftUrl;
+    const bearerToken = this.dependencies.config.bearerToken;
+    if (!targetUrl || !bearerToken) {
+      throw new Error(
+        'STEMCraft chat URL and bearer token are required for Discord chat forwarding',
+      );
+    }
+
+    const body = JSON.stringify({
+      event: 'discord.chat',
+      event_id: message.messageId,
+      username: message.username,
+      displayname: message.displayName,
+      message: message.message,
+    });
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= DISCORD_TO_MINECRAFT_MAX_RETRIES; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DISCORD_TO_MINECRAFT_TIMEOUT_MS);
+      let response: Response | undefined;
+      let requestError: unknown;
+      try {
+        response = await this.fetchImplementation(targetUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Discord-Message-Id': message.messageId,
+          },
+          body,
+          signal: controller.signal,
+        });
+      } catch (error: unknown) {
+        requestError = error;
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (requestError !== undefined) {
+        lastError = requestError;
+        if (attempt === DISCORD_TO_MINECRAFT_MAX_RETRIES) {
+          break;
+        }
+        await retryDelay(attempt);
+        continue;
+      }
+
+      if (!response) {
+        lastError = new Error('STEMCraft chat request returned no response');
+        break;
+      }
+
+      if (response.ok) {
+        this.dependencies.logger.info(
+          { messageId: message.messageId, username: message.username },
+          'Discord chat forwarded to Minecraft',
+        );
+        return;
+      }
+
+      if (response.status >= 400 && response.status < 500) {
+        throw new Error(`STEMCraft chat request was rejected with HTTP ${response.status}`);
+      }
+
+      lastError = new Error(`STEMCraft chat request failed with HTTP ${response.status}`);
+      if (attempt === DISCORD_TO_MINECRAFT_MAX_RETRIES) {
+        break;
+      }
+      await retryDelay(attempt);
+    }
+
+    throw new Error('STEMCraft chat request failed after retries', { cause: lastError });
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -464,6 +566,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled Minecraft event: ${JSON.stringify(value)}`);
+}
+
+export function createDiscordChatMessage(input: {
+  messageId: string;
+  username: string;
+  displayName: string;
+  content: string;
+  authorIsBot?: boolean;
+  isWebhook?: boolean;
+}): DiscordChatMessage | undefined {
+  if (input.authorIsBot || input.isWebhook) {
+    return undefined;
+  }
+
+  const message = input.content.trim();
+  if (!message) {
+    return undefined;
+  }
+
+  const username = input.username.trim();
+  const displayName = input.displayName.trim() || username;
+  if (!username || !displayName) {
+    return undefined;
+  }
+
+  return {
+    messageId: input.messageId,
+    username,
+    displayName,
+    message,
+  };
+}
+
+async function retryDelay(attempt: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.min(5_000, 250 * 2 ** attempt));
+  });
 }
 
 export function createChatDiscordBridge(

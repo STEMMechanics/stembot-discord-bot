@@ -328,6 +328,13 @@ incoming `server` and `channel` values are deliberately ignored. The optional
 retries with an already delivered event ID are acknowledged without a second
 Discord message.
 
+When `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL` is set, the same channel also
+forwards human Discord messages to STEMCraft with the same
+`CHAT_DISCORD_BRIDGE_BEARER_TOKEN`. STEMBot sends only the message's text,
+username, and display name. Bot/webhook messages and messages with no text are
+ignored, so embeds, images, and attachments are not copied into Minecraft.
+Messages containing text plus an attachment forward the text only.
+
 Global chat and death events are plain text announcements. Player join and quit
 events use compact embeds; command, minigame, and server lifecycle events use
 structured embeds. Embed mentions are disabled, and valid `occurred_at`
@@ -376,6 +383,18 @@ started`. Minigame end events retain their arena, status, participant and
 winner details. The bridge
 stores delivered event IDs in the shared state file so a plugin retry after a
 network timeout is safe.
+
+STEMBot posts Discord chat to the STEMCraft URL in this form:
+
+```json
+{
+  "event": "discord.chat",
+  "event_id": "123456789012345678",
+  "username": "alex",
+  "displayname": "Alex",
+  "message": "Hello from Discord"
+}
+```
 
 ### Discord command synchronization
 
@@ -530,6 +549,7 @@ npm run validate
 | `CHAT_DISCORD_BRIDGE_PATH`                  | No                  | HTTP path; defaults to `/minecraft/event`.                                                  |
 | `CHAT_DISCORD_BRIDGE_BEARER_TOKEN`          | When enabled        | Bearer token required by the Minecraft plugin.                                              |
 | `CHAT_DISCORD_BRIDGE_CHANNEL_ID`            | When enabled        | Discord channel receiving accepted Minecraft chat messages.                                 |
+| `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL`         | For reverse chat    | STEMCraft `POST /api/v1/chat/discord` URL for Discord-to-Minecraft chat.                    |
 | `CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES`        | No                  | Maximum request size; defaults to 64 KiB.                                                   |
 | `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
 | `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                               |

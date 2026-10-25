@@ -614,6 +614,7 @@ describe('loadConfig', () => {
       CHAT_DISCORD_BRIDGE_PATH: '/bridge/minecraft',
       CHAT_DISCORD_BRIDGE_BEARER_TOKEN: 'bridge-token',
       CHAT_DISCORD_BRIDGE_CHANNEL_ID: '5234567890',
+      CHAT_DISCORD_BRIDGE_STEMCRAFT_URL: 'https://play.example.test:8950/api/v1/chat/discord',
       CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: '100000',
     });
 
@@ -646,6 +647,7 @@ describe('loadConfig', () => {
       path: '/bridge/minecraft',
       bearerToken: 'bridge-token',
       channelId: '5234567890',
+      minecraftUrl: 'https://play.example.test:8950/api/v1/chat/discord',
       maxBodyBytes: 100000,
     });
   });
