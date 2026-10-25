@@ -4,6 +4,7 @@ import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createDiscordChatMessage,
   HttpChatDiscordBridge,
   type ChatDiscordBridgeConfig,
   type ChatDiscordBridgePublisher,
@@ -59,6 +60,62 @@ async function request(
 }
 
 describe('Minecraft chat Discord bridge', () => {
+  it('forwards Discord text to STEMCraft with the shared bearer token', async () => {
+    const fetchImplementation = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    const bridge = new HttpChatDiscordBridge({
+      config: { ...config(), minecraftUrl: 'https://minecraft.example.test/api/v1/chat/discord' },
+      publisher: { send: vi.fn() },
+      state: new MemoryStateStore(),
+      logger,
+      fetchImplementation,
+    });
+
+    await bridge.forwardDiscordMessage({
+      messageId: 'discord-message-1',
+      username: 'alex',
+      displayName: 'Alex',
+      message: 'Hello from Discord',
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://minecraft.example.test/api/v1/chat/discord',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Discord-Message-Id': 'discord-message-1',
+        },
+        body: JSON.stringify({
+          event: 'discord.chat',
+          event_id: 'discord-message-1',
+          username: 'alex',
+          displayname: 'Alex',
+          message: 'Hello from Discord',
+        }),
+      }),
+    );
+  });
+
+  it('ignores bot, webhook, and contentless Discord messages', () => {
+    const base = {
+      messageId: 'discord-message-1',
+      username: 'alex',
+      displayName: 'Alex',
+      content: 'Hello',
+    };
+
+    expect(createDiscordChatMessage({ ...base, authorIsBot: true })).toBeUndefined();
+    expect(createDiscordChatMessage({ ...base, isWebhook: true })).toBeUndefined();
+    expect(createDiscordChatMessage({ ...base, content: '   ' })).toBeUndefined();
+    expect(createDiscordChatMessage(base)).toEqual({
+      messageId: 'discord-message-1',
+      username: 'alex',
+      displayName: 'Alex',
+      message: 'Hello',
+    });
+  });
+
   it('accepts a trailing slash without changing the configured event endpoint', async () => {
     const state = new MemoryStateStore();
     const publisher: ChatDiscordBridgePublisher = { send: vi.fn() };

@@ -335,24 +335,6 @@ export function createApplication(
           logger,
         })
       : undefined);
-  const discord =
-    dependencies?.discord ??
-    createDiscordGateway(config, logger, {
-      website,
-      stemcraft,
-      timeZone: config.workshops.timeZone,
-      ...(countingChain ? { countingChain } : {}),
-      ...(quiz ? { quiz } : {}),
-      ...(scramble ? { scramble } : {}),
-      ...(wordChain ? { wordChain } : {}),
-      ...(wordReveal ? { wordReveal } : {}),
-      ...(codeFix ? { codeFix } : {}),
-      ...(reminders ? { reminders } : {}),
-      ...(ask ? { ask } : {}),
-      ...(userLevels ? { userLevels } : {}),
-      ...(uptime ? { uptime } : {}),
-    });
-  discordGatewayRef.current = discord;
   const chatDiscordBridge =
     dependencies?.chatDiscordBridge ??
     (config.chatDiscordBridge.enabled
@@ -378,6 +360,25 @@ export function createApplication(
           logger,
         })
       : undefined);
+  const discord =
+    dependencies?.discord ??
+    createDiscordGateway(config, logger, {
+      website,
+      stemcraft,
+      timeZone: config.workshops.timeZone,
+      ...(countingChain ? { countingChain } : {}),
+      ...(quiz ? { quiz } : {}),
+      ...(scramble ? { scramble } : {}),
+      ...(wordChain ? { wordChain } : {}),
+      ...(wordReveal ? { wordReveal } : {}),
+      ...(codeFix ? { codeFix } : {}),
+      ...(reminders ? { reminders } : {}),
+      ...(ask ? { ask } : {}),
+      ...(userLevels ? { userLevels } : {}),
+      ...(uptime ? { uptime } : {}),
+      ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
+    });
+  discordGatewayRef.current = discord;
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
   const uptimeStatus =
     dependencies?.uptimeStatus ??

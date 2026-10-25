@@ -277,6 +277,7 @@ const environmentSchema = z.object({
   CHAT_DISCORD_BRIDGE_PATH: z.string().trim().min(1).default('/minecraft/event'),
   CHAT_DISCORD_BRIDGE_BEARER_TOKEN: optionalSecret,
   CHAT_DISCORD_BRIDGE_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_STEMCRAFT_URL: optionalUrl,
   CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: positiveInteger(64 * 1024, 2 * 1024 * 1024),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
   STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
@@ -403,6 +404,7 @@ export interface AppConfig {
     path: string;
     bearerToken?: string;
     channelId?: string;
+    minecraftUrl?: string;
     maxBodyBytes: number;
   };
   levels: {
@@ -722,6 +724,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : {}),
       ...(values.CHAT_DISCORD_BRIDGE_CHANNEL_ID
         ? { channelId: values.CHAT_DISCORD_BRIDGE_CHANNEL_ID }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL
+        ? { minecraftUrl: values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL }
         : {}),
       maxBodyBytes: values.CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES,
     },
