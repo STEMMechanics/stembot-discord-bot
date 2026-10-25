@@ -328,10 +328,10 @@ incoming `server` and `channel` values are deliberately ignored. The optional
 retries with an already delivered event ID are acknowledged without a second
 Discord message.
 
-Global chat remains a plain text announcement. Player join/quit/death/command,
-minigame start/end, and server start/stop events are rendered as Discord embeds. Embed
-mentions are disabled; each event includes its server name in the footer, and
-valid `occurred_at` timestamps appear in the embed timestamp.
+Global chat and death events are plain text announcements. Player join and quit
+events use compact embeds; command, minigame, and server lifecycle events use
+structured embeds. Embed mentions are disabled, and valid `occurred_at`
+timestamps appear in the embed timestamp.
 The recommended path is `/minecraft/event`; requests with a trailing slash are
 accepted as well. Existing deployments can keep `/minecraft/chat` when that
 path is explicitly configured in both the bot and the Minecraft plugin.
@@ -369,10 +369,11 @@ STEMBot publishes chat as `Alex » Hello from Minecraft` with Discord mentions
 disabled and no pickaxe prefix. Player join and quit events use compact embeds
 with the player avatar and a green or red edge. Death events are plain text in
 the form `💀 Alex was slain by Zombie`; the plugin's `data.message` is used when
-present, with `Alex died` as the fallback. Command events use embeds with the
-command text (the plugin redacts configured sensitive command arguments);
-server lifecycle events identify the server state; minigame events include the
-game, arena, status, participant counts, and winner when available. The bridge
+present, with `Alex died` as the fallback. Commands are plain text in the form
+`Alex >> \`/spawn home\``. Server start/stop and minigame start events use
+compact green/red embeds; a minigame start looks like `Mobarena - Forest
+started`. Minigame end events retain their arena, status, participant and
+winner details. The bridge
 stores delivered event IDs in the shared state file so a plugin retry after a
 network timeout is safe.
 
