@@ -370,7 +370,7 @@ disabled and no pickaxe prefix. Player join and quit events use compact embeds
 with the player avatar and a green or red edge. Death events are plain text in
 the form `💀 Alex was slain by Zombie`; the plugin's `data.message` is used when
 present, with `Alex died` as the fallback. Commands are plain text in the form
-`Alex >> \`/spawn home\``. Server start/stop and minigame start events use
+`Alex » \`/spawn home\``. Server start/stop and minigame start events use
 compact green/red embeds; a minigame start looks like `Mobarena - Forest
 started`. Minigame end events retain their arena, status, participant and
 winner details. The bridge

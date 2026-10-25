@@ -172,7 +172,7 @@ describe('Minecraft chat Discord bridge', () => {
           player: { name: 'Alex', uuid: 'player-1' },
           data: { command: '/spawn home' },
         },
-        expectedText: 'Alex >> `/spawn home`',
+        expectedText: 'Alex » `/spawn home`',
         fields: [],
       },
       {
