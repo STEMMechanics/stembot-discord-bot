@@ -276,7 +276,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
         : event.event === 'minecraft.player_death'
           ? `💀 ${getMinecraftDeathMessage(event)}`
           : event.event === 'minecraft.player_command'
-            ? `${event.player.name} >> \`${event.data.command}\``
+            ? `${event.player.name} » \`${event.data.command}\``
             : {
                 embeds: [buildMinecraftEventEmbed(event)],
                 allowedMentions: { parse: [] },
