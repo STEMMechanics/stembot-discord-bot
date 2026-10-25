@@ -78,6 +78,14 @@ const minecraftEventSchema = z.discriminatedUnion('event', [
   }),
   z.object({
     ...minecraftEventBase,
+    event: z.literal('minecraft.player_command'),
+    player: minecraftPlayerSchema,
+    data: z.object({
+      command: z.string().trim().min(1).max(1800),
+    }),
+  }),
+  z.object({
+    ...minecraftEventBase,
     event: z.literal('minecraft.server_start'),
     data: minecraftEventDataSchema.optional(),
   }),
@@ -326,9 +334,16 @@ function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
       title = 'Player death';
       description = `**${event.player.name}** died.`;
       color = 0xe74c3c;
+      addEmbedField(fields, 'Message', data.message);
       addEmbedField(fields, 'Killer', data.killer ?? 'Unknown');
       addEmbedField(fields, 'Cause', data.cause);
       addEmbedField(fields, 'World', data.world);
+      break;
+    case 'minecraft.player_command':
+      title = 'Player command';
+      description = `**${event.player.name}** ran a command.`;
+      color = 0x5865f2;
+      addEmbedField(fields, 'Command', data.command);
       break;
     case 'minecraft.server_start':
       title = 'Server started';

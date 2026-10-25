@@ -328,8 +328,8 @@ incoming `server` and `channel` values are deliberately ignored. The optional
 retries with an already delivered event ID are acknowledged without a second
 Discord message.
 
-Global chat remains a plain text announcement. Player join/quit/death, minigame
-start/end, and server start/stop events are rendered as Discord embeds. Embed
+Global chat remains a plain text announcement. Player join/quit/death/command,
+minigame start/end, and server start/stop events are rendered as Discord embeds. Embed
 mentions are disabled; each event includes its server name in the footer, and
 valid `occurred_at` timestamps appear in the embed timestamp.
 The recommended path is `/minecraft/event`; requests with a trailing slash are
@@ -359,7 +359,7 @@ X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
 ```
 
 The structured event names are `minecraft.player_join`,
-`minecraft.player_quit`, `minecraft.player_death`,
+`minecraft.player_quit`, `minecraft.player_death`, `minecraft.player_command`,
 `minecraft.minigame_start`, `minecraft.minigame_end`,
 `minecraft.server_start`, and `minecraft.server_stop`. Player events carry
 the player object; server events have no player; event-specific details are in
@@ -367,7 +367,9 @@ the player object; server events have no player; event-specific details are in
 
 STEMBot publishes chat as `⛏️ **Alex**: Hello from Minecraft` with Discord
 mentions disabled. Structured events use embeds: player join/quit include their
-online player count; death includes the player, killer, cause, and world;
+online player count; death includes the rendered death message, player, killer,
+cause, and world; command events include the command text (the plugin redacts
+configured sensitive command arguments);
 server lifecycle events identify the server state; minigame events include the
 game, arena, status, participant counts, and winner when available. The bridge
 stores delivered event IDs in the shared state file so a plugin retry after a

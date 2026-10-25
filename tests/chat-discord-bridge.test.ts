@@ -153,15 +153,31 @@ describe('Minecraft chat Discord bridge', () => {
         event: 'minecraft.player_death',
         payload: {
           player: { name: 'Alex', uuid: 'player-1' },
-          data: { killer: null, cause: 'fall', world: 'survival' },
+          data: {
+            message: 'Alex hit the ground too hard',
+            killer: null,
+            cause: 'fall',
+            world: 'survival',
+          },
         },
         title: 'Player death',
         description: '**Alex** died.',
         fields: [
+          ['Message', 'Alex hit the ground too hard'],
           ['Killer', 'Unknown'],
           ['Cause', 'fall'],
           ['World', 'survival'],
         ],
+      },
+      {
+        event: 'minecraft.player_command',
+        payload: {
+          player: { name: 'Alex', uuid: 'player-1' },
+          data: { command: '/spawn home' },
+        },
+        title: 'Player command',
+        description: '**Alex** ran a command.',
+        fields: [['Command', '/spawn home']],
       },
       {
         event: 'minecraft.server_start',
