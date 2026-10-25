@@ -108,7 +108,8 @@ const minecraftEventSchema = z.discriminatedUnion('event', [
 
 type MinecraftEvent = z.infer<typeof minecraftEventSchema>;
 type MinecraftChatEvent = Extract<MinecraftEvent, { event: 'minecraft.chat' }>;
-type MinecraftStructuredEvent = Exclude<MinecraftEvent, MinecraftChatEvent>;
+type MinecraftPlayerDeathEvent = Extract<MinecraftEvent, { event: 'minecraft.player_death' }>;
+type MinecraftEmbedEvent = Exclude<MinecraftEvent, MinecraftChatEvent | MinecraftPlayerDeathEvent>;
 
 interface ChatDiscordBridgeState {
   version: 1;
@@ -267,11 +268,13 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
 
     const message =
       event.event === 'minecraft.chat'
-        ? `⛏️ **${event.player.name}**: ${event.message}`
-        : {
-            embeds: [buildMinecraftEventEmbed(event)],
-            allowedMentions: { parse: [] },
-          };
+        ? `${event.player.name} » ${event.message}`
+        : event.event === 'minecraft.player_death'
+          ? `💀 ${getMinecraftDeathMessage(event)}`
+          : {
+              embeds: [buildMinecraftEventEmbed(event)],
+              allowedMentions: { parse: [] },
+            };
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
       message,
@@ -290,6 +293,16 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
           messageLength: event.message.length,
         },
         'Minecraft chat event published to Discord',
+      );
+    } else if (event.event === 'minecraft.player_death') {
+      this.dependencies.logger.info(
+        {
+          eventId: event.event_id,
+          messageId,
+          player: event.player.name,
+          messageLength: asText(event.data?.message)?.length ?? 0,
+        },
+        'Minecraft death event published to Discord',
       );
     } else {
       this.dependencies.logger.info(
@@ -310,7 +323,18 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
   }
 }
 
-function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
+function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
+  if (event.event === 'minecraft.player_join' || event.event === 'minecraft.player_quit') {
+    const joined = event.event === 'minecraft.player_join';
+    return {
+      color: joined ? 0x00ff00 : 0xff0000,
+      author: {
+        name: `${event.player.name} ${joined ? 'joined' : 'left'} the server`,
+        icon_url: `https://mc-heads.net/avatar/${encodeURIComponent(event.player.name)}/64.png`,
+      },
+    };
+  }
+
   const data: Record<string, unknown> = event.data ?? {};
   const fields: NonNullable<APIEmbed['fields']> = [];
   let title: string;
@@ -318,27 +342,6 @@ function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
   let color: number;
 
   switch (event.event) {
-    case 'minecraft.player_join':
-      title = 'Player joined';
-      description = `**${event.player.name}** joined the server.`;
-      color = 0x2ecc71;
-      addEmbedField(fields, 'Online players', data.online_players);
-      break;
-    case 'minecraft.player_quit':
-      title = 'Player left';
-      description = `**${event.player.name}** left the server.`;
-      color = 0x95a5a6;
-      addEmbedField(fields, 'Online players', data.online_players);
-      break;
-    case 'minecraft.player_death':
-      title = 'Player death';
-      description = `**${event.player.name}** died.`;
-      color = 0xe74c3c;
-      addEmbedField(fields, 'Message', data.message);
-      addEmbedField(fields, 'Killer', data.killer ?? 'Unknown');
-      addEmbedField(fields, 'Cause', data.cause);
-      addEmbedField(fields, 'World', data.world);
-      break;
     case 'minecraft.player_command':
       title = 'Player command';
       description = `**${event.player.name}** ran a command.`;
@@ -394,6 +397,10 @@ function buildMinecraftEventEmbed(event: MinecraftStructuredEvent): APIEmbed {
     ...(timestamp ? { timestamp } : {}),
     ...(fields.length > 0 ? { fields } : {}),
   };
+}
+
+function getMinecraftDeathMessage(event: MinecraftPlayerDeathEvent): string {
+  return asText(event.data?.message) || `${event.player.name} died`;
 }
 
 function addEmbedField(

@@ -365,11 +365,12 @@ The structured event names are `minecraft.player_join`,
 the player object; server events have no player; event-specific details are in
 `data`.
 
-STEMBot publishes chat as `⛏️ **Alex**: Hello from Minecraft` with Discord
-mentions disabled. Structured events use embeds: player join/quit include their
-online player count; death includes the rendered death message, player, killer,
-cause, and world; command events include the command text (the plugin redacts
-configured sensitive command arguments);
+STEMBot publishes chat as `Alex » Hello from Minecraft` with Discord mentions
+disabled and no pickaxe prefix. Player join and quit events use compact embeds
+with the player avatar and a green or red edge. Death events are plain text in
+the form `💀 Alex was slain by Zombie`; the plugin's `data.message` is used when
+present, with `Alex died` as the fallback. Command events use embeds with the
+command text (the plugin redacts configured sensitive command arguments);
 server lifecycle events identify the server state; minigame events include the
 game, arena, status, participant counts, and winner when available. The bridge
 stores delivered event IDs in the shared state file so a plugin retry after a

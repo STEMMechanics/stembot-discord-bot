@@ -108,10 +108,7 @@ describe('Minecraft chat Discord bridge', () => {
     expect(duplicate.status).toBe(200);
     expect(JSON.parse(duplicate.body)).toMatchObject({ accepted: true, duplicate: true });
     expect(publisher.send).toHaveBeenCalledOnce();
-    expect(publisher.send).toHaveBeenCalledWith(
-      'discord-channel',
-      '⛏️ **Alex**: Hello from Minecraft',
-    );
+    expect(publisher.send).toHaveBeenCalledWith('discord-channel', 'Alex » Hello from Minecraft');
   });
 
   it('publishes structured Minecraft events as embeds with mentions disabled', async () => {
@@ -128,15 +125,22 @@ describe('Minecraft chat Discord bridge', () => {
     activeBridges.push(bridge);
     await bridge.start();
 
-    const cases = [
+    const cases: Array<{
+      event: string;
+      payload: Record<string, unknown>;
+      expectedText?: string;
+      compact?: { color: number; author: string };
+      title?: string;
+      description?: string;
+      fields: Array<[string, string]>;
+    }> = [
       {
         event: 'minecraft.player_join',
         payload: {
           player: { name: 'Alex', uuid: 'player-1' },
           data: { online_players: 12 },
         },
-        title: 'Player joined',
-        description: '**Alex** joined the server.',
+        compact: { color: 0x00ff00, author: 'Alex joined the server' },
         fields: [['Online players', '12']],
       },
       {
@@ -145,8 +149,7 @@ describe('Minecraft chat Discord bridge', () => {
           player: { name: 'Alex', uuid: 'player-1' },
           data: { online_players: 11 },
         },
-        title: 'Player left',
-        description: '**Alex** left the server.',
+        compact: { color: 0xff0000, author: 'Alex left the server' },
         fields: [['Online players', '11']],
       },
       {
@@ -160,14 +163,8 @@ describe('Minecraft chat Discord bridge', () => {
             world: 'survival',
           },
         },
-        title: 'Player death',
-        description: '**Alex** died.',
-        fields: [
-          ['Message', 'Alex hit the ground too hard'],
-          ['Killer', 'Unknown'],
-          ['Cause', 'fall'],
-          ['World', 'survival'],
-        ],
+        expectedText: '💀 Alex hit the ground too hard',
+        fields: [],
       },
       {
         event: 'minecraft.player_command',
@@ -262,8 +259,28 @@ describe('Minecraft chat Discord bridge', () => {
       const call = send.mock.calls[index];
       expect(call?.[0]).toBe('discord-channel');
       const message = call?.[1];
+      if (testCase.expectedText) {
+        expect(message).toBe(testCase.expectedText);
+        continue;
+      }
       if (!message || typeof message === 'string') {
         throw new Error('Expected a structured Discord embed message');
+      }
+
+      if (testCase.compact) {
+        expect(message).toEqual({
+          embeds: [
+            {
+              color: testCase.compact.color,
+              author: {
+                name: testCase.compact.author,
+                icon_url: 'https://mc-heads.net/avatar/Alex/64.png',
+              },
+            },
+          ],
+          allowedMentions: { parse: [] },
+        });
+        continue;
       }
 
       const embed = message.embeds[0];
