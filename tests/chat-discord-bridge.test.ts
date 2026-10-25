@@ -172,29 +172,26 @@ describe('Minecraft chat Discord bridge', () => {
           player: { name: 'Alex', uuid: 'player-1' },
           data: { command: '/spawn home' },
         },
-        title: 'Player command',
-        description: '**Alex** ran a command.',
-        fields: [['Command', '/spawn home']],
+        expectedText: 'Alex >> `/spawn home`',
+        fields: [],
       },
       {
         event: 'minecraft.server_start',
         payload: { data: {} },
-        title: 'Server started',
-        description: 'STEMCraft is online.',
+        compact: { color: 0x00ff00, author: 'Server started' },
         fields: [],
       },
       {
         event: 'minecraft.server_stop',
         payload: { data: {} },
-        title: 'Server stopping',
-        description: 'STEMCraft is shutting down.',
+        compact: { color: 0xff0000, author: 'Server stopped' },
         fields: [],
       },
       {
         event: 'minecraft.minigame_start',
         payload: {
           data: {
-            minigame: 'bedwars',
+            minigame: 'mobarena',
             arena: { id: 'forest', name: 'Forest', world: 'bedwars_forest' },
             status: 'running',
             players: [{ name: 'Alex', uuid: 'player-1' }],
@@ -202,14 +199,8 @@ describe('Minecraft chat Discord bridge', () => {
             teams: [],
           },
         },
-        title: 'Bedwars started',
-        description: 'A Bedwars match has started.',
-        fields: [
-          ['Arena', 'Forest'],
-          ['Status', 'running'],
-          ['Players', '1'],
-          ['Spectators', '0'],
-        ],
+        compact: { color: 0x00ff00, author: 'Mobarena - Forest started' },
+        fields: [],
       },
       {
         event: 'minecraft.minigame_end',
@@ -274,7 +265,10 @@ describe('Minecraft chat Discord bridge', () => {
               color: testCase.compact.color,
               author: {
                 name: testCase.compact.author,
-                icon_url: 'https://mc-heads.net/avatar/Alex/64.png',
+                ...(testCase.event === 'minecraft.player_join' ||
+                testCase.event === 'minecraft.player_quit'
+                  ? { icon_url: 'https://mc-heads.net/avatar/Alex/64.png' }
+                  : {}),
               },
             },
           ],
