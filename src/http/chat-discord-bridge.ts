@@ -382,7 +382,6 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
       return assertNever(event);
   }
 
-  const server = asText('server' in event ? event.server : undefined) || 'STEMCraft';
   const occurredAt = asText('occurred_at' in event ? event.occurred_at : undefined);
   const timestamp =
     occurredAt && Number.isFinite(Date.parse(occurredAt))
@@ -393,7 +392,6 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
     title,
     description,
     color,
-    footer: { text: `STEMCraft • ${server}` },
     ...(timestamp ? { timestamp } : {}),
     ...(fields.length > 0 ? { fields } : {}),
   };
