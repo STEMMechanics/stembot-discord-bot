@@ -109,7 +109,11 @@ const minecraftEventSchema = z.discriminatedUnion('event', [
 type MinecraftEvent = z.infer<typeof minecraftEventSchema>;
 type MinecraftChatEvent = Extract<MinecraftEvent, { event: 'minecraft.chat' }>;
 type MinecraftPlayerDeathEvent = Extract<MinecraftEvent, { event: 'minecraft.player_death' }>;
-type MinecraftEmbedEvent = Exclude<MinecraftEvent, MinecraftChatEvent | MinecraftPlayerDeathEvent>;
+type MinecraftPlayerCommandEvent = Extract<MinecraftEvent, { event: 'minecraft.player_command' }>;
+type MinecraftEmbedEvent = Exclude<
+  MinecraftEvent,
+  MinecraftChatEvent | MinecraftPlayerDeathEvent | MinecraftPlayerCommandEvent
+>;
 
 interface ChatDiscordBridgeState {
   version: 1;
@@ -271,10 +275,12 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
         ? `${event.player.name} » ${event.message}`
         : event.event === 'minecraft.player_death'
           ? `💀 ${getMinecraftDeathMessage(event)}`
-          : {
-              embeds: [buildMinecraftEventEmbed(event)],
-              allowedMentions: { parse: [] },
-            };
+          : event.event === 'minecraft.player_command'
+            ? `${event.player.name} >> \`${event.data.command}\``
+            : {
+                embeds: [buildMinecraftEventEmbed(event)],
+                allowedMentions: { parse: [] },
+              };
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
       message,
@@ -304,6 +310,16 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
         },
         'Minecraft death event published to Discord',
       );
+    } else if (event.event === 'minecraft.player_command') {
+      this.dependencies.logger.info(
+        {
+          eventId: event.event_id,
+          messageId,
+          player: event.player.name,
+          commandLength: event.data.command.length,
+        },
+        'Minecraft command event published to Discord',
+      );
     } else {
       this.dependencies.logger.info(
         { eventId: event.event_id, eventType: event.event, messageId },
@@ -324,6 +340,8 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
 }
 
 function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
+  const data: Record<string, unknown> = event.data ?? {};
+
   if (event.event === 'minecraft.player_join' || event.event === 'minecraft.player_quit') {
     const joined = event.event === 'minecraft.player_join';
     return {
@@ -335,36 +353,36 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
     };
   }
 
-  const data: Record<string, unknown> = event.data ?? {};
+  if (event.event === 'minecraft.server_start' || event.event === 'minecraft.server_stop') {
+    const started = event.event === 'minecraft.server_start';
+    return {
+      color: started ? 0x00ff00 : 0xff0000,
+      author: { name: started ? 'Server started' : 'Server stopped' },
+    };
+  }
+
+  if (event.event === 'minecraft.minigame_start') {
+    const minigame = humanize(data.minigame) || 'Minigame';
+    const arena = isRecord(data.arena)
+      ? firstText(data.arena.name, data.arena.id)
+      : asText(data.arena);
+    return {
+      color: 0x00ff00,
+      author: { name: `${minigame} - ${arena || 'Unknown arena'} started` },
+    };
+  }
+
   const fields: NonNullable<APIEmbed['fields']> = [];
   let title: string;
   let description: string;
   let color: number;
 
   switch (event.event) {
-    case 'minecraft.player_command':
-      title = 'Player command';
-      description = `**${event.player.name}** ran a command.`;
-      color = 0x5865f2;
-      addEmbedField(fields, 'Command', data.command);
-      break;
-    case 'minecraft.server_start':
-      title = 'Server started';
-      description = 'STEMCraft is online.';
-      color = 0x2ecc71;
-      break;
-    case 'minecraft.server_stop':
-      title = 'Server stopping';
-      description = 'STEMCraft is shutting down.';
-      color = 0xe67e22;
-      break;
-    case 'minecraft.minigame_start':
     case 'minecraft.minigame_end': {
       const minigame = humanize(data.minigame) || 'Minigame';
-      const started = event.event === 'minecraft.minigame_start';
-      title = `${minigame} ${started ? 'started' : 'ended'}`;
-      description = started ? `A ${minigame} match has started.` : `A ${minigame} match has ended.`;
-      color = started ? 0x2ecc71 : 0x5865f2;
+      title = `${minigame} ended`;
+      description = `A ${minigame} match has ended.`;
+      color = 0x5865f2;
       const arena = isRecord(data.arena)
         ? firstText(data.arena.name, data.arena.id)
         : asText(data.arena);

@@ -369,10 +369,11 @@ STEMBot publishes chat as `Alex » Hello from Minecraft` with Discord mentions
 disabled and no pickaxe prefix. Player join and quit events use compact embeds
 with the player avatar and a green or red edge. Death events are plain text in
 the form `💀 Alex was slain by Zombie`; the plugin's `data.message` is used when
-present, with `Alex died` as the fallback. Command events use embeds with the
-command text (the plugin redacts configured sensitive command arguments);
-server lifecycle events identify the server state; minigame events include the
-game, arena, status, participant counts, and winner when available. The bridge
+present, with `Alex died` as the fallback. Commands are plain text in the form
+`Alex >> \`/spawn home\``. Server start/stop and minigame start events use
+compact green/red embeds; a minigame start looks like `Mobarena - Forest
+started`. Minigame end events retain their arena, status, participant and
+winner details. The bridge
 stores delivered event IDs in the shared state file so a plugin retry after a
 network timeout is safe.
 
