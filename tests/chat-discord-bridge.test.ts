@@ -287,9 +287,9 @@ describe('Minecraft chat Discord bridge', () => {
       expect(embed).toMatchObject({
         title: testCase.title,
         description: testCase.description,
-        footer: { text: 'STEMCraft • survival' },
         timestamp: '2026-10-24T01:02:03.000Z',
       });
+      expect(embed.footer).toBeUndefined();
       expect(message.allowedMentions).toEqual({ parse: [] });
       const expectedFields = testCase.fields;
       if (expectedFields.length === 0) {

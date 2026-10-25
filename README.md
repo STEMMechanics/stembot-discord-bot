@@ -328,10 +328,10 @@ incoming `server` and `channel` values are deliberately ignored. The optional
 retries with an already delivered event ID are acknowledged without a second
 Discord message.
 
-Global chat remains a plain text announcement. Player join/quit/death/command,
-minigame start/end, and server start/stop events are rendered as Discord embeds. Embed
-mentions are disabled; each event includes its server name in the footer, and
-valid `occurred_at` timestamps appear in the embed timestamp.
+Global chat and death events are plain text announcements. Player join and quit
+events use compact embeds; command, minigame, and server lifecycle events use
+structured embeds. Embed mentions are disabled, and valid `occurred_at`
+timestamps appear in the embed timestamp.
 The recommended path is `/minecraft/event`; requests with a trailing slash are
 accepted as well. Existing deployments can keep `/minecraft/chat` when that
 path is explicitly configured in both the bot and the Minecraft plugin.
