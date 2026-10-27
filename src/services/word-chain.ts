@@ -220,6 +220,9 @@ interface StemWordChainServiceDependencies {
   clock?: () => Date;
 }
 
+type WordChainFailureReason =
+  'not-a-word' | 'repeated-word' | 'wrong-starting-letter' | 'outside-theme';
+
 const STATE_KEY = 'stemWordChain';
 const PASS_REACTION = '✅';
 const FAILURE_REACTION = '❌';
@@ -256,6 +259,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
   private readonly lastHintAt = new Map<string, number>();
   private hintWindowStartedAt = 0;
   private hintWindowRequestCount = 0;
+  private readonly inFlightAuthorIds = new Set<string>();
+  private readonly responseCompletions = new Map<string, Promise<void>>();
 
   private readonly currentTime: () => Date;
 
@@ -381,7 +386,36 @@ export class PersistentStemWordChainService implements StemWordChainService {
       return;
     }
 
-    await this.enqueue(() => this.processMessage(message));
+    if (this.inFlightAuthorIds.has(message.authorId)) {
+      this.dependencies.logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          userId: message.authorId,
+        },
+        'STEM word chain answer ignored while the same author response is pending',
+      );
+      return;
+    }
+
+    this.inFlightAuthorIds.add(message.authorId);
+    const processing = this.enqueue(() => this.processMessage(message));
+    const responseCompletion = processing
+      .then(async () => {
+        await this.responseCompletions.get(message.id);
+      })
+      .catch((error: unknown) => {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, messageId: message.id },
+          'STEM word chain response completion failed',
+        );
+      })
+      .finally(() => {
+        this.responseCompletions.delete(message.id);
+        this.inFlightAuthorIds.delete(message.authorId);
+      });
+    void responseCompletion;
+    await processing;
   }
 
   private async processMessage(message: StemWordChainMessage): Promise<void> {
@@ -416,12 +450,12 @@ export class PersistentStemWordChainService implements StemWordChainService {
     const word = extractWordChainCandidate(message.content);
     const expectedLetter = state.lastWord?.slice(-1) ?? undefined;
     if (!word) {
-      await this.endRound(rootState, state, message, theme, word);
+      await this.endRound(rootState, state, message, theme, word, 'not-a-word', expectedLetter);
       return;
     }
 
     if (state.usedWords.includes(word)) {
-      await this.endRound(rootState, state, message, theme, word);
+      await this.endRound(rootState, state, message, theme, word, 'repeated-word', expectedLetter);
       return;
     }
 
@@ -434,7 +468,15 @@ export class PersistentStemWordChainService implements StemWordChainService {
     const startsWithExpectedLetter =
       !state.lastWord || (expectedLetter !== undefined && word.startsWith(expectedLetter));
     if (!startsWithExpectedLetter) {
-      await this.endRound(rootState, state, message, theme, word);
+      await this.endRound(
+        rootState,
+        state,
+        message,
+        theme,
+        word,
+        'wrong-starting-letter',
+        expectedLetter,
+      );
       return;
     }
 
@@ -470,13 +512,16 @@ export class PersistentStemWordChainService implements StemWordChainService {
       await this.dependencies.state.save(rootState);
       await this.react(message, PASS_REACTION);
       await this.recordGameParticipation(message);
-      this.queueWordDefinition(
-        message,
-        theme,
-        word,
-        word.slice(-1),
-        state.usedWords,
-        state.roundNumber,
+      this.responseCompletions.set(
+        message.id,
+        this.queueWordDefinition(
+          message,
+          theme,
+          word,
+          word.slice(-1),
+          state.usedWords,
+          state.roundNumber,
+        ),
       );
       this.dependencies.logger.info(
         {
@@ -492,7 +537,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       return;
     }
 
-    await this.endRound(rootState, state, message, theme, word);
+    await this.endRound(rootState, state, message, theme, word, 'outside-theme', expectedLetter);
   }
 
   private async handleNearMiss(
@@ -607,6 +652,8 @@ export class PersistentStemWordChainService implements StemWordChainService {
     message: StemWordChainMessage,
     theme: StemWordChainTheme,
     word: string | undefined,
+    reason: WordChainFailureReason,
+    expectedLetter: string | undefined,
   ): Promise<void> {
     const previousStreak = state.streak;
     const currentHighestStreak = Math.max(state.bestStreak, previousStreak);
@@ -629,6 +676,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     writeStemWordChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, FAILURE_REACTION);
+    await this.replyInvalidWord(message, theme, word, reason, expectedLetter);
     await this.publishRound(
       rootState,
       state,
@@ -646,6 +694,23 @@ export class PersistentStemWordChainService implements StemWordChainService {
       },
       'STEM word chain round ended',
     );
+  }
+
+  private async replyInvalidWord(
+    message: StemWordChainMessage,
+    theme: StemWordChainTheme,
+    word: string | undefined,
+    reason: WordChainFailureReason,
+    expectedLetter: string | undefined,
+  ): Promise<void> {
+    const definition = word
+      ? await this.getWordDefinition(theme, word, message.authorId)
+      : undefined;
+    const definitionText = word
+      ? `📖 ${word} — ${definition ?? 'I could not retrieve a definition right now.'}`
+      : '📖 I could not identify a single word to define.';
+    const reasonText = getWordChainFailureReason(theme, word, reason, expectedLetter);
+    await this.replySafely(message, `${definitionText}\n\n❌ ${reasonText}`);
   }
 
   private async isWordInTheme(
@@ -695,7 +760,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
     nextLetter: string,
     usedWords: readonly string[],
     roundNumber: number,
-  ): void {
+  ): Promise<void> {
     const next = this.definitionQueue
       .catch(() => undefined)
       .then(async () => {
@@ -721,7 +786,7 @@ export class PersistentStemWordChainService implements StemWordChainService {
       () => undefined,
       () => undefined,
     );
-    void next;
+    return next;
   }
 
   private async getContinuationWords(
@@ -1201,6 +1266,24 @@ function validateWordChainHint(
   }
 
   return { word, hint };
+}
+
+function getWordChainFailureReason(
+  theme: StemWordChainTheme,
+  word: string | undefined,
+  reason: WordChainFailureReason,
+  expectedLetter: string | undefined,
+): string {
+  switch (reason) {
+    case 'not-a-word':
+      return 'I could not identify a single word in that message.';
+    case 'repeated-word':
+      return `**${word ?? 'That word'}** has already been used in this round.`;
+    case 'wrong-starting-letter':
+      return `**${word ?? 'That word'}** starts with **${word?.[0]?.toLocaleUpperCase() ?? '?'}**, but the next word needed to start with **${expectedLetter?.toLocaleUpperCase() ?? '?'}**.`;
+    case 'outside-theme':
+      return `**${word ?? 'That word'}** does not fit the **${theme.name}** theme.`;
+  }
 }
 
 function formatWordChainContinuation(

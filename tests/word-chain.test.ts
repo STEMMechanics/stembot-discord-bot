@@ -122,6 +122,43 @@ describe('STEM word chain service', () => {
     });
   });
 
+  it('defines an incorrect word and explains why it ended the round', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      stemWordChain: {
+        version: 1,
+        themeIndex: 2,
+        roundNumber: 8,
+        promptMessageId: '100',
+        lastWord: 'proton',
+        lastAuthorId: 'user-one',
+        lastMessageId: '150',
+        streak: 1,
+        bestStreak: 1,
+        roundStreaks: { 'user-one': 1 },
+        bestStreaks: { 'user-one': 1 },
+        usedWords: ['proton'],
+        processedMessageIds: [],
+      },
+    };
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-9') };
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>(),
+      getWordDefinition: vi
+        .fn<NonNullable<StemWordChainThemeValidator['getWordDefinition']>>()
+        .mockResolvedValue('A negatively charged particle found in an atom.'),
+    };
+    const service = createService(state, publisher, themeValidator);
+    const incorrect = createMessage('200', 'electron', { authorId: 'user-two' });
+
+    await service.handleMessage(incorrect);
+
+    expect(themeValidator.getWordDefinition).toHaveBeenCalledWith('Chemistry', 'electron');
+    expect(incorrect.reply).toHaveBeenCalledWith(
+      '📖 electron — A negatively charged particle found in an atom.\n\n❌ **electron** starts with **E**, but the next word needed to start with **N**.',
+    );
+  });
+
   it('skips a word sent before the replacement theme prompt was posted', async () => {
     const state = new MemoryStateStore();
     const publisher = {
@@ -357,6 +394,38 @@ describe('STEM word chain service', () => {
     expect(state.state).toMatchObject({
       stemWordChain: { lastWord: 'moon', streak: 1 },
     });
+  });
+
+  it('ignores a same-author answer posted while the previous answer is still being answered', async () => {
+    const state = new MemoryStateStore();
+    const publisher = { send: vi.fn().mockResolvedValue('round-message-1') };
+    let resolveDefinition!: (definition: string) => void;
+    const themeValidator = {
+      isWordInTheme: vi.fn<StemWordChainThemeValidator['isWordInTheme']>().mockResolvedValue(true),
+      getWordDefinition: vi.fn<NonNullable<StemWordChainThemeValidator['getWordDefinition']>>(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveDefinition = resolve;
+          }),
+      ),
+    };
+    const service = createService(state, publisher, themeValidator);
+    await service.initialize();
+    const first = createMessage('first', 'moon', { authorId: 'same-user' });
+    const second = createMessage('second', 'nebula', { authorId: 'same-user' });
+
+    const firstProcessing = service.handleMessage(first);
+    await vi.waitFor(() => expect(first.react).toHaveBeenCalledWith('✅'));
+    await vi.waitFor(() => expect(themeValidator.getWordDefinition).toHaveBeenCalledOnce());
+
+    await service.handleMessage(second);
+
+    expect(second.react).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({ stemWordChain: { lastWord: 'moon', streak: 1 } });
+
+    resolveDefinition('A natural satellite that orbits a planet.');
+    await firstProcessing;
+    await vi.waitFor(() => expect(first.reply).toHaveBeenCalled());
   });
 
   it('includes an earlier word when it matches the next starting letter', async () => {

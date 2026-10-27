@@ -17,13 +17,12 @@ import {
   jokeCommand,
   levelCommand,
   pingCommand,
-  playersCommand,
   reviewCommand,
   robotJokes,
   scrambleCommand,
   statusCommand,
 } from '../src/discord/commands.js';
-import type { MinecraftPlayer } from '../src/integrations/stemcraft.js';
+import { PlayerListUnavailableError, type MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
 import type { StemScrambleService } from '../src/services/scramble.js';
 import type { CountingChainService } from '../src/services/counting-chain.js';
@@ -60,11 +59,7 @@ describe('Discord commands', () => {
       'counting-chain',
       'remind',
       'minecraft',
-      'players',
     ]);
-    expect(
-      definitions.find((definition) => definition.name === 'players')?.default_member_permissions,
-    ).toBeUndefined();
     expect(definitions.find((definition) => definition.name === 'review')?.options).toEqual([]);
   });
 
@@ -306,7 +301,7 @@ describe('Discord commands', () => {
     expect(embed.description).toBe(
       'One or more monitored services are interrupted or under maintenance.',
     );
-    expect(embed.fields?.[0]?.value).toContain('🟠 **Website** — Pending');
+    expect(embed.fields?.[0]?.value).toContain('🟠 **Website** — Issue');
   });
 
   it('lets members with Manage Messages reset the scramble', async () => {
@@ -331,23 +326,51 @@ describe('Discord commands', () => {
     });
   });
 
-  it('makes /players available without a permission check', async () => {
+  it('includes online usernames in /minecraft without a permission check', async () => {
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
     const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
+    const getServerStatus = vi.fn().mockResolvedValue({
+      online: true,
+      playerCount: 1,
+      maxPlayers: 50,
+      version: '26.3',
+    });
     const getOnlinePlayers = vi.fn().mockResolvedValue([{ username: 'Alex' }]);
 
-    await playersCommand.execute(interaction, {
+    await minecraftCommand.execute(interaction, {
       getGatewayPing: () => 0,
       stemcraft: {
-        getServerStatus: vi.fn(),
+        getServerStatus,
         getOnlinePlayers,
       },
     });
 
     expect(deferReply).toHaveBeenCalledOnce();
     expect(editReply).toHaveBeenCalledWith({
-      content: 'Online Minecraft players:\n• Alex',
+      content:
+        'STEMCraft is **online** — 1/50 players online · version 26.3.\n\nOnline Minecraft players:\n• Alex',
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it('keeps /minecraft status available when usernames are unavailable', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = { deferReply, editReply } as unknown as ChatInputCommandInteraction;
+
+    await minecraftCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      stemcraft: {
+        getServerStatus: vi.fn().mockResolvedValue({ online: false, playerCount: 0 }),
+        getOnlinePlayers: vi.fn().mockRejectedValue(new PlayerListUnavailableError()),
+      },
+    });
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        'Online Minecraft usernames are not available from STEMCraft right now.',
+      ),
       allowedMentions: { parse: [] },
     });
   });
@@ -418,16 +441,20 @@ describe('Discord commands', () => {
       calls.push('fetch');
       return { online: true, playerCount: 0, maxPlayers: 50 };
     });
+    const getOnlinePlayers = vi.fn().mockImplementation(async () => {
+      calls.push('players');
+      return [];
+    });
 
     await minecraftCommand.execute(interaction, {
       getGatewayPing: () => 0,
       stemcraft: {
         getServerStatus,
-        getOnlinePlayers: vi.fn(),
+        getOnlinePlayers,
       },
     });
 
-    expect(calls).toEqual(['defer', 'fetch', 'edit']);
+    expect(calls).toEqual(['defer', 'fetch', 'players', 'edit']);
   });
 
   it('replies immediately to /ping', async () => {

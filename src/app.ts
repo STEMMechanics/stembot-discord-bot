@@ -1,4 +1,5 @@
 import type { AppConfig } from './config/env.js';
+import { buildCakeDayCard } from './discord/cake-day-card.js';
 import {
   createDiscordGateway,
   type DiscordChannelMessage,
@@ -28,6 +29,11 @@ import {
   createCountingChainService,
   type CountingChainService,
 } from './services/counting-chain.js';
+import {
+  createCakeDayService,
+  type CakeDayAnnouncement,
+  type CakeDayService,
+} from './services/cake-days.js';
 import { createStemAskService, type StemAskService } from './services/stem-ask.js';
 import {
   createWorkshopNotificationService,
@@ -71,6 +77,7 @@ export interface ApplicationDependencies {
   ask?: StemAskService;
   chatDiscordBridge?: ChatDiscordBridge;
   userLevels?: UserLevelService;
+  cakeDays?: CakeDayService;
   workshopNotifications: WorkshopNotificationService;
 }
 
@@ -379,6 +386,42 @@ export function createApplication(
       ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
     });
   discordGatewayRef.current = discord;
+  const cakeDayAnnouncementChannelId = config.cakeDays.announcementChannelId;
+  const cakeDays =
+    dependencies?.cakeDays ??
+    (config.cakeDays.enabled && cakeDayAnnouncementChannelId
+      ? createCakeDayService({
+          config: config.cakeDays,
+          timeZone: config.workshops.timeZone,
+          state,
+          logger,
+          memberProvider: {
+            getMembers: async () => {
+              if (!discordGatewayRef.current) {
+                throw new Error('Discord gateway is not ready for cake-day checks');
+              }
+
+              return discordGatewayRef.current.getGuildMembers();
+            },
+          },
+          publisher: {
+            send: async (announcement: CakeDayAnnouncement): Promise<void> => {
+              if (!discordGatewayRef.current) {
+                throw new Error('Discord gateway is not ready for cake-day announcements');
+              }
+
+              const card = await buildCakeDayCard(announcement);
+              await discordGatewayRef.current.sendChannelMessage(announcement.channelId, {
+                content: announcement.content,
+                files: [{ attachment: card, name: 'stembot-cake-day.png' }],
+                ...(announcement.allowedUserIds.length > 0
+                  ? { allowedMentions: { users: [...announcement.allowedUserIds] } }
+                  : {}),
+              });
+            },
+          },
+        })
+      : undefined);
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
   const uptimeStatus =
     dependencies?.uptimeStatus ??
@@ -409,6 +452,14 @@ export function createApplication(
     intervalMs: config.workshops.pollIntervalMs,
     run: () => workshopNotifications.synchronizeWorkshops(),
   });
+
+  if (cakeDays && config.cakeDays.enabled) {
+    scheduler.register({
+      name: 'cake-day-announcements',
+      intervalMs: config.cakeDays.checkIntervalMs,
+      run: () => cakeDays.check(),
+    });
+  }
 
   if (quiz && config.quiz.enabled) {
     scheduler.register({
@@ -513,6 +564,11 @@ export function createApplication(
         if (uptimeStatus && config.uptime.enabled) {
           void uptimeStatus.synchronize().catch((error: unknown) => {
             logger.error({ err: error }, 'Initial uptime status synchronization failed');
+          });
+        }
+        if (cakeDays && config.cakeDays.enabled) {
+          void cakeDays.check().catch((error: unknown) => {
+            logger.error({ err: error }, 'Initial cake-day check failed');
           });
         }
       } catch (error: unknown) {

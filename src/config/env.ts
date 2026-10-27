@@ -291,6 +291,13 @@ const environmentSchema = z.object({
   STEM_LEVELS_GAME_XP: positiveInteger(15, 500),
   STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS: positiveInteger(60, 86400),
   STEM_LEVELS_REACTION_COOLDOWN_SECONDS: positiveInteger(30, 86400),
+  STEM_CAKE_DAYS_ENABLED: booleanFromEnvironment(false),
+  STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID: optionalDiscordId,
+  STEM_CAKE_DAYS_CHECK_INTERVAL_MS: positiveMilliseconds(60000, 3600000),
+  STEM_CAKE_DAYS_HOUR: z.preprocess(
+    (value) => (value === undefined || value === '' ? 8 : value),
+    z.coerce.number().int().min(0).max(23),
+  ),
 });
 
 export type AppEnvironment = (typeof ENVIRONMENTS)[number];
@@ -415,6 +422,12 @@ export interface AppConfig {
     gameXp: number;
     messageCooldownMs: number;
     reactionCooldownMs: number;
+  };
+  cakeDays: {
+    enabled: boolean;
+    announcementChannelId?: string;
+    checkIntervalMs: number;
+    hour: number;
   };
   workshops: {
     timeZone: string;
@@ -575,6 +588,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   if (values.STEM_ASK_ENABLED && !values.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when STEM_ASK_ENABLED is true');
+  }
+
+  if (values.STEM_CAKE_DAYS_ENABLED && !values.STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID) {
+    throw new Error(
+      'STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID is required when STEM_CAKE_DAYS_ENABLED is true',
+    );
   }
 
   if (values.CHAT_DISCORD_BRIDGE_ENABLED && !values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN) {
@@ -740,6 +759,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       gameXp: values.STEM_LEVELS_GAME_XP,
       messageCooldownMs: values.STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS * 1000,
       reactionCooldownMs: values.STEM_LEVELS_REACTION_COOLDOWN_SECONDS * 1000,
+    },
+    cakeDays: {
+      enabled: values.STEM_CAKE_DAYS_ENABLED,
+      ...(values.STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID
+        ? { announcementChannelId: values.STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID }
+        : {}),
+      checkIntervalMs: values.STEM_CAKE_DAYS_CHECK_INTERVAL_MS,
+      hour: values.STEM_CAKE_DAYS_HOUR,
     },
     workshops: {
       timeZone: values.WORKSHOP_TIME_ZONE,

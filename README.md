@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, an optional AI-generated STEM question chain, an optional AI word-scramble minigame, an optional themed word-chain minigame, optional mention-based AI STEM answers, and a persistent participation XP and level system. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, an optional AI-generated STEM question chain, an optional AI word-scramble minigame, an optional themed word-chain minigame, optional mention-based AI STEM answers, a persistent participation XP and level system, and optional join-date cake-day announcements. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -44,8 +44,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/counting-chain number:<number>` — set the next counting-chain number; requires Manage Messages.
-- `/minecraft` — server availability, player count, capacity, maintenance state, and version.
-- `/players` — online Minecraft usernames only. It is available to all members. If the configured STEMCraft response has no permitted player list, the command reports that names are unavailable.
+- `/minecraft` — server availability, player count, capacity, maintenance state, version, and online Minecraft usernames. If the configured STEMCraft response has no permitted player list, it reports that names are unavailable.
 - `/level` — your persisted XP, level and activity counts, or the public level card for another member.
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
@@ -150,9 +149,13 @@ ordinary Discord messages. Questions may be short answer, true/false or multiple
 choice. The first accepted answer earns one point, receives `✅`, and advances
 the game. Incorrect answers receive `❌`; after the configured
 number of wrong answers, STEMBot reveals the answer and explanation before
-posting the next question. Unclear answers receive `🤔` and leave the question
-open without using an attempt. If answer evaluation fails temporarily, the
-message receives `⚠️` and no attempt is counted, so the member can try again.
+posting the next question. A wrong true/false answer ends that question
+immediately, and a multiple-choice question ends once every option but one has
+been tried incorrectly. Each prompt explains that members can type `hint` (or
+`clue`/`help`) for an extra clue, or `skip` to reveal the answer and move on.
+Hints do not use an answer attempt. Unclear answers receive `🤔` and leave the
+question open without using an attempt. If answer evaluation fails temporarily,
+the message receives `⚠️` and no attempt is counted, so the member can try again.
 
 Generated questions are checked for accurate terminology and matching units.
 Minecraft questions distinguish blocks, metres, seconds, game ticks and
@@ -162,9 +165,9 @@ questions and answers, supplies them to the generator as exclusions, and
 regenerates an exact duplicate before it is posted. Near-equivalent questions
 are also discouraged by the generation prompt.
 
-The active question, wrong-attempt count, scores, question sequence, recent
-question history and recent message IDs are persisted in the shared JSON state
-file. A restart keeps an
+The active question, wrong-attempt count, tried multiple-choice options, hints,
+scores, question sequence, recent question history and recent message IDs are
+persisted in the shared JSON state file. A restart keeps an
 active question instead of generating a replacement. Question generation and
 natural-language answer checking use the existing `OPENAI_API_KEY`,
 `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT` and `OPENAI_TIMEOUT` settings. The
@@ -248,11 +251,10 @@ repetition.
 When `STEM_ASK_ENABLED=true`, members can mention STEMBot followed by a STEM
 question in any channel. STEMBot answers with the shared OpenAI model without
 storing the question text. Empty or oversized questions are ignored. A message
-that mentions STEMBot is excluded from counting, quiz, scramble, word-chain,
+that mentions STEMBot is normally excluded from counting, quiz, scramble, word-chain,
 Mystery Lab and Code Fix answer processing so the bot can answer it safely
-anywhere. In the scramble and word-chain channels, `@STEMBot hint` continues
-to route to the game hint
-behavior.
+anywhere. In the quiz, scramble and word-chain channels, `@STEMBot hint`
+continues to route to the game hint behavior; quiz also accepts `@STEMBot skip`.
 The service allows one request per user every 30 seconds, ten requests per user
 per UTC day, and 100 requests across the bot per UTC day by default. Requests
 that reach a limit receive a short playful cooldown or quota response without
@@ -282,6 +284,22 @@ The level listener requires the Discord Message Content and Guild Message
 Reactions intents. STEMBot requests these automatically when the feature is
 enabled, but the privileged Message Content intent must also be enabled in the
 Discord Developer Portal.
+
+### Join-date cake days
+
+When `STEM_CAKE_DAYS_ENABLED=true`, STEMBot checks current human guild members
+during the hour configured by `STEM_CAKE_DAYS_HOUR` in `WORKSHOP_TIME_ZONE`.
+The default is 8am in `Australia/Brisbane`. A member receives one announcement
+on the month and day of their Discord join date after completing at least one
+year. The daily sent-member list is stored in the shared JSON state file, so a
+restart or a retry during the same morning does not repeat a successful post.
+
+Each announcement includes the member mention and a personalized PNG card with
+their current avatar, a STEMBot robot, a birthday cake and the completed years.
+The card is rendered with `DejaVu Sans`, which is already installed by the
+Docker image's `fonts-dejavu-core` package. The feature requests Discord's
+privileged `GuildMembers` intent so it can read the current member list; enable
+that intent in the Discord Developer Portal when cake days are enabled.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single STEMBot minigame
 dashboard embed with the counting streak, best counting streak, a separate
@@ -323,10 +341,15 @@ When `CHAT_DISCORD_BRIDGE_ENABLED=true`, STEMBot listens for authenticated
 `CHAT_DISCORD_BRIDGE_PATH`. Put that listener behind the public HTTPS URL used
 by the Minecraft plugin and keep the bearer token in the plugin secret store.
 Every accepted event is posted to `CHAT_DISCORD_BRIDGE_CHANNEL_ID`; the
-incoming `server` and `channel` values are deliberately ignored. The optional
-`X-STEMCraft-Event-Id` header must match the JSON `event_id` when supplied, and
-retries with an already delivered event ID are acknowledged without a second
-Discord message.
+incoming `server` and `channel` values are accepted but the configured Discord
+channel remains authoritative. The `X-STEMCraft-Event-Id` header must match the
+JSON `event_id` when supplied, and retries with an already delivered event ID
+are acknowledged without a second Discord message. The receiver accepts
+`minecraft.chat`, `minecraft.player_join`, `minecraft.player_quit`,
+`minecraft.player_death`, `minecraft.player_command`,
+`minecraft.server_start`, `minecraft.server_stop`,
+`minecraft.server_message`, `minecraft.minigame_start` and
+`minecraft.minigame_end` on this same endpoint.
 
 When `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL` is set, the same channel also
 forwards human Discord messages to STEMCraft with the same
@@ -439,7 +462,7 @@ The Website adapter reads `title`, `link`, `guid`, `description`, `pubDate`, `en
 
 The adapter keeps dates with their supplied offsets, skips malformed items, and retains a narrow compatibility fallback for older escaped XML declarations. `sm:statusCode` drives visibility, cancellation, and reminder decisions; `sm:status` is retained for display compatibility. Missing feed items are left in persistent state and are never treated as cancellations. Discord commands and workshop notifications include type-appropriate registration links or calls to action.
 
-The STEMCraft adapter supports the deployed response (`online`, `players_online`, `max_players`, `version`, `maintenance`, `message`, `players`, `checked_at`). The live endpoint currently supplies a username-only `players` array when `web-server.status.players.enabled` is enabled. Older responses without that array remain supported; `/players` reports that names are unavailable in that case. UUIDs and other identity fields are discarded.
+The STEMCraft adapter supports the deployed response (`online`, `players_online`, `max_players`, `version`, `maintenance`, `message`, `players`, `checked_at`). The live endpoint currently supplies a username-only `players` array when `web-server.status.players.enabled` is enabled. Older responses without that array remain supported; `/minecraft` reports that names are unavailable in that case. UUIDs and other identity fields are discarded.
 
 ## Requirements and local development
 
@@ -546,6 +569,10 @@ npm run validate
 | `STEM_LEVELS_GAME_XP`                       | No                  | XP for an accepted minigame move; defaults to `15`.                                         |
 | `STEM_LEVELS_MESSAGE_COOLDOWN_SECONDS`      | No                  | Per-user message XP cooldown; defaults to `60`.                                             |
 | `STEM_LEVELS_REACTION_COOLDOWN_SECONDS`     | No                  | Per-user reaction XP cooldown; defaults to `30`.                                            |
+| `STEM_CAKE_DAYS_ENABLED`                    | No                  | Enable join-date cake-day announcements; defaults to `false`.                               |
+| `STEM_CAKE_DAYS_ANNOUNCEMENT_CHANNEL_ID`    | When enabled        | Channel for cake-day announcements.                                                         |
+| `STEM_CAKE_DAYS_CHECK_INTERVAL_MS`          | No                  | Scheduler interval for the local-hour check; defaults to 60000 ms.                          |
+| `STEM_CAKE_DAYS_HOUR`                       | No                  | Local hour for announcements in `WORKSHOP_TIME_ZONE`; defaults to `8`.                      |
 | `CHAT_DISCORD_BRIDGE_ENABLED`               | No                  | Enable the bearer-authenticated Minecraft chat HTTP bridge; defaults to `false`.            |
 | `CHAT_DISCORD_BRIDGE_HOST`                  | No                  | HTTP bind host; defaults to `0.0.0.0`.                                                      |
 | `CHAT_DISCORD_BRIDGE_PORT`                  | No                  | HTTP bind port; defaults to `8080`.                                                         |
@@ -583,7 +610,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft bridge event IDs and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft event IDs and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:
@@ -736,9 +763,9 @@ in CI.
 
 ## Security and privacy
 
-The bot uses only the `Guilds` gateway intent by default. Enabling the counting-chain minigame, AI quiz, scramble, mention-based AI answers or user levels additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review or user levels also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
+The bot uses only the `Guilds` gateway intent by default. Enabling cake-day announcements additionally enables the privileged `GuildMembers` intent so the bot can read the current guild member list. Enabling the counting-chain minigame, AI quiz, scramble, mention-based AI answers or user levels additionally enables `GuildMessages` and the privileged `MessageContent` intent. Counting-chain review or user levels also enables `GuildMessageReactions` and Discord partial message support. It needs channel permissions only where notifications or games are enabled. Secrets are environment variables and are excluded by `.gitignore`; never commit `.env`, tokens, OpenAI keys, or API credentials.
 
-The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/players` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. `/players` emits usernames only.
+The configured direct STEMCraft URL is HTTP and the plugin’s embedded server defaults to loopback. Production deployment needs a protected reachable path, preferably HTTPS with network ACLs and an agreed bearer-token contract. Do not expose port 8950 broadly. The Website HTTPS status proxy can provide the aggregate `/minecraft` data but currently omits player names; `/minecraft` therefore requires an authenticated or network-protected STEMCraft path that includes the approved username array. Player data contains usernames only.
 
 ## Next phase
 

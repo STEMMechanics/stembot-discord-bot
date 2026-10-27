@@ -58,6 +58,7 @@ function createMessage(
     authorIsBot: false,
     content,
     react: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -111,6 +112,9 @@ describe('STEM quiz service', () => {
         2,
       ),
     ).toContain('A) Earth\nB) Mercury\nC) Mars');
+    expect(formatStemQuizQuestion(question('water'), 3)).toContain(
+      '*You can ask for a hint or skip this question.*',
+    );
   });
 
   it('checks true-false and multiple-choice selections locally', async () => {
@@ -216,6 +220,149 @@ describe('STEM quiz service', () => {
       },
     });
     await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
+  });
+
+  it('provides a hint without counting it as an answer', async () => {
+    const state = new MemoryStateStore();
+    const multipleChoiceQuestion: StemQuizQuestion = {
+      type: 'multiple-choice',
+      prompt: 'Which planet is closest to the Sun?',
+      options: ['Earth', 'Mercury', 'Mars'],
+      answer: 'Mercury',
+      acceptedAnswers: ['Mercury'],
+      explanation: 'Mercury is closest to the Sun.',
+    };
+    const generateHint = vi
+      .fn<NonNullable<StemQuizEngine['generateHint']>>()
+      .mockResolvedValue('Think about the planet nearest to the Sun.');
+    const engine: StemQuizEngine = {
+      generateQuestion: vi.fn().mockResolvedValue(multipleChoiceQuestion),
+      evaluateAnswer: vi.fn(),
+      generateHint,
+    };
+    const service = createService(state, engine);
+    const hint = createMessage('user-1', 'hint-1', 'hint');
+
+    await service.initialize();
+    await service.handleMessage(hint);
+
+    expect(generateHint).toHaveBeenCalledWith(expect.objectContaining({ answer: 'Mercury' }), []);
+    expect(hint.reply).toHaveBeenCalledWith('💡 Hint: Think about the planet nearest to the Sun.');
+    expect(hint.react).not.toHaveBeenCalled();
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemQuiz: {
+        question: {
+          answer: 'Mercury',
+          wrongAttempts: 0,
+          hints: ['Think about the planet nearest to the Sun.'],
+        },
+      },
+    });
+  });
+
+  it('skips the active question when asked', async () => {
+    const state = new MemoryStateStore();
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(question('water'))
+        .mockResolvedValueOnce(question('gravity')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('question-message-1')
+        .mockResolvedValueOnce('question-message-2'),
+    };
+    const service = createService(state, engine, publisher);
+
+    await service.initialize();
+    const skip = createMessage('user-1', 'skip-1', 'skip');
+    await service.handleMessage(skip);
+
+    expect(skip.react).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '⏭️ Question skipped. The answer was **water**.',
+    );
+    expect(state.state).toMatchObject({
+      stemQuiz: { question: { answer: 'gravity', questionNumber: 2 } },
+    });
+  });
+
+  it('ends a true-false question after the first incorrect answer', async () => {
+    const state = new MemoryStateStore();
+    const trueFalseQuestion: StemQuizQuestion = {
+      type: 'true-false',
+      prompt: 'The Earth orbits the Sun.',
+      answer: 'True',
+      acceptedAnswers: ['true'],
+      explanation: 'Earth orbits the Sun.',
+    };
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(trueFalseQuestion)
+        .mockResolvedValueOnce(question('gravity')),
+      evaluateAnswer: vi.fn().mockResolvedValue('incorrect'),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('question-message-1')
+        .mockResolvedValueOnce('question-message-2'),
+    };
+    const service = createService(state, engine, publisher);
+    const incorrect = createMessage('user-1', 'false-1', 'False');
+
+    await service.initialize();
+    await service.handleMessage(incorrect);
+
+    expect(incorrect.react).toHaveBeenCalledWith('❌');
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(state.state).toMatchObject({
+      stemQuiz: { question: { answer: 'gravity', questionNumber: 2 } },
+    });
+  });
+
+  it('ends a multiple-choice question when every option but one is wrong', async () => {
+    const state = new MemoryStateStore();
+    const multipleChoiceQuestion: StemQuizQuestion = {
+      type: 'multiple-choice',
+      prompt: 'Which option is correct?',
+      options: ['Alpha', 'Beta', 'Gamma', 'Delta'],
+      answer: 'Delta',
+      acceptedAnswers: ['Delta'],
+      explanation: 'Delta is the correct option.',
+    };
+    const engine: StemQuizEngine = {
+      generateQuestion: vi
+        .fn()
+        .mockResolvedValueOnce(multipleChoiceQuestion)
+        .mockResolvedValueOnce(question('gravity')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('question-message-1')
+        .mockResolvedValueOnce('question-message-2'),
+    };
+    const service = createService(state, engine, publisher);
+
+    await service.initialize();
+    await service.handleMessage(createMessage('user-1', 'choice-1', 'A'));
+    await service.handleMessage(createMessage('user-2', 'choice-2', 'B'));
+    await service.handleMessage(createMessage('user-3', 'choice-3', 'C'));
+
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain('The answer was **Delta**.');
+    expect(state.state).toMatchObject({
+      stemQuiz: { question: { answer: 'gravity', questionNumber: 2 } },
+    });
   });
 
   it('skips an answer that was sent before the replacement question was posted', async () => {

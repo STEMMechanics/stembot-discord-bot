@@ -17,6 +17,7 @@ import {
 } from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
 import { isDiscordMessageBefore } from './message-order.js';
+import { isMinigameHintRequest } from './minigame-hints.js';
 
 export interface StemQuizConfig {
   enabled: boolean;
@@ -37,7 +38,9 @@ export interface StemQuizMessage {
   authorId: string;
   authorIsBot: boolean;
   content: string;
+  hintRequest?: boolean;
   react(emoji: string): Promise<void>;
+  reply?(content: string): Promise<void>;
 }
 
 export interface StemQuizPublisher {
@@ -57,6 +60,8 @@ interface StemQuizQuestionState extends StemQuizQuestion {
   messageId: string;
   questionNumber: number;
   wrongAttempts: number;
+  wrongOptions: number[];
+  hints: string[];
   askedAt: string;
 }
 
@@ -89,6 +94,10 @@ const EVALUATION_FAILURE_REACTION = '⚠️';
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_RECENT_QUESTIONS = 20;
 const MAX_QUESTION_GENERATION_ATTEMPTS = 3;
+const MAX_HINTS_PER_QUESTION = 5;
+const QUIZ_HINT_USER_COOLDOWN_MS = 5_000;
+const QUIZ_HINT_GLOBAL_WINDOW_MS = 60_000;
+const QUIZ_HINT_GLOBAL_LIMIT = 30;
 const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 
 export class PersistentStemQuizService implements StemQuizService {
@@ -96,6 +105,9 @@ export class PersistentStemQuizService implements StemQuizService {
   private readonly random: () => number;
   private readonly idFactory: () => string;
   private eventQueue: Promise<void> = Promise.resolve();
+  private readonly lastHintAt = new Map<string, number>();
+  private hintWindowStartedAt = 0;
+  private hintWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemQuizServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
@@ -222,6 +234,16 @@ export class PersistentStemQuizService implements StemQuizService {
       return;
     }
 
+    if (message.hintRequest === true || isMinigameHintRequest(message.content)) {
+      await this.processHintRequest(rootState, state, question, message);
+      return;
+    }
+
+    if (isStemQuizSkipRequest(message.content)) {
+      await this.processSkipRequest(rootState, state, question, message);
+      return;
+    }
+
     let result: StemQuizAnswerResult;
     try {
       result = await this.evaluateAnswer(question, message.content);
@@ -310,6 +332,84 @@ export class PersistentStemQuizService implements StemQuizService {
     );
   }
 
+  private async processHintRequest(
+    rootState: JsonState,
+    state: StemQuizState,
+    question: StemQuizQuestionState,
+    message: StemQuizMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemQuizState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    if (question.hints.length >= MAX_HINTS_PER_QUESTION) {
+      await this.replySafely(
+        message,
+        '💡 I have given all the extra clues I have for this question. Have a go with the clues above!',
+      );
+      return;
+    }
+
+    if (!this.canRequestHint(message.authorId)) {
+      await this.replySafely(
+        message,
+        '💡 Give me a moment to think before asking for another clue.',
+      );
+      return;
+    }
+
+    let hint: string | undefined;
+    if (this.dependencies.engine.generateHint) {
+      try {
+        const generatedHint = (
+          await this.dependencies.engine.generateHint(question, question.hints)
+        ).trim();
+        if (isUsableQuizHint(generatedHint, question, question.hints)) {
+          hint = generatedHint;
+        }
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, questionId: question.id },
+          'STEM quiz hint could not be generated; using a local clue',
+        );
+      }
+    }
+
+    if (!hint) {
+      hint = createFallbackQuizHint(question);
+    }
+
+    question.hints = [...question.hints, hint].slice(-MAX_HINTS_PER_QUESTION);
+    writeStemQuizState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.replySafely(message, `💡 Hint: ${hint}`);
+  }
+
+  private async processSkipRequest(
+    rootState: JsonState,
+    state: StemQuizState,
+    question: StemQuizQuestionState,
+    message: StemQuizMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    state.question = null;
+    writeStemQuizState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.publishNextQuestion(
+      rootState,
+      state,
+      `⏭️ Question skipped. The answer was **${question.answer}**. ${question.explanation}`,
+    );
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        questionId: question.id,
+      },
+      'STEM quiz question skipped by a player',
+    );
+  }
+
   private async handleIncorrectAnswer(
     rootState: JsonState,
     state: StemQuizState,
@@ -317,9 +417,23 @@ export class PersistentStemQuizService implements StemQuizService {
     message: StemQuizMessage,
   ): Promise<void> {
     question.wrongAttempts += 1;
+    const selectedOptionIndex = readSelectedChoiceIndex(question, message.content);
+    if (selectedOptionIndex !== undefined) {
+      question.wrongOptions = [...new Set([...question.wrongOptions, selectedOptionIndex])];
+    }
     await this.react(message, WRONG_REACTION);
 
-    if (question.wrongAttempts < this.dependencies.config.maxWrongAnswers) {
+    const multipleChoiceLimitReached =
+      question.type === 'multiple-choice' &&
+      (question.wrongOptions.length >= Math.max(1, (question.options?.length ?? 0) - 1) ||
+        question.wrongAttempts >= this.dependencies.config.maxWrongAnswers);
+    const questionEnded =
+      question.type === 'true-false' ||
+      multipleChoiceLimitReached ||
+      (question.type !== 'multiple-choice' &&
+        question.wrongAttempts >= this.dependencies.config.maxWrongAnswers);
+
+    if (!questionEnded) {
       writeStemQuizState(rootState, state);
       await this.dependencies.state.save(rootState);
       this.dependencies.logger.info(
@@ -385,6 +499,8 @@ export class PersistentStemQuizService implements StemQuizService {
       messageId,
       questionNumber,
       wrongAttempts: 0,
+      wrongOptions: [],
+      hints: [],
       askedAt: now,
     };
     state.recentQuestions = rememberQuestion(state.recentQuestions, question);
@@ -400,6 +516,27 @@ export class PersistentStemQuizService implements StemQuizService {
       },
       'STEM quiz question posted',
     );
+  }
+
+  private canRequestHint(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastHintAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < QUIZ_HINT_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.hintWindowStartedAt >= QUIZ_HINT_GLOBAL_WINDOW_MS) {
+      this.hintWindowStartedAt = now;
+      this.hintWindowRequestCount = 0;
+    }
+
+    if (this.hintWindowRequestCount >= QUIZ_HINT_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastHintAt.set(authorId, now);
+    this.hintWindowRequestCount += 1;
+    return true;
   }
 
   private async generateQuestionAvoidingDuplicates(
@@ -434,6 +571,25 @@ export class PersistentStemQuizService implements StemQuizService {
       this.dependencies.logger.warn(
         { err: error, channelId: message.channelId, messageId: message.id, emoji },
         'STEM quiz reaction could not be added',
+      );
+    }
+  }
+
+  private async replySafely(message: StemQuizMessage, content: string): Promise<void> {
+    if (!message.reply) {
+      this.dependencies.logger.warn(
+        { channelId: message.channelId, messageId: message.id },
+        'STEM quiz reply could not be sent because the message adapter has no reply method',
+      );
+      return;
+    }
+
+    try {
+      await message.reply(content);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'STEM quiz reply could not be sent',
       );
     }
   }
@@ -488,6 +644,7 @@ export function formatStemQuizQuestion(
           ].join('\n')
         : undefined;
   const sections = [leadIn, `🧠 **Question ${questionNumber}**`, question.prompt, answerPrompt];
+  sections.push('*You can ask for a hint or skip this question.*');
   return sections.filter((section): section is string => Boolean(section)).join('\n\n');
 }
 
@@ -588,6 +745,9 @@ function readQuestionState(value: unknown): StemQuizQuestionState | null {
     return null;
   }
 
+  const wrongOptions = readWrongOptionIndexes(value.wrongOptions, options?.length ?? 0);
+  const hints = readHintList(value.hints);
+
   return {
     id: value.id,
     messageId: value.messageId,
@@ -598,6 +758,8 @@ function readQuestionState(value: unknown): StemQuizQuestionState | null {
     answer: value.answer,
     acceptedAnswers: value.acceptedAnswers,
     explanation: value.explanation,
+    wrongOptions,
+    hints,
     ...(type ? { type } : {}),
     ...(options ? { options } : {}),
   };
@@ -624,11 +786,7 @@ function evaluateChoiceAnswer(
   }
 
   const options = question.options ?? [];
-  const optionIndex = readChoiceIndex(answer, options.length);
-  const selectedTextIndex = options.findIndex(
-    (option) => normalizeQuizText(option) === normalizedAnswer,
-  );
-  const selectedIndex = optionIndex ?? (selectedTextIndex >= 0 ? selectedTextIndex : undefined);
+  const selectedIndex = readSelectedChoiceIndex(question, answer);
   if (selectedIndex === undefined) {
     return undefined;
   }
@@ -645,6 +803,20 @@ function evaluateChoiceAnswer(
 
   const acceptedAnswers = [question.answer, ...question.acceptedAnswers].map(normalizeQuizText);
   return acceptedAnswers.includes(normalizeQuizText(selectedOption)) ? 'correct' : 'incorrect';
+}
+
+function readSelectedChoiceIndex(question: StemQuizQuestion, answer: string): number | undefined {
+  if ((question.type ?? 'short-answer') !== 'multiple-choice') {
+    return undefined;
+  }
+
+  const options = question.options ?? [];
+  const normalizedAnswer = normalizeQuizText(answer);
+  const optionIndex = readChoiceIndex(answer, options.length);
+  const selectedTextIndex = options.findIndex(
+    (option) => normalizeQuizText(option) === normalizedAnswer,
+  );
+  return optionIndex ?? (selectedTextIndex >= 0 ? selectedTextIndex : undefined);
 }
 
 function readChoiceIndex(answer: string, optionCount: number): number | undefined {
@@ -678,6 +850,32 @@ function readQuestionOptions(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((option) => typeof option === 'string')
     ? value
     : undefined;
+}
+
+function readWrongOptionIndexes(value: unknown, optionCount: number): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      value.filter(
+        (index): index is number =>
+          typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < optionCount,
+      ),
+    ),
+  ];
+}
+
+function readHintList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((hint): hint is string => typeof hint === 'string' && hint.trim().length > 0)
+    .map((hint) => hint.trim())
+    .slice(-MAX_HINTS_PER_QUESTION);
 }
 
 function choiceLetter(index: number): string {
@@ -741,6 +939,49 @@ function normalizeQuizText(value: string): string {
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+}
+
+export function isStemQuizSkipRequest(content: string): boolean {
+  const normalized = normalizeQuizText(content);
+  return /^(?:skip|skip question|skip this question)$/.test(normalized);
+}
+
+function isUsableQuizHint(
+  hint: string,
+  question: StemQuizQuestion,
+  previousHints: readonly string[],
+): boolean {
+  if (
+    !hint ||
+    previousHints.some(
+      (previousHint) => normalizeQuizText(previousHint) === normalizeQuizText(hint),
+    )
+  ) {
+    return false;
+  }
+
+  const forbiddenAnswers = [
+    question.answer,
+    ...question.acceptedAnswers,
+    ...(question.options ?? []),
+  ].filter((answer) => answer.trim().length > 0);
+  return !forbiddenAnswers.some((answer) => containsWholeWord(hint, answer));
+}
+
+function createFallbackQuizHint(question: StemQuizQuestion): string {
+  switch (question.type) {
+    case 'true-false':
+      return 'Focus on the key scientific fact in the statement and recall whether it is accurate.';
+    case 'multiple-choice':
+      return 'Compare each option with the main STEM concept being tested and look for the best-supported choice.';
+    default:
+      return 'Break the question into its key STEM concept and recall the definition or principle it is asking about.';
+  }
+}
+
+function containsWholeWord(value: string, word: string): boolean {
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escapedWord}\\b`, 'i').test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

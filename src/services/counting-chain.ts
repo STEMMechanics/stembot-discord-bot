@@ -92,6 +92,7 @@ export interface CountingChainService {
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
   getReviewTargetMessageId(): Promise<string | undefined>;
   getReviewRequestMessageId(): Promise<string | undefined>;
+  getReviewRequestMessageIds(): Promise<readonly string[]>;
   setNextNumber(channelId: string, nextNumber: number, moderatorId: string): Promise<boolean>;
   requestReview(message: CountingChainMessage): Promise<boolean>;
   reviewMessage(
@@ -136,6 +137,7 @@ interface CountingChainGameEnding {
 
 interface CountingChainPendingReview extends CountingChainGameEnding {
   reviewMessageId: string | null;
+  reviewMessageIds: string[];
   requestedAt: string;
 }
 
@@ -192,6 +194,15 @@ const IMAGE_URL_NUMBER_WORDS = new Map<string, number>([
   ['eighteen', 18],
   ['nineteen', 19],
   ['twenty', 20],
+]);
+const IMAGE_URL_NUMBER_TENS = new Map<string, number>([
+  ['thirty', 30],
+  ['forty', 40],
+  ['fifty', 50],
+  ['sixty', 60],
+  ['seventy', 70],
+  ['eighty', 80],
+  ['ninety', 90],
 ]);
 const MAX_IMAGE_REDIRECTS = 3;
 const BLOCKED_REMOTE_NETWORKS = new BlockList();
@@ -365,12 +376,16 @@ export class PersistentCountingChainService implements CountingChainService {
   }
 
   public getReviewRequestMessageId(): Promise<string | undefined> {
+    return this.getReviewRequestMessageIds().then((messageIds) => messageIds.at(-1));
+  }
+
+  public getReviewRequestMessageIds(): Promise<readonly string[]> {
     if (
       !this.dependencies.config.enabled ||
       !this.dependencies.config.reviewEnabled ||
       !this.dependencies.config.channelId
     ) {
-      return Promise.resolve(undefined);
+      return Promise.resolve([]);
     }
 
     return this.dependencies.state.load().then((rootState) => {
@@ -378,7 +393,7 @@ export class PersistentCountingChainService implements CountingChainService {
         rootState[STATE_KEY],
         this.dependencies.config.channelId,
       );
-      return state.pendingReview?.reviewMessageId ?? undefined;
+      return state.pendingReview?.reviewMessageIds ?? [];
     });
   }
 
@@ -1079,6 +1094,7 @@ export class PersistentCountingChainService implements CountingChainService {
       reason: effectiveReason,
       endedAt: previousEnding?.endedAt ?? now.toISOString(),
       reviewMessageId: null,
+      reviewMessageIds: [],
       requestedAt: now.toISOString(),
     };
     game.lastProcessedMessageId = message.id;
@@ -1103,6 +1119,7 @@ export class PersistentCountingChainService implements CountingChainService {
       state.pendingReview = {
         ...state.pendingReview,
         reviewMessageId,
+        reviewMessageIds: [...new Set([...state.pendingReview.reviewMessageIds, reviewMessageId])],
       };
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
@@ -1169,7 +1186,7 @@ export class PersistentCountingChainService implements CountingChainService {
       writeCountingChainState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.publishInfo();
-      await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
+      await this.deleteReviewMessages(message, pendingReview);
       await this.clearReactions(message);
       await this.react(message, PASS_REACTION, true);
       await this.recordGameParticipation(message);
@@ -1202,7 +1219,7 @@ export class PersistentCountingChainService implements CountingChainService {
     writeCountingChainState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.publishInfo();
-    await this.deleteReviewMessage(message, pendingReview.reviewMessageId);
+    await this.deleteReviewMessages(message, pendingReview);
     await this.clearReactions(message);
     await this.react(message, RULE_FAILURE_REACTION, true);
     await this.reply(
@@ -1437,21 +1454,29 @@ export class PersistentCountingChainService implements CountingChainService {
     }
   }
 
-  private async deleteReviewMessage(
+  private async deleteReviewMessages(
     message: CountingChainMessage,
-    reviewMessageId: string | null,
+    pendingReview: CountingChainPendingReview,
   ): Promise<void> {
-    if (!reviewMessageId || !message.deleteMessage) {
+    if (!message.deleteMessage) {
       return;
     }
 
-    try {
-      await message.deleteMessage(reviewMessageId);
-    } catch (error: unknown) {
-      this.dependencies.logger.warn(
-        { err: error, channelId: message.channelId, messageId: reviewMessageId },
-        'Counting chain review request message could not be deleted',
-      );
+    const reviewMessageIds = [
+      ...new Set([
+        ...pendingReview.reviewMessageIds,
+        ...(pendingReview.reviewMessageId ? [pendingReview.reviewMessageId] : []),
+      ]),
+    ];
+    for (const reviewMessageId of reviewMessageIds) {
+      try {
+        await message.deleteMessage(reviewMessageId);
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, messageId: reviewMessageId },
+          'Counting chain review request message could not be deleted',
+        );
+      }
     }
   }
 
@@ -1699,11 +1724,21 @@ function readPendingReview(value: unknown): CountingChainPendingReview | null {
     return null;
   }
 
+  const reviewMessageId = readNullableString(value.reviewMessageId);
+  const reviewMessageIds = readReviewMessageIds(value.reviewMessageIds, reviewMessageId);
   return {
     ...ending,
-    reviewMessageId: readNullableString(value.reviewMessageId),
+    reviewMessageId,
+    reviewMessageIds,
     requestedAt,
   };
+}
+
+function readReviewMessageIds(value: unknown, latestId: string | null): string[] {
+  const ids = Array.isArray(value)
+    ? value.filter((candidate): candidate is string => typeof candidate === 'string')
+    : [];
+  return [...new Set([...ids, ...(latestId ? [latestId] : [])])];
 }
 
 function isCountingChainReviewReason(value: unknown): value is CountingChainReviewReason {
@@ -1915,7 +1950,17 @@ function extractNumberCandidates(value: string): number[] {
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  for (const word of words) {
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    const tens = IMAGE_URL_NUMBER_TENS.get(word) ?? (word === 'twenty' ? 20 : undefined);
+    const nextWord = words[index + 1];
+    const unit = nextWord ? IMAGE_URL_NUMBER_WORDS.get(nextWord) : undefined;
+    if (tens !== undefined && unit !== undefined && unit < 10) {
+      candidates.push(tens + unit);
+      index += 1;
+      continue;
+    }
+
     const number = IMAGE_URL_NUMBER_WORDS.get(word);
     if (number !== undefined) {
       candidates.push(number);

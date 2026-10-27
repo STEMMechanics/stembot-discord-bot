@@ -107,6 +107,41 @@ describe('OpenAI STEM quiz engine', () => {
     expect(body.input[0]?.content[0]?.text).toContain('It is gravity');
   });
 
+  it('generates a structured hint without revealing the answer', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            hint: 'Think about the attraction between objects that have mass.',
+          }),
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const engine = createEngine(fetchImplementation);
+
+    await expect(
+      engine.generateHint(
+        {
+          ...question,
+          type: 'short-answer',
+        },
+        ['Start by thinking about forces.'],
+      ),
+    ).resolves.toBe('Think about the attraction between objects that have mass.');
+
+    const request = fetchImplementation.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      text: { format: { name: string } };
+      input: Array<{ content: Array<{ text?: string }> }>;
+    };
+    expect(body.text.format.name).toBe('stem_quiz_hint');
+    expect(body.input[0]?.content[0]?.text).toContain('without giving away the answer');
+    expect(body.input[0]?.content[0]?.text).toContain(
+      '<previous-hints>\nStart by thinking about forces.\n</previous-hints>',
+    );
+  });
+
   it('retries an incomplete high-effort response with the shared low setting', async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()
