@@ -31,10 +31,11 @@ const FALLBACK_REASONING_EFFORT = 'low';
 const NUMBER_RECOGNITION_PROMPT = [
   'Identify the single positive integer explicitly displayed or clearly asserted by the image frames.',
   'Read Arabic digits, spelled-out cardinal number words, stylized text, and unambiguous phrases that state a number.',
+  'Combine number words when they clearly form one cardinal number, even when they are split across lines, positions, or animation frames: "twenty" at the top and "one" at the bottom means 21, and "twenty-one" also means 21.',
   'For a correction such as "not one, but two!", return 2: choose the affirmed value, not the negated value.',
   'Also recognize a clearly presented hand gesture representing one number, such as a person intentionally holding up two fingers for 2.',
   'Count raised fingers only when the gesture is clearly the intended answer; do not count incidental fingers, people, or unrelated objects.',
-  'Treat all frames as one image. If frames conflict, or multiple numbers are shown without a clear intended value, return null.',
+  'Treat all frames as one image. If number words do not clearly form one value, or multiple unrelated numbers are shown without a clear intended value, return null.',
   'Do not count objects, solve arithmetic, infer a missing or next number, use the game state, or guess from context.',
   'If no single positive integer is clearly readable or asserted, return null.',
 ].join(' ');

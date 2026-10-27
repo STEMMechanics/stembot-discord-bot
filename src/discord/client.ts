@@ -32,7 +32,11 @@ import type {
 } from '../services/counting-chain.js';
 import type { StemAskMessage, StemAskService } from '../services/stem-ask.js';
 import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
-import type { StemQuizMessage, StemQuizService } from '../services/stem-quiz.js';
+import {
+  isStemQuizSkipRequest,
+  type StemQuizMessage,
+  type StemQuizService,
+} from '../services/stem-quiz.js';
 import type { StemWordRevealMessage, StemWordRevealService } from '../services/word-reveal.js';
 import type {
   MinigameLeaderboardEntry,
@@ -440,11 +444,15 @@ export function createDiscordGateway(
 
   if (dependencies.quiz && config.quiz.enabled && config.quiz.channelId) {
     client.on(Events.MessageCreate, (message) => {
-      if (message.channelId !== config.quiz.channelId) {
-        return;
-      }
-
-      if (message.author.bot || messageMentionsBot(message, client.user?.id)) {
+      const botMentioned = messageMentionsBot(message, client.user?.id);
+      const gameContent = client.user
+        ? removeBotMentions(message.content, client.user.id)
+        : message.content;
+      if (
+        message.channelId !== config.quiz.channelId ||
+        message.author.bot ||
+        (botMentioned && !isMinigameHintRequest(gameContent) && !isStemQuizSkipRequest(gameContent))
+      ) {
         return;
       }
 
@@ -459,7 +467,7 @@ export function createDiscordGateway(
       );
 
       void dependencies
-        .quiz!.handleMessage(toStemQuizMessage(message))
+        .quiz!.handleMessage(toStemQuizMessage(message, client.user?.id))
         .catch((error: unknown) => {
           logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id },
@@ -614,14 +622,21 @@ export function createDiscordGateway(
 
       const question = removeBotMentions(message.content, client.user.id);
       const isMinigameChannel =
+        message.channelId === config.quiz.channelId ||
         message.channelId === config.scramble.channelId ||
         message.channelId === config.wordChain.channelId ||
         message.channelId === config.wordReveal.channelId ||
         message.channelId === config.codeFix.channelId;
       const supportsHintRequests =
+        message.channelId === config.quiz.channelId ||
         message.channelId === config.scramble.channelId ||
         message.channelId === config.wordChain.channelId;
-      if (isMinigameChannel && (!supportsHintRequests || isMinigameHintRequest(question))) {
+      const isQuizSkipRequest =
+        message.channelId === config.quiz.channelId && isStemQuizSkipRequest(question);
+      if (
+        isMinigameChannel &&
+        (!supportsHintRequests || isMinigameHintRequest(question) || isQuizSkipRequest)
+      ) {
         return;
       }
 
@@ -863,15 +878,23 @@ function toCountingChainMessage(message: Message): CountingChainMessage {
   };
 }
 
-function toStemQuizMessage(message: Message): StemQuizMessage {
+function toStemQuizMessage(message: Message, botUserId?: string): StemQuizMessage {
+  const content = botUserId ? removeBotMentions(message.content, botUserId) : message.content;
   return {
     id: message.id,
     channelId: message.channelId,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
-    content: message.content,
+    content,
+    hintRequest: isMinigameHintRequest(content),
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
+    },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
     },
   };
 }
@@ -1154,10 +1177,10 @@ async function handleCountingChainReviewReaction(
     }
 
     const targetMessageId = await service.getReviewTargetMessageId();
-    const reviewRequestMessageId = await service.getReviewRequestMessageId();
+    const reviewRequestMessageIds = await service.getReviewRequestMessageIds();
     if (
       !targetMessageId ||
-      (message.id !== targetMessageId && message.id !== reviewRequestMessageId)
+      (message.id !== targetMessageId && !reviewRequestMessageIds.includes(message.id))
     ) {
       return;
     }

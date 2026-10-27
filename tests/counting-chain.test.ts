@@ -271,6 +271,34 @@ describe('counting-chain service', () => {
     });
   });
 
+  it('combines a tens word and a unit word in an image URL fallback', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      countingChain: {
+        version: 1,
+        expectedNumber: 21,
+        lastAuthorId: null,
+        lastMessageId: null,
+        updatedAt: '2026-10-23T00:00:00.000Z',
+      },
+    };
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(null),
+    };
+    const service = createService(state, recognizer);
+    const message = createMessage('user-1', 'message-word-number', {
+      content: 'https://static.example/counting-chain-twenty-one.gif',
+      attachments: [],
+    });
+
+    await service.handleMessage(message);
+
+    expect(message.react).toHaveBeenCalledWith('👍');
+    expect(state.state).toMatchObject({
+      countingChain: { expectedNumber: 22, lastMessageId: 'message-word-number' },
+    });
+  });
+
   it('does not treat ambiguous URL numbers as a valid game number', async () => {
     const state = new MemoryStateStore();
     const recognizer = {
@@ -668,6 +696,7 @@ describe('counting-chain service', () => {
 
     expect(await service.getReviewTargetMessageId()).toBe('review-message-2');
     expect(await service.getReviewRequestMessageId()).toBe('review-reply-message');
+    await expect(service.getReviewRequestMessageIds()).resolves.toEqual(['review-reply-message']);
     expect(await service.reviewMessage(wrong, 'approve', 'moderator-1')).toBe(true);
     expect(wrong.react).toHaveBeenCalledWith('👍');
     expect(wrong.clearReactions).toHaveBeenCalledOnce();
@@ -681,6 +710,32 @@ describe('counting-chain service', () => {
     expect(state.state.countingChain).not.toHaveProperty('pendingReview');
     expect(state.state.countingChain).not.toHaveProperty('lastGameEnding');
     expect(await service.getReviewRequestMessageId()).toBeUndefined();
+    await expect(service.getReviewRequestMessageIds()).resolves.toEqual([]);
+  });
+
+  it('deletes every stored review request when a moderator approves a post', async () => {
+    const state = new MemoryStateStore();
+    const recognizer = {
+      recognizeNumber: vi.fn<NumberRecognizer['recognizeNumber']>().mockResolvedValue(4),
+    };
+    const service = createService(state, recognizer, {
+      config: { reviewEnabled: true, reviewRoleId: 'moderator-role' },
+    });
+    const message = createMessage('user-1', 'review-multiple-requests');
+
+    await service.handleMessage(message);
+    const countingState = state.state.countingChain as {
+      pendingReview: { reviewMessageIds: string[] };
+    };
+    countingState.pendingReview.reviewMessageIds = [
+      'review-reply-message-old',
+      'review-reply-message',
+    ];
+
+    await expect(service.reviewMessage(message, 'approve', 'moderator-1')).resolves.toBe(true);
+
+    expect(message.deleteMessage).toHaveBeenNthCalledWith(1, 'review-reply-message-old');
+    expect(message.deleteMessage).toHaveBeenNthCalledWith(2, 'review-reply-message');
   });
 
   it('catches up messages posted while a moderator review was pending', async () => {

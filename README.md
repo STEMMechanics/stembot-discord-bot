@@ -149,9 +149,13 @@ ordinary Discord messages. Questions may be short answer, true/false or multiple
 choice. The first accepted answer earns one point, receives `✅`, and advances
 the game. Incorrect answers receive `❌`; after the configured
 number of wrong answers, STEMBot reveals the answer and explanation before
-posting the next question. Unclear answers receive `🤔` and leave the question
-open without using an attempt. If answer evaluation fails temporarily, the
-message receives `⚠️` and no attempt is counted, so the member can try again.
+posting the next question. A wrong true/false answer ends that question
+immediately, and a multiple-choice question ends once every option but one has
+been tried incorrectly. Each prompt explains that members can type `hint` (or
+`clue`/`help`) for an extra clue, or `skip` to reveal the answer and move on.
+Hints do not use an answer attempt. Unclear answers receive `🤔` and leave the
+question open without using an attempt. If answer evaluation fails temporarily,
+the message receives `⚠️` and no attempt is counted, so the member can try again.
 
 Generated questions are checked for accurate terminology and matching units.
 Minecraft questions distinguish blocks, metres, seconds, game ticks and
@@ -161,9 +165,9 @@ questions and answers, supplies them to the generator as exclusions, and
 regenerates an exact duplicate before it is posted. Near-equivalent questions
 are also discouraged by the generation prompt.
 
-The active question, wrong-attempt count, scores, question sequence, recent
-question history and recent message IDs are persisted in the shared JSON state
-file. A restart keeps an
+The active question, wrong-attempt count, tried multiple-choice options, hints,
+scores, question sequence, recent question history and recent message IDs are
+persisted in the shared JSON state file. A restart keeps an
 active question instead of generating a replacement. Question generation and
 natural-language answer checking use the existing `OPENAI_API_KEY`,
 `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT` and `OPENAI_TIMEOUT` settings. The
@@ -247,11 +251,10 @@ repetition.
 When `STEM_ASK_ENABLED=true`, members can mention STEMBot followed by a STEM
 question in any channel. STEMBot answers with the shared OpenAI model without
 storing the question text. Empty or oversized questions are ignored. A message
-that mentions STEMBot is excluded from counting, quiz, scramble, word-chain,
+that mentions STEMBot is normally excluded from counting, quiz, scramble, word-chain,
 Mystery Lab and Code Fix answer processing so the bot can answer it safely
-anywhere. In the scramble and word-chain channels, `@STEMBot hint` continues
-to route to the game hint
-behavior.
+anywhere. In the quiz, scramble and word-chain channels, `@STEMBot hint`
+continues to route to the game hint behavior; quiz also accepts `@STEMBot skip`.
 The service allows one request per user every 30 seconds, ten requests per user
 per UTC day, and 100 requests across the bot per UTC day by default. Requests
 that reach a limit receive a short playful cooldown or quota response without
@@ -331,7 +334,7 @@ pending when history cannot be read. It retries recovery on the next startup,
 so correcting the channel configuration and permissions does not require
 manually editing the game fields.
 
-### Minecraft chat bridge
+### Minecraft Discord bridge
 
 When `CHAT_DISCORD_BRIDGE_ENABLED=true`, STEMBot listens for authenticated
 `POST` requests on `CHAT_DISCORD_BRIDGE_HOST`, `CHAT_DISCORD_BRIDGE_PORT` and
@@ -343,7 +346,10 @@ channel remains authoritative. The `X-STEMCraft-Event-Id` header must match the
 JSON `event_id` when supplied, and retries with an already delivered event ID
 are acknowledged without a second Discord message. The receiver accepts
 `minecraft.chat`, `minecraft.player_join`, `minecraft.player_quit`,
-`minecraft.minigame_start` and `minecraft.minigame_end` on this same endpoint.
+`minecraft.player_death`, `minecraft.player_command`,
+`minecraft.server_start`, `minecraft.server_stop`,
+`minecraft.server_message`, `minecraft.minigame_start` and
+`minecraft.minigame_end` on this same endpoint.
 
 The plugin can send:
 
@@ -368,18 +374,30 @@ X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
 ```
 
 STEMBot publishes chat as the plain text `Alex » Hello from Minecraft` with
-Discord mentions disabled. Join, leave and minigame events use embeds by
-default:
+Discord mentions disabled; no pickaxe prefix is added. Join and leave events
+use compact DiscordSRV-style embeds with the player avatar as the author icon.
+Death events are plain text with a skull prefix:
 
 ```text
 JOIN — color #00ff00
 Author: Alex joined the server
-Online players: 12
 
 LEAVE — color #ff0000
 Author: Alex left the server
-Online players: 11
 
+DEATH — plain text
+💀 Alex was slain by Zombie
+```
+
+Death events may provide their display text as `message`, `death_message`,
+`data.message`, or `data.death_message`; when none is supplied, STEMBot uses
+`Alex died`. The death `data` may also include nullable `killer`, `cause`, and
+`world` fields. Server start and stop events use compact green and red embeds.
+Server messages use a compact amber embed containing only the bold server
+message text, for example `Server restarting to apply updates`. Minigame
+events continue to use embeds with their arena, roster, team and result details:
+
+```text
 MINIGAME START — color #3498db
 Author: Bedwars started
 Arena: Forest, ID forest, World bedwars_forest
@@ -401,7 +419,7 @@ Teams: none
 The formatting is centralized in `formatMinecraftEvent` in
 `src/http/chat-discord-bridge.ts`, so these labels and layouts can be changed
 without changing the receiver or payload schemas. The bridge stores delivered
-event IDs for all five event types in the shared state file, so a plugin retry
+event IDs for every event type in the shared state file, so a plugin retry
 after a network timeout is safe.
 
 ### Discord command synchronization

@@ -116,7 +116,7 @@ describe('Minecraft chat Discord bridge', () => {
     expect(publisher.send).not.toHaveBeenCalled();
   });
 
-  it('routes player join and quit events with the online player count', async () => {
+  it('routes join and quit as compact embeds and death as text', async () => {
     const state = new MemoryStateStore();
     const publisher: ChatDiscordBridgePublisher = {
       send: vi.fn().mockResolvedValue('discord-message-2'),
@@ -163,16 +163,40 @@ describe('Minecraft chat Discord bridge', () => {
       },
       43129,
     );
+    const death = await request(
+      JSON.stringify({
+        event: 'minecraft.player_death',
+        event_id: 'death-1',
+        server: 'survival',
+        channel: 'global',
+        player: { name: 'Alex', uuid: 'player-1' },
+        data: {
+          message: 'Alex was slain by Zombie',
+          killer: null,
+          cause: 'entity_attack',
+          world: 'survival',
+        },
+      }),
+      {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+        'x-stemcraft-event-id': 'death-1',
+      },
+      43129,
+    );
 
     expect(join.status).toBe(200);
     expect(quit.status).toBe(200);
+    expect(death.status).toBe(200);
     expect(publisher.send).toHaveBeenNthCalledWith(1, 'discord-channel', {
       content: '',
       embeds: [
         {
           color: 0x00ff00,
-          author: { name: 'Alex joined the server' },
-          fields: [{ name: 'Online players', value: '12', inline: true }],
+          author: {
+            name: 'Alex joined the server',
+            icon_url: 'https://mc-heads.net/avatar/Alex/64.png',
+          },
         },
       ],
     });
@@ -181,11 +205,18 @@ describe('Minecraft chat Discord bridge', () => {
       embeds: [
         {
           color: 0xff0000,
-          author: { name: 'Alex left the server' },
-          fields: [{ name: 'Online players', value: '11', inline: true }],
+          author: {
+            name: 'Alex left the server',
+            icon_url: 'https://mc-heads.net/avatar/Alex/64.png',
+          },
         },
       ],
     });
+    expect(publisher.send).toHaveBeenNthCalledWith(
+      3,
+      'discord-channel',
+      '💀 Alex was slain by Zombie',
+    );
   });
 
   it('routes minigame start and end events with arena, roster, team and winner details', async () => {
@@ -336,6 +367,68 @@ describe('Minecraft chat Discord bridge', () => {
         ],
       }),
     );
+  });
+
+  it('routes server messages as bold amber embeds and keeps lifecycle embeds compact', async () => {
+    const state = new MemoryStateStore();
+    const publisher: ChatDiscordBridgePublisher = {
+      send: vi.fn().mockResolvedValue('discord-message-4'),
+    };
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43132),
+      publisher,
+      state,
+      logger,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const message = await request(
+      JSON.stringify({
+        event: 'minecraft.server_message',
+        event_id: 'server-message-1',
+        server: 'survival',
+        channel: 'global',
+        data: { message: 'Server restarting to apply updates' },
+      }),
+      {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+        'x-stemcraft-event-id': 'server-message-1',
+      },
+      43132,
+    );
+    const started = await request(
+      JSON.stringify({
+        event: 'minecraft.server_start',
+        event_id: 'server-start-1',
+        server: 'survival',
+        channel: 'global',
+        data: {},
+      }),
+      {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+        'x-stemcraft-event-id': 'server-start-1',
+      },
+      43132,
+    );
+
+    expect(message.status).toBe(200);
+    expect(started.status).toBe(200);
+    expect(publisher.send).toHaveBeenNthCalledWith(1, 'discord-channel', {
+      content: '',
+      embeds: [
+        {
+          color: 0xf59e0b,
+          description: '**Server restarting to apply updates**',
+        },
+      ],
+    });
+    expect(publisher.send).toHaveBeenNthCalledWith(2, 'discord-channel', {
+      content: '',
+      embeds: [{ color: 0x00ff00, author: { name: 'Server started' } }],
+    });
   });
 
   it('rejects a mismatched event-id header for every event type', async () => {

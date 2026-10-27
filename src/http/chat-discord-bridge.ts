@@ -65,6 +65,44 @@ export interface MinecraftPlayerCountEvent extends MinecraftEventEnvelope {
   };
 }
 
+export interface MinecraftPlayerDeathEvent extends MinecraftEventEnvelope {
+  event: 'minecraft.player_death';
+  player: MinecraftPlayer;
+  message?: string | null | undefined;
+  death_message?: string | null | undefined;
+  data?:
+    | {
+        message?: string | null | undefined;
+        killer?: MinecraftPlayer | string | null | undefined;
+        death_message?: string | null | undefined;
+        cause?: string | null | undefined;
+        world?: string | null | undefined;
+      }
+    | null
+    | undefined;
+}
+
+export interface MinecraftPlayerCommandEvent extends MinecraftEventEnvelope {
+  event: 'minecraft.player_command';
+  player: MinecraftPlayer;
+  data: {
+    command: string;
+  };
+}
+
+export interface MinecraftServerLifecycleEvent extends MinecraftEventEnvelope {
+  event: 'minecraft.server_start' | 'minecraft.server_stop';
+  data?: Record<string, unknown> | null | undefined;
+}
+
+export interface MinecraftServerMessageEvent extends MinecraftEventEnvelope {
+  event: 'minecraft.server_message';
+  data: {
+    message: string;
+    source?: string | null | undefined;
+  };
+}
+
 export interface MinecraftArena {
   id: string;
   name: string;
@@ -96,7 +134,13 @@ export interface MinecraftMinigameEvent extends MinecraftEventEnvelope {
 }
 
 export type MinecraftEvent =
-  MinecraftChatEvent | MinecraftPlayerCountEvent | MinecraftMinigameEvent;
+  | MinecraftChatEvent
+  | MinecraftPlayerCountEvent
+  | MinecraftPlayerDeathEvent
+  | MinecraftPlayerCommandEvent
+  | MinecraftServerLifecycleEvent
+  | MinecraftServerMessageEvent
+  | MinecraftMinigameEvent;
 
 interface ChatDiscordBridgeState {
   version: 1;
@@ -137,6 +181,10 @@ const minecraftWinnerSchema = z
   .union([minecraftPlayerSchema, z.string().trim().max(100)])
   .nullable()
   .optional();
+const minecraftKillerSchema = z
+  .union([minecraftPlayerSchema, z.string().trim().max(100)])
+  .nullable()
+  .optional();
 const minecraftEventSchema = z.discriminatedUnion('event', [
   z.object({
     ...minecraftEventEnvelopeSchema,
@@ -155,6 +203,49 @@ const minecraftEventSchema = z.discriminatedUnion('event', [
     event: z.literal('minecraft.player_quit'),
     player: minecraftPlayerSchema,
     data: z.object({ online_players: z.number().int().nonnegative() }),
+  }),
+  z.object({
+    ...minecraftEventEnvelopeSchema,
+    event: z.literal('minecraft.player_death'),
+    player: minecraftPlayerSchema,
+    message: z.string().trim().max(300).nullable().optional(),
+    death_message: z.string().trim().max(300).nullable().optional(),
+    data: z
+      .object({
+        message: z.string().trim().max(300).nullable().optional(),
+        killer: minecraftKillerSchema,
+        death_message: z.string().trim().max(300).nullable().optional(),
+        cause: z.string().trim().max(100).nullable().optional(),
+        world: z.string().trim().max(100).nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+  }),
+  z.object({
+    ...minecraftEventEnvelopeSchema,
+    event: z.literal('minecraft.player_command'),
+    player: minecraftPlayerSchema,
+    data: z.object({
+      command: z.string().trim().min(1).max(1800),
+    }),
+  }),
+  z.object({
+    ...minecraftEventEnvelopeSchema,
+    event: z.literal('minecraft.server_start'),
+    data: z.record(z.string(), z.unknown()).nullable().optional(),
+  }),
+  z.object({
+    ...minecraftEventEnvelopeSchema,
+    event: z.literal('minecraft.server_stop'),
+    data: z.record(z.string(), z.unknown()).nullable().optional(),
+  }),
+  z.object({
+    ...minecraftEventEnvelopeSchema,
+    event: z.literal('minecraft.server_message'),
+    data: z.object({
+      message: z.string().trim().min(1).max(2000),
+      source: z.string().trim().max(50).nullable().optional(),
+    }),
   }),
   z.object({
     ...minecraftEventEnvelopeSchema,
@@ -362,9 +453,19 @@ export function formatMinecraftEvent(event: MinecraftEvent): MinecraftDiscordMes
     case 'minecraft.chat':
       return `${event.player.name} » ${event.message}`;
     case 'minecraft.player_join':
-      return formatPlayerCountEvent(event, 'joined');
+      return formatPlayerEvent(event, `${event.player.name} joined the server`, 0x00ff00);
     case 'minecraft.player_quit':
-      return formatPlayerCountEvent(event, 'left');
+      return formatPlayerEvent(event, `${event.player.name} left the server`, 0xff0000);
+    case 'minecraft.player_death':
+      return `💀 ${getDeathMessage(event)}`;
+    case 'minecraft.player_command':
+      return `${event.player.name} >> \`${escapeDiscordCode(event.data.command)}\``;
+    case 'minecraft.server_start':
+      return formatServerLifecycleEvent('Server started', 0x00ff00);
+    case 'minecraft.server_stop':
+      return formatServerLifecycleEvent('Server stopped', 0xff0000);
+    case 'minecraft.server_message':
+      return formatServerMessageEvent(event);
     case 'minecraft.minigame_start':
       return formatMinigameEvent(event, 'started');
     case 'minecraft.minigame_end':
@@ -372,28 +473,58 @@ export function formatMinecraftEvent(event: MinecraftEvent): MinecraftDiscordMes
   }
 }
 
-function formatPlayerCountEvent(
+function formatServerLifecycleEvent(authorName: string, color: number): ChatDiscordBridgeMessage {
+  return {
+    content: '',
+    embeds: [
+      {
+        color,
+        author: { name: authorName },
+      },
+    ],
+  };
+}
+
+function formatServerMessageEvent(event: MinecraftServerMessageEvent): ChatDiscordBridgeMessage {
+  const message = escapeDiscordText(event.data.message).slice(0, 4090);
+  return {
+    content: '',
+    embeds: [
+      {
+        color: 0xf59e0b,
+        description: `**${message}**`,
+      },
+    ],
+  };
+}
+
+function formatPlayerEvent(
   event: MinecraftPlayerCountEvent,
-  action: 'joined' | 'left',
+  authorName: string,
+  color: number,
 ): ChatDiscordBridgeMessage {
   return {
     content: '',
     embeds: [
       {
-        color: action === 'joined' ? 0x00ff00 : 0xff0000,
+        color,
         author: {
-          name: `${event.player.name} ${action} the server`,
+          name: authorName,
+          icon_url: `https://mc-heads.net/avatar/${encodeURIComponent(event.player.name)}/64.png`,
         },
-        fields: [
-          {
-            name: 'Online players',
-            value: String(event.data.online_players),
-            inline: true,
-          },
-        ],
       },
     ],
   };
+}
+
+function getDeathMessage(event: MinecraftPlayerDeathEvent): string {
+  const message =
+    event.message ??
+    event.death_message ??
+    event.data?.message ??
+    event.data?.death_message ??
+    `${event.player.name} died`;
+  return message.trim() || `${event.player.name} died`;
 }
 
 function formatMinigameEvent(
