@@ -106,6 +106,13 @@ const minecraftEventSchema = z.discriminatedUnion('event', [
   }),
   z.object({
     ...minecraftEventBase,
+    event: z.literal('minecraft.server_message'),
+    data: z.object({
+      message: z.string().trim().min(1).max(4090),
+    }),
+  }),
+  z.object({
+    ...minecraftEventBase,
     event: z.literal('minecraft.minigame_start'),
     data: minecraftEventDataSchema,
   }),
@@ -463,6 +470,13 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
     };
   }
 
+  if (event.event === 'minecraft.server_message') {
+    return {
+      color: 0xf59e0b,
+      description: `**${escapeDiscordMarkdown(event.data.message)}**`,
+    };
+  }
+
   if (event.event === 'minecraft.minigame_start') {
     const minigame = humanize(data.minigame) || 'Minigame';
     const arena = isRecord(data.arena)
@@ -536,6 +550,10 @@ function asText(value: unknown): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   if (typeof value === 'boolean') return String(value);
   return undefined;
+}
+
+function escapeDiscordMarkdown(value: string): string {
+  return value.replace(/[\\*_~`>|]/g, '\\$&').slice(0, 4090);
 }
 
 function firstText(...values: unknown[]): string | undefined {

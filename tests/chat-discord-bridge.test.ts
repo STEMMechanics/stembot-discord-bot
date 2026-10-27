@@ -186,7 +186,7 @@ describe('Minecraft chat Discord bridge', () => {
       event: string;
       payload: Record<string, unknown>;
       expectedText?: string;
-      compact?: { color: number; author: string };
+      compact?: { color: number; author?: string; description?: string };
       title?: string;
       description?: string;
       fields: Array<[string, string]>;
@@ -242,6 +242,12 @@ describe('Minecraft chat Discord bridge', () => {
         event: 'minecraft.server_stop',
         payload: { data: {} },
         compact: { color: 0xff0000, author: 'Server stopped' },
+        fields: [],
+      },
+      {
+        event: 'minecraft.server_message',
+        payload: { data: { message: 'Server restarting...' } },
+        compact: { color: 0xf59e0b, description: '**Server restarting...**' },
         fields: [],
       },
       {
@@ -316,19 +322,23 @@ describe('Minecraft chat Discord bridge', () => {
       }
 
       if (testCase.compact) {
+        const expectedEmbed = {
+          color: testCase.compact.color,
+          ...(testCase.compact.author
+            ? {
+                author: {
+                  name: testCase.compact.author,
+                  ...(testCase.event === 'minecraft.player_join' ||
+                  testCase.event === 'minecraft.player_quit'
+                    ? { icon_url: 'https://mc-heads.net/avatar/Alex/64.png' }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(testCase.compact.description ? { description: testCase.compact.description } : {}),
+        };
         expect(message).toEqual({
-          embeds: [
-            {
-              color: testCase.compact.color,
-              author: {
-                name: testCase.compact.author,
-                ...(testCase.event === 'minecraft.player_join' ||
-                testCase.event === 'minecraft.player_quit'
-                  ? { icon_url: 'https://mc-heads.net/avatar/Alex/64.png' }
-                  : {}),
-              },
-            },
-          ],
+          embeds: [expectedEmbed],
           allowedMentions: { parse: [] },
         });
         continue;

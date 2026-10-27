@@ -336,9 +336,10 @@ ignored, so embeds, images, and attachments are not copied into Minecraft.
 Messages containing text plus an attachment forward the text only.
 
 Global chat and death events are plain text announcements. Player join and quit
-events use compact embeds; command, minigame, and server lifecycle events use
-structured embeds. Embed mentions are disabled, and valid `occurred_at`
-timestamps appear in the embed timestamp.
+events use compact embeds; command, minigame, server lifecycle, and server
+message events use structured embeds. Server messages are rendered as a bold
+message-only amber embed, with no additional label. Embed mentions are disabled,
+and valid `occurred_at` timestamps appear in the embed timestamp.
 The recommended path is `/minecraft/event`; requests with a trailing slash are
 accepted as well. Existing deployments can keep `/minecraft/chat` when that
 path is explicitly configured in both the bot and the Minecraft plugin.
@@ -368,9 +369,11 @@ X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
 The structured event names are `minecraft.player_join`,
 `minecraft.player_quit`, `minecraft.player_death`, `minecraft.player_command`,
 `minecraft.minigame_start`, `minecraft.minigame_end`,
-`minecraft.server_start`, and `minecraft.server_stop`. Player events carry
-the player object; server events have no player; event-specific details are in
-`data`.
+`minecraft.server_start`, `minecraft.server_stop`, and
+`minecraft.server_message`. Player events carry the player object; server
+events have no player; event-specific details are in `data`. A server message
+uses `data.message` for text originating from the Minecraft server console,
+plugins, scripts, or services.
 
 STEMBot publishes chat as `Alex » Hello from Minecraft` with Discord mentions
 disabled and no pickaxe prefix. Player join and quit events use compact embeds
