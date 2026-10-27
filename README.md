@@ -71,8 +71,9 @@ When `STEM_GLOBAL_CHASE_ENABLED=true`, STEMBot posts a cooperative location
 mystery in the configured channel. Each clue offers three possible destinations;
 players reply with a location or `1`, `2`, or `3`. A case has three correct
 locations to follow, while decoy choices add strikes. Three strikes ends the
-case and starts a new one. The board embed keeps the clue, current location,
-route, choices, and strike count visible. Solved cases are recorded on the
+case and starts a new one. Each player response posts a fresh board embed, keeping
+earlier clues and choices visible in the channel while the latest embed shows the
+current location, route, and strike count. Solved cases are recorded on the
 minigame leaderboard.
 
 ### Counting-chain minigame
@@ -241,8 +242,9 @@ wrong-answer penalty or an extra round change.
 When `STEM_MYSTERY_LAB_ENABLED=true`, STEMBot opens a Mystery Lab round with
 one age-appropriate word and one clue. The board is a blue embed with the clue at
 the top, a comma-separated code-style list of guessed letters, and the word shown
-as blue circles for unknown positions and blue-square letter emojis for revealed
-positions. The default `challenging` difficulty uses longer words and clues that
+as blue circles for unknown positions and Discord `:regional_indicator_a:` through
+`:regional_indicator_z:` names for revealed positions. The default `challenging`
+difficulty uses longer words and clues that
 require a little more thought without giving away the answer. Members can submit
 one letter or the whole word. Every guess edits the board embed so the current
 state stays visible during a busy round. A completed word records the member's

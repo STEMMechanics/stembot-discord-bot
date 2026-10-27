@@ -125,7 +125,11 @@ describe('STEM Word Reveal service', () => {
           expect.objectContaining({
             fields: expect.arrayContaining([
               { name: '🔤 Guesses', value: '`A`', inline: false },
-              { name: '🧩 Word', value: '🇦 🔵 🔵 🔵', inline: false },
+              {
+                name: '🧩 Word',
+                value: ':regional_indicator_a: 🔵 🔵 🔵',
+                inline: false,
+              },
             ]),
           }),
         ],

@@ -351,7 +351,7 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
         state.round = null;
         writeGlobalChaseState(rootState, state);
         await this.dependencies.state.save(rootState);
-        await this.editBoardSafely(
+        await this.postBoardSafely(
           round,
           formatGlobalChaseEmbed(
             chaseCase,
@@ -368,9 +368,7 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
         return;
       }
 
-      writeGlobalChaseState(rootState, state);
-      await this.dependencies.state.save(rootState);
-      await this.editBoardSafely(
+      const messageId = await this.postBoardSafely(
         round,
         formatGlobalChaseEmbed(
           chaseCase,
@@ -379,6 +377,11 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
           `❌ **${choice}** was a decoy. Try another lead.`,
         ),
       );
+      if (messageId) {
+        round.messageId = messageId;
+      }
+      writeGlobalChaseState(rootState, state);
+      await this.dependencies.state.save(rootState);
       return;
     }
 
@@ -394,7 +397,7 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
       writeGlobalChaseState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.recordGameParticipation(message.authorId, message);
-      await this.editBoardSafely(
+      await this.postBoardSafely(
         round,
         formatGlobalChaseEmbed(
           chaseCase,
@@ -407,9 +410,7 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
       return;
     }
 
-    writeGlobalChaseState(rootState, { ...state, round: nextRound });
-    await this.dependencies.state.save(rootState);
-    await this.editBoardSafely(
+    const messageId = await this.postBoardSafely(
       nextRound,
       formatGlobalChaseEmbed(
         chaseCase,
@@ -418,6 +419,11 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
         `✅ **${leg.destination}** was correct. Follow the next lead.`,
       ),
     );
+    if (messageId) {
+      nextRound.messageId = messageId;
+    }
+    writeGlobalChaseState(rootState, { ...state, round: nextRound });
+    await this.dependencies.state.save(rootState);
   }
 
   private async publishNextCase(
@@ -467,6 +473,23 @@ export class PersistentGlobalChaseService implements GlobalChaseService {
 
     const available = CASEBOOK.filter((chaseCase) => !recentCaseIds.includes(chaseCase.id));
     return available[0] ?? preferred;
+  }
+
+  private async postBoardSafely(
+    round: GlobalChaseRoundState,
+    embed: APIEmbed,
+  ): Promise<string | undefined> {
+    try {
+      return await this.dependencies.publisher.send(this.dependencies.config.channelId!, {
+        embeds: [embed],
+      });
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: this.dependencies.config.channelId, caseNumber: round.caseNumber },
+        'Global Chase board could not be posted',
+      );
+      return undefined;
+    }
   }
 
   private async editBoardSafely(round: GlobalChaseRoundState, embed: APIEmbed): Promise<void> {

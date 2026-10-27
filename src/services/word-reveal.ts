@@ -584,8 +584,7 @@ function formatWordRevealEmbed(
 }
 
 function toRegionalIndicator(letter: string): string {
-  const codePoint = letter.toLowerCase().charCodeAt(0);
-  return String.fromCodePoint(0x1f1e6 + codePoint - 97);
+  return `:regional_indicator_${letter.toLowerCase()}:`;
 }
 
 function normalizeWordRevealGuess(value: string): string | undefined {
