@@ -351,10 +351,26 @@ are acknowledged without a second Discord message. The receiver accepts
 `minecraft.server_message`, `minecraft.minigame_start` and
 `minecraft.minigame_end` on this same endpoint.
 
+When `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL` is set, the same channel also
+forwards human Discord messages to STEMCraft with the same
+`CHAT_DISCORD_BRIDGE_BEARER_TOKEN`. STEMBot sends only the message's text,
+username, and display name. Bot/webhook messages and messages with no text are
+ignored, so embeds, images, and attachments are not copied into Minecraft.
+Messages containing text plus an attachment forward the text only.
+
+Global chat and death events are plain text announcements. Player join and quit
+events use compact embeds; command, minigame, server lifecycle, and server
+message events use structured embeds. Server messages are rendered as a bold
+message-only amber embed, with no additional label. Embed mentions are disabled,
+and valid `occurred_at` timestamps appear in the embed timestamp.
+The recommended path is `/minecraft/event`; requests with a trailing slash are
+accepted as well. Existing deployments can keep `/minecraft/chat` when that
+path is explicitly configured in both the bot and the Minecraft plugin.
+
 The plugin can send:
 
 ```http
-POST /minecraft/chat
+POST /minecraft/event
 Authorization: Bearer replace-with-long-random-token
 Content-Type: application/json; charset=utf-8
 X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
@@ -373,54 +389,38 @@ X-STEMCraft-Event-Id: 7b5e1d0e-8d86-4a93-9ea2-92a57fb1b40e
 }
 ```
 
-STEMBot publishes chat as the plain text `Alex » Hello from Minecraft` with
-Discord mentions disabled; no pickaxe prefix is added. Join and leave events
-use compact DiscordSRV-style embeds with the player avatar as the author icon.
-Death events are plain text with a skull prefix:
+The structured event names are `minecraft.player_join`,
+`minecraft.player_quit`, `minecraft.player_death`, `minecraft.player_command`,
+`minecraft.minigame_start`, `minecraft.minigame_end`,
+`minecraft.server_start`, `minecraft.server_stop`, and
+`minecraft.server_message`. Player events carry the player object; server
+events have no player; event-specific details are in `data`. A server message
+uses `data.message` for text originating from the Minecraft server console,
+plugins, scripts, or services.
 
-```text
-JOIN — color #00ff00
-Author: Alex joined the server
+STEMBot publishes chat as `Alex » Hello from Minecraft` with Discord mentions
+disabled and no pickaxe prefix. Player join and quit events use compact embeds
+with the player avatar and a green or red edge. Death events are plain text in
+the form `💀 Alex was slain by Zombie`; the plugin's `data.message` is used when
+present, with `Alex died` as the fallback. Commands are plain text in the form
+`Alex » \`/spawn home\``. Server start/stop and minigame start events use
+compact green/red embeds; a minigame start looks like `Mobarena - Forest
+started`. Minigame end events retain their arena, status, participant and
+winner details. The bridge
+stores delivered event IDs in the shared state file so a plugin retry after a
+network timeout is safe.
 
-LEAVE — color #ff0000
-Author: Alex left the server
+STEMBot posts Discord chat to the STEMCraft URL in this form:
 
-DEATH — plain text
-💀 Alex was slain by Zombie
+```json
+{
+  "event": "discord.chat",
+  "event_id": "123456789012345678",
+  "username": "alex",
+  "displayname": "Alex",
+  "message": "Hello from Discord"
+}
 ```
-
-Death events may provide their display text as `message`, `death_message`,
-`data.message`, or `data.death_message`; when none is supplied, STEMBot uses
-`Alex died`. The death `data` may also include nullable `killer`, `cause`, and
-`world` fields. Server start and stop events use compact green and red embeds.
-Server messages use a compact amber embed containing only the bold server
-message text, for example `Server restarting to apply updates`. Minigame
-events continue to use embeds with their arena, roster, team and result details:
-
-```text
-MINIGAME START — color #3498db
-Author: Bedwars started
-Arena: Forest, ID forest, World bedwars_forest
-Status: running
-Players: Alex
-Spectators: none
-Teams: Red (0): Alex
-
-MINIGAME END — color #9b59b6
-Author: Bedwars ended
-Arena: Forest, ID forest, World bedwars_forest
-Status: ending
-Winner: Red — Alex
-Players: none
-Spectators: none
-Teams: none
-```
-
-The formatting is centralized in `formatMinecraftEvent` in
-`src/http/chat-discord-bridge.ts`, so these labels and layouts can be changed
-without changing the receiver or payload schemas. The bridge stores delivered
-event IDs for every event type in the shared state file, so a plugin retry
-after a network timeout is safe.
 
 ### Discord command synchronization
 
@@ -576,9 +576,10 @@ npm run validate
 | `CHAT_DISCORD_BRIDGE_ENABLED`               | No                  | Enable the bearer-authenticated Minecraft chat HTTP bridge; defaults to `false`.            |
 | `CHAT_DISCORD_BRIDGE_HOST`                  | No                  | HTTP bind host; defaults to `0.0.0.0`.                                                      |
 | `CHAT_DISCORD_BRIDGE_PORT`                  | No                  | HTTP bind port; defaults to `8080`.                                                         |
-| `CHAT_DISCORD_BRIDGE_PATH`                  | No                  | HTTP path; defaults to `/minecraft/chat`.                                                   |
+| `CHAT_DISCORD_BRIDGE_PATH`                  | No                  | HTTP path; defaults to `/minecraft/event`.                                                  |
 | `CHAT_DISCORD_BRIDGE_BEARER_TOKEN`          | When enabled        | Bearer token required by the Minecraft plugin.                                              |
 | `CHAT_DISCORD_BRIDGE_CHANNEL_ID`            | When enabled        | Discord channel receiving accepted Minecraft chat messages.                                 |
+| `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL`         | For reverse chat    | STEMCraft `POST /api/v1/chat/discord` URL for Discord-to-Minecraft chat.                    |
 | `CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES`        | No                  | Maximum request size; defaults to 64 KiB.                                                   |
 | `WORKSHOP_TIME_ZONE`                        | No                  | IANA timezone for Discord output and notifications; defaults to `Australia/Brisbane`.       |
 | `WORKSHOP_POLL_INTERVAL_MS`                 | No                  | Feed polling interval; defaults to 5 minutes.                                               |

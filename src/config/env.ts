@@ -117,6 +117,12 @@ function optionalEnvironmentString() {
   );
 }
 
+function normalizeHttpPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === '/') return trimmed;
+  return trimmed.replace(/\/+$/, '') || '/';
+}
+
 function commaSeparatedEnvironmentStrings(defaultValue: readonly string[]) {
   return z.preprocess(
     (value) => {
@@ -268,9 +274,10 @@ const environmentSchema = z.object({
   CHAT_DISCORD_BRIDGE_ENABLED: booleanFromEnvironment(false),
   CHAT_DISCORD_BRIDGE_HOST: z.string().trim().min(1).default('0.0.0.0'),
   CHAT_DISCORD_BRIDGE_PORT: positiveInteger(8080, 65535),
-  CHAT_DISCORD_BRIDGE_PATH: z.string().trim().min(1).default('/minecraft/chat'),
+  CHAT_DISCORD_BRIDGE_PATH: z.string().trim().min(1).default('/minecraft/event'),
   CHAT_DISCORD_BRIDGE_BEARER_TOKEN: optionalSecret,
   CHAT_DISCORD_BRIDGE_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_STEMCRAFT_URL: optionalUrl,
   CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: positiveInteger(64 * 1024, 2 * 1024 * 1024),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
   STEM_ASK_MAX_QUESTION_LENGTH: positiveInteger(500, 2000),
@@ -404,6 +411,7 @@ export interface AppConfig {
     path: string;
     bearerToken?: string;
     channelId?: string;
+    minecraftUrl?: string;
     maxBodyBytes: number;
   };
   levels: {
@@ -729,12 +737,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       enabled: values.CHAT_DISCORD_BRIDGE_ENABLED,
       host: values.CHAT_DISCORD_BRIDGE_HOST,
       port: values.CHAT_DISCORD_BRIDGE_PORT,
-      path: values.CHAT_DISCORD_BRIDGE_PATH,
+      path: normalizeHttpPath(values.CHAT_DISCORD_BRIDGE_PATH),
       ...(values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN
         ? { bearerToken: values.CHAT_DISCORD_BRIDGE_BEARER_TOKEN }
         : {}),
       ...(values.CHAT_DISCORD_BRIDGE_CHANNEL_ID
         ? { channelId: values.CHAT_DISCORD_BRIDGE_CHANNEL_ID }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL
+        ? { minecraftUrl: values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL }
         : {}),
       maxBodyBytes: values.CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES,
     },

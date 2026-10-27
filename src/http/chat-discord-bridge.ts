@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
-import type { APIEmbed } from 'discord.js';
+import type { APIEmbed, MessageMentionOptions } from 'discord.js';
 import { z } from 'zod';
 
 import type { AppLogger } from '../logging/logger.js';
@@ -14,21 +14,30 @@ export interface ChatDiscordBridgeConfig {
   path: string;
   bearerToken?: string;
   channelId?: string;
+  minecraftUrl?: string;
   maxBodyBytes: number;
+}
+
+export interface DiscordChatMessage {
+  messageId: string;
+  username: string;
+  displayName: string;
+  message: string;
+}
+
+export interface ChatDiscordBridgeMessage {
+  embeds: APIEmbed[];
+  allowedMentions: MessageMentionOptions;
 }
 
 export interface ChatDiscordBridgePublisher {
   send(channelId: string, message: string | ChatDiscordBridgeMessage): Promise<string>;
 }
 
-export interface ChatDiscordBridgeMessage {
-  content: string;
-  embeds?: APIEmbed[] | undefined;
-}
-
 export interface ChatDiscordBridge {
   start(): Promise<void>;
   stop(): Promise<void>;
+  forwardDiscordMessage(message: DiscordChatMessage): Promise<void>;
 }
 
 interface ChatDiscordBridgeDependencies {
@@ -37,25 +46,91 @@ interface ChatDiscordBridgeDependencies {
   state: StateStore<JsonState>;
   logger: AppLogger;
   serverFactory?: typeof createServer;
+  fetchImplementation?: typeof fetch;
 }
 
-export interface MinecraftPlayer {
-  name: string;
-  uuid?: string | undefined;
-}
+const minecraftPlayerSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  uuid: z.string().trim().max(100).optional(),
+});
+const minecraftEventBase = {
+  event_id: z.string().trim().min(1).max(200),
+  occurred_at: z.string().trim().max(100).optional(),
+  server: z.string().trim().max(100).optional(),
+  channel: z.string().trim().max(100).optional(),
+};
+const minecraftEventDataSchema = z.record(z.string(), z.unknown());
 
-interface MinecraftEventEnvelope {
-  event_id: string;
-  occurred_at?: string | undefined;
-  server?: string | undefined;
-  channel?: string | undefined;
-}
+const minecraftEventSchema = z.discriminatedUnion('event', [
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.chat'),
+    player: minecraftPlayerSchema,
+    message: z.string().trim().min(1).max(1800),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_join'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_quit'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_death'),
+    player: minecraftPlayerSchema,
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.player_command'),
+    player: minecraftPlayerSchema,
+    data: z.object({
+      command: z.string().trim().min(1).max(1800),
+    }),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.server_start'),
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.server_stop'),
+    data: minecraftEventDataSchema.optional(),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.server_message'),
+    data: z.object({
+      message: z.string().trim().min(1).max(4090),
+    }),
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.minigame_start'),
+    data: minecraftEventDataSchema,
+  }),
+  z.object({
+    ...minecraftEventBase,
+    event: z.literal('minecraft.minigame_end'),
+    data: minecraftEventDataSchema,
+  }),
+]);
 
-export interface MinecraftChatEvent extends MinecraftEventEnvelope {
-  event: 'minecraft.chat';
-  player: MinecraftPlayer;
-  message: string;
-}
+type MinecraftEvent = z.infer<typeof minecraftEventSchema>;
+type MinecraftChatEvent = Extract<MinecraftEvent, { event: 'minecraft.chat' }>;
+type MinecraftPlayerDeathEvent = Extract<MinecraftEvent, { event: 'minecraft.player_death' }>;
+type MinecraftPlayerCommandEvent = Extract<MinecraftEvent, { event: 'minecraft.player_command' }>;
+type MinecraftEmbedEvent = Exclude<
+  MinecraftEvent,
+  MinecraftChatEvent | MinecraftPlayerDeathEvent | MinecraftPlayerCommandEvent
+>;
 
 export interface MinecraftPlayerCountEvent extends MinecraftEventEnvelope {
   event: 'minecraft.player_join' | 'minecraft.player_quit';
@@ -148,128 +223,18 @@ interface ChatDiscordBridgeState {
 }
 
 const MAX_PROCESSED_EVENT_IDS = 1000;
-const minecraftPlayerSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  uuid: z.string().trim().max(100).optional(),
-});
-const minecraftEventEnvelopeSchema = {
-  event_id: z.string().trim().min(1).max(200),
-  occurred_at: z.string().trim().max(100).optional(),
-  server: z.string().trim().max(100).optional(),
-  channel: z.string().trim().max(100).optional(),
-};
-const minecraftArenaSchema = z.object({
-  id: z.string().trim().min(1).max(100),
-  name: z.string().trim().min(1).max(100),
-  world: z.string().trim().min(1).max(100),
-});
-const minecraftTeamSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  display_name: z.string().trim().min(1).max(100),
-  score: z.number().int(),
-  players: z.array(minecraftPlayerSchema).max(100).default([]),
-});
-const minecraftMinigameDataSchema = z.object({
-  minigame: z.string().trim().min(1).max(100),
-  arena: minecraftArenaSchema,
-  status: z.string().trim().min(1).max(50),
-  players: z.array(minecraftPlayerSchema).max(100).default([]),
-  spectators: z.array(minecraftPlayerSchema).max(100).default([]),
-  teams: z.array(minecraftTeamSchema).max(100).default([]),
-});
-const minecraftWinnerSchema = z
-  .union([minecraftPlayerSchema, z.string().trim().max(100)])
-  .nullable()
-  .optional();
-const minecraftKillerSchema = z
-  .union([minecraftPlayerSchema, z.string().trim().max(100)])
-  .nullable()
-  .optional();
-const minecraftEventSchema = z.discriminatedUnion('event', [
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.chat'),
-    player: minecraftPlayerSchema,
-    message: z.string().trim().min(1).max(1800),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.player_join'),
-    player: minecraftPlayerSchema,
-    data: z.object({ online_players: z.number().int().nonnegative() }),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.player_quit'),
-    player: minecraftPlayerSchema,
-    data: z.object({ online_players: z.number().int().nonnegative() }),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.player_death'),
-    player: minecraftPlayerSchema,
-    message: z.string().trim().max(300).nullable().optional(),
-    death_message: z.string().trim().max(300).nullable().optional(),
-    data: z
-      .object({
-        message: z.string().trim().max(300).nullable().optional(),
-        killer: minecraftKillerSchema,
-        death_message: z.string().trim().max(300).nullable().optional(),
-        cause: z.string().trim().max(100).nullable().optional(),
-        world: z.string().trim().max(100).nullable().optional(),
-      })
-      .nullable()
-      .optional(),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.player_command'),
-    player: minecraftPlayerSchema,
-    data: z.object({
-      command: z.string().trim().min(1).max(1800),
-    }),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.server_start'),
-    data: z.record(z.string(), z.unknown()).nullable().optional(),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.server_stop'),
-    data: z.record(z.string(), z.unknown()).nullable().optional(),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.server_message'),
-    data: z.object({
-      message: z.string().trim().min(1).max(2000),
-      source: z.string().trim().max(50).nullable().optional(),
-    }),
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.minigame_start'),
-    data: minecraftMinigameDataSchema,
-  }),
-  z.object({
-    ...minecraftEventEnvelopeSchema,
-    event: z.literal('minecraft.minigame_end'),
-    data: minecraftMinigameDataSchema.extend({
-      winner: minecraftWinnerSchema,
-      winner_team: z.string().trim().max(100).nullable().optional(),
-      winner_players: z.array(minecraftPlayerSchema).max(100).nullable().optional(),
-    }),
-  }),
-]);
-
+const DISCORD_TO_MINECRAFT_TIMEOUT_MS = 5_000;
+const DISCORD_TO_MINECRAFT_MAX_RETRIES = 3;
 export class HttpChatDiscordBridge implements ChatDiscordBridge {
   private readonly serverFactory: typeof createServer;
+  private readonly fetchImplementation: typeof fetch;
   private server: Server | undefined;
   private eventQueue: Promise<void> = Promise.resolve();
+  private discordMessageQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: ChatDiscordBridgeDependencies) {
     this.serverFactory = dependencies.serverFactory ?? createServer;
+    this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
   }
 
   public async start(): Promise<void> {
@@ -297,7 +262,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
             path: this.dependencies.config.path,
             channelId: this.dependencies.config.channelId,
           },
-          'Minecraft chat Discord bridge listening',
+          'Minecraft Discord bridge listening',
         );
         resolve();
       };
@@ -318,11 +283,100 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
-    this.dependencies.logger.info('Minecraft chat Discord bridge stopped');
+    this.dependencies.logger.info('Minecraft Discord bridge stopped');
+  }
+
+  public forwardDiscordMessage(message: DiscordChatMessage): Promise<void> {
+    const next = this.discordMessageQueue
+      .catch(() => undefined)
+      .then(() => this.postDiscordMessageToMinecraft(message));
+    this.discordMessageQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async postDiscordMessageToMinecraft(message: DiscordChatMessage): Promise<void> {
+    const targetUrl = this.dependencies.config.minecraftUrl;
+    const bearerToken = this.dependencies.config.bearerToken;
+    if (!targetUrl || !bearerToken) {
+      throw new Error(
+        'STEMCraft chat URL and bearer token are required for Discord chat forwarding',
+      );
+    }
+
+    const body = JSON.stringify({
+      event: 'discord.chat',
+      event_id: message.messageId,
+      username: message.username,
+      displayname: message.displayName,
+      message: message.message,
+    });
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= DISCORD_TO_MINECRAFT_MAX_RETRIES; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DISCORD_TO_MINECRAFT_TIMEOUT_MS);
+      let response: Response | undefined;
+      let requestError: unknown;
+      try {
+        response = await this.fetchImplementation(targetUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Discord-Message-Id': message.messageId,
+          },
+          body,
+          signal: controller.signal,
+        });
+      } catch (error: unknown) {
+        requestError = error;
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (requestError !== undefined) {
+        lastError = requestError;
+        if (attempt === DISCORD_TO_MINECRAFT_MAX_RETRIES) {
+          break;
+        }
+        await retryDelay(attempt);
+        continue;
+      }
+
+      if (!response) {
+        lastError = new Error('STEMCraft chat request returned no response');
+        break;
+      }
+
+      if (response.ok) {
+        this.dependencies.logger.info(
+          { messageId: message.messageId, username: message.username },
+          'Discord chat forwarded to Minecraft',
+        );
+        return;
+      }
+
+      if (response.status >= 400 && response.status < 500) {
+        throw new Error(`STEMCraft chat request was rejected with HTTP ${response.status}`);
+      }
+
+      lastError = new Error(`STEMCraft chat request failed with HTTP ${response.status}`);
+      if (attempt === DISCORD_TO_MINECRAFT_MAX_RETRIES) {
+        break;
+      }
+      await retryDelay(attempt);
+    }
+
+    throw new Error('STEMCraft chat request failed after retries', { cause: lastError });
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.url?.split('?')[0] !== this.dependencies.config.path) {
+    const requestPath = normalizeHttpPath(request.url?.split('?')[0] ?? '');
+    const configuredPath = normalizeHttpPath(this.dependencies.config.path);
+    if (requestPath !== configuredPath) {
       request.resume();
       writeJson(response, 404, { error: 'not_found' });
       return;
@@ -347,7 +401,9 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
       !contentType.toLocaleLowerCase().startsWith('application/json')
     ) {
       request.resume();
-      writeJson(response, 415, { error: 'content_type_must_be_application_json' });
+      writeJson(response, 415, {
+        error: 'content_type_must_be_application_json',
+      });
       return;
     }
 
@@ -375,7 +431,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
 
     const result = minecraftEventSchema.safeParse(parsed);
     if (!result.success) {
-      writeJson(response, 400, { error: 'invalid_minecraft_chat_event' });
+      writeJson(response, 400, { error: 'invalid_minecraft_event' });
       return;
     }
 
@@ -391,7 +447,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     } catch (error: unknown) {
       this.dependencies.logger.error(
         { err: error },
-        'Minecraft chat bridge could not publish event',
+        'Minecraft event bridge could not publish event',
       );
       writeJson(response, 502, { error: 'discord_publish_failed' });
     }
@@ -403,14 +459,25 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     if (state.processedEventIds.includes(event.event_id)) {
       this.dependencies.logger.info(
         { eventId: event.event_id },
-        'Duplicate Minecraft chat event ignored',
+        'Duplicate Minecraft event ignored',
       );
       return true;
     }
 
+    const message =
+      event.event === 'minecraft.chat'
+        ? `${event.player.name} » ${event.message}`
+        : event.event === 'minecraft.player_death'
+          ? `💀 ${getMinecraftDeathMessage(event)}`
+          : event.event === 'minecraft.player_command'
+            ? `${event.player.name} » \`${event.data.command}\``
+            : {
+                embeds: [buildMinecraftEventEmbed(event)],
+                allowedMentions: { parse: [] },
+              };
     const messageId = await this.dependencies.publisher.send(
       this.dependencies.config.channelId!,
-      formatMinecraftEvent(event),
+      message,
     );
     state.processedEventIds = [...state.processedEventIds, event.event_id].slice(
       -MAX_PROCESSED_EVENT_IDS,
@@ -427,10 +494,30 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
         },
         'Minecraft chat event published to Discord',
       );
+    } else if (event.event === 'minecraft.player_death') {
+      this.dependencies.logger.info(
+        {
+          eventId: event.event_id,
+          messageId,
+          player: event.player.name,
+          messageLength: asText(event.data?.message)?.length ?? 0,
+        },
+        'Minecraft death event published to Discord',
+      );
+    } else if (event.event === 'minecraft.player_command') {
+      this.dependencies.logger.info(
+        {
+          eventId: event.event_id,
+          messageId,
+          player: event.player.name,
+          commandLength: event.data.command.length,
+        },
+        'Minecraft command event published to Discord',
+      );
     } else {
       this.dependencies.logger.info(
         { eventId: event.event_id, eventType: event.event, messageId },
-        'Minecraft event published to Discord',
+        'Minecraft event embed published to Discord',
       );
     }
     return false;
@@ -446,208 +533,179 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
   }
 }
 
-export type MinecraftDiscordMessage = string | ChatDiscordBridgeMessage;
+function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
+  const data: Record<string, unknown> = event.data ?? {};
 
-export function formatMinecraftEvent(event: MinecraftEvent): MinecraftDiscordMessage {
+  if (event.event === 'minecraft.player_join' || event.event === 'minecraft.player_quit') {
+    const joined = event.event === 'minecraft.player_join';
+    return {
+      color: joined ? 0x00ff00 : 0xff0000,
+      author: {
+        name: `${event.player.name} ${joined ? 'joined' : 'left'} the server`,
+        icon_url: `https://mc-heads.net/avatar/${encodeURIComponent(event.player.name)}/64.png`,
+      },
+    };
+  }
+
+  if (event.event === 'minecraft.server_start' || event.event === 'minecraft.server_stop') {
+    const started = event.event === 'minecraft.server_start';
+    return {
+      color: started ? 0x00ff00 : 0xff0000,
+      author: { name: started ? 'Server started' : 'Server stopped' },
+    };
+  }
+
+  if (event.event === 'minecraft.server_message') {
+    return {
+      color: 0xf59e0b,
+      description: `**${escapeDiscordMarkdown(event.data.message)}**`,
+    };
+  }
+
+  if (event.event === 'minecraft.minigame_start') {
+    const minigame = humanize(data.minigame) || 'Minigame';
+    const arena = isRecord(data.arena)
+      ? firstText(data.arena.name, data.arena.id)
+      : asText(data.arena);
+    return {
+      color: 0x00ff00,
+      author: { name: `${minigame} - ${arena || 'Unknown arena'} started` },
+    };
+  }
+
+  const fields: NonNullable<APIEmbed['fields']> = [];
+  let title: string;
+  let description: string;
+  let color: number;
+
   switch (event.event) {
-    case 'minecraft.chat':
-      return `${event.player.name} » ${event.message}`;
-    case 'minecraft.player_join':
-      return formatPlayerEvent(event, `${event.player.name} joined the server`, 0x00ff00);
-    case 'minecraft.player_quit':
-      return formatPlayerEvent(event, `${event.player.name} left the server`, 0xff0000);
-    case 'minecraft.player_death':
-      return `💀 ${getDeathMessage(event)}`;
-    case 'minecraft.player_command':
-      return `${event.player.name} >> \`${escapeDiscordCode(event.data.command)}\``;
-    case 'minecraft.server_start':
-      return formatServerLifecycleEvent('Server started', 0x00ff00);
-    case 'minecraft.server_stop':
-      return formatServerLifecycleEvent('Server stopped', 0xff0000);
-    case 'minecraft.server_message':
-      return formatServerMessageEvent(event);
-    case 'minecraft.minigame_start':
-      return formatMinigameEvent(event, 'started');
-    case 'minecraft.minigame_end':
-      return formatMinigameEvent(event, 'ended');
+    case 'minecraft.minigame_end': {
+      const minigame = humanize(data.minigame) || 'Minigame';
+      title = `${minigame} ended`;
+      description = `A ${minigame} match has ended.`;
+      color = 0x5865f2;
+      const arena = isRecord(data.arena)
+        ? firstText(data.arena.name, data.arena.id)
+        : asText(data.arena);
+      addEmbedField(fields, 'Arena', arena);
+      addEmbedField(fields, 'Status', data.status);
+      addEmbedField(fields, 'Players', arrayLength(data.players));
+      addEmbedField(fields, 'Spectators', arrayLength(data.spectators));
+      addEmbedField(fields, 'Winner', firstText(data.winner, data.winner_team));
+      if (Array.isArray(data.winner_players) && data.winner_players.length > 0) {
+        addEmbedField(fields, 'Winning players', data.winner_players.length);
+      }
+      break;
+    }
+    default:
+      return assertNever(event);
   }
-}
 
-function formatServerLifecycleEvent(authorName: string, color: number): ChatDiscordBridgeMessage {
+  const occurredAt = asText('occurred_at' in event ? event.occurred_at : undefined);
+  const timestamp =
+    occurredAt && Number.isFinite(Date.parse(occurredAt))
+      ? new Date(occurredAt).toISOString()
+      : undefined;
+
   return {
-    content: '',
-    embeds: [
-      {
-        color,
-        author: { name: authorName },
-      },
-    ],
+    title,
+    description,
+    color,
+    ...(timestamp ? { timestamp } : {}),
+    ...(fields.length > 0 ? { fields } : {}),
   };
 }
 
-function formatServerMessageEvent(event: MinecraftServerMessageEvent): ChatDiscordBridgeMessage {
-  const message = escapeDiscordText(event.data.message).slice(0, 4090);
-  return {
-    content: '',
-    embeds: [
-      {
-        color: 0xf59e0b,
-        description: `**${message}**`,
-      },
-    ],
-  };
+function getMinecraftDeathMessage(event: MinecraftPlayerDeathEvent): string {
+  return asText(event.data?.message) || `${event.player.name} died`;
 }
 
-function formatPlayerEvent(
-  event: MinecraftPlayerCountEvent,
-  authorName: string,
-  color: number,
-): ChatDiscordBridgeMessage {
-  return {
-    content: '',
-    embeds: [
-      {
-        color,
-        author: {
-          name: authorName,
-          icon_url: `https://mc-heads.net/avatar/${encodeURIComponent(event.player.name)}/64.png`,
-        },
-      },
-    ],
-  };
+function addEmbedField(
+  fields: NonNullable<APIEmbed['fields']>,
+  name: string,
+  value: unknown,
+): void {
+  const text = asText(value);
+  if (!text) return;
+  fields.push({ name, value: text.slice(0, 1024), inline: true });
 }
 
-function getDeathMessage(event: MinecraftPlayerDeathEvent): string {
-  const message =
-    event.message ??
-    event.death_message ??
-    event.data?.message ??
-    event.data?.death_message ??
-    `${event.player.name} died`;
-  return message.trim() || `${event.player.name} died`;
-}
-
-function formatMinigameEvent(
-  event: MinecraftMinigameEvent,
-  action: 'started' | 'ended',
-): ChatDiscordBridgeMessage {
-  const { data } = event;
-  const fields: APIEmbed['fields'] = [
-    {
-      name: 'Arena',
-      value: [
-        `**${escapeDiscordText(data.arena.name)}**`,
-        `ID: \`${escapeDiscordCode(data.arena.id)}\``,
-        `World: \`${escapeDiscordCode(data.arena.world)}\``,
-      ].join('\n'),
-      inline: true,
-    },
-    {
-      name: 'Status',
-      value: `\`${escapeDiscordCode(data.status)}\``,
-      inline: true,
-    },
-  ];
-
-  if (event.event === 'minecraft.minigame_end') {
-    fields.push({ name: 'Winner', value: formatWinner(data) });
-  }
-
-  fields.push(
-    { name: 'Players', value: formatPlayerList(data.players) },
-    { name: 'Spectators', value: formatPlayerList(data.spectators) },
-    { name: 'Teams', value: formatTeamList(data.teams) },
-  );
-
-  return {
-    content: '',
-    embeds: [
-      {
-        color: action === 'started' ? 0x3498db : 0x9b59b6,
-        author: {
-          name: `${toTitleCase(data.minigame)} ${action}`,
-        },
-        fields,
-      },
-    ],
-  };
-}
-
-function formatWinner(data: MinecraftMinigameData): string {
-  const winnerTeam = data.winner_team?.trim();
-  const winnerPlayers = data.winner_players ?? [];
-  if (winnerTeam) {
-    const players = winnerPlayers.length > 0 ? ` — ${formatPlayerList(winnerPlayers, 10)}` : '';
-    return `**${escapeDiscordText(toTitleCase(winnerTeam))}**${players}`;
-  }
-
-  const winner = formatWinnerValue(data.winner);
-  if (winner) {
-    return winner;
-  }
-
-  return winnerPlayers.length > 0 ? formatPlayerList(winnerPlayers, 10) : 'none (draw)';
-}
-
-function formatWinnerValue(winner: MinecraftMinigameData['winner']): string | undefined {
-  if (typeof winner === 'string') {
-    const value = winner.trim();
-    return value ? `**${escapeDiscordText(value)}**` : undefined;
-  }
-
-  if (winner && typeof winner === 'object') {
-    return `**${escapeDiscordText(winner.name)}**`;
-  }
-
+function asText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return String(value);
   return undefined;
 }
 
-function formatPlayerList(players: readonly MinecraftPlayer[], maxItems = 20): string {
-  if (players.length === 0) {
-    return 'none';
-  }
-
-  const visiblePlayers = players
-    .slice(0, maxItems)
-    .map((player) => `**${escapeDiscordText(player.name)}**`);
-  const remaining = players.length - visiblePlayers.length;
-  return remaining > 0
-    ? `${visiblePlayers.join(', ')}, +${remaining} more`
-    : visiblePlayers.join(', ');
+function escapeDiscordMarkdown(value: string): string {
+  return value.replace(/[\\*_~`>|]/g, '\\$&').slice(0, 4090);
 }
 
-function formatTeamList(teams: readonly MinecraftTeam[]): string {
-  if (teams.length === 0) {
-    return 'none';
+function firstText(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asText(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function humanize(value: unknown): string | undefined {
+  const text = asText(value);
+  if (!text) return undefined;
+  return text
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toLocaleUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function arrayLength(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled Minecraft event: ${JSON.stringify(value)}`);
+}
+
+export function createDiscordChatMessage(input: {
+  messageId: string;
+  username: string;
+  displayName: string;
+  content: string;
+  authorIsBot?: boolean;
+  isWebhook?: boolean;
+}): DiscordChatMessage | undefined {
+  if (input.authorIsBot || input.isWebhook) {
+    return undefined;
   }
 
-  const visibleTeams = teams.slice(0, 20).map((team) => {
-    const label = team.display_name.trim() || team.name;
-    return `**${escapeDiscordText(label)}** (${team.score}): ${formatPlayerList(team.players, 10)}`;
+  const message = input.content.trim();
+  if (!message) {
+    return undefined;
+  }
+
+  const username = input.username.trim();
+  const displayName = input.displayName.trim() || username;
+  if (!username || !displayName) {
+    return undefined;
+  }
+
+  return {
+    messageId: input.messageId,
+    username,
+    displayName,
+    message,
+  };
+}
+
+async function retryDelay(attempt: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.min(5_000, 250 * 2 ** attempt));
   });
-  const remaining = teams.length - visibleTeams.length;
-  return remaining > 0
-    ? `${visibleTeams.join(' · ')}, +${remaining} more`
-    : visibleTeams.join(' · ');
-}
-
-function toTitleCase(value: string): string {
-  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function escapeDiscordText(value: string): string {
-  return value
-    .replaceAll('\\', '\\\\')
-    .replaceAll('*', '\\*')
-    .replaceAll('_', '\\_')
-    .replaceAll('~', '\\~')
-    .replaceAll('`', '\\`')
-    .replaceAll('<', '\\<')
-    .replaceAll('>', '\\>');
-}
-
-function escapeDiscordCode(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll('`', '\\`');
 }
 
 export function createChatDiscordBridge(
@@ -720,6 +778,12 @@ function writeJson(response: ServerResponse, statusCode: number, payload: unknow
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('Content-Length', Buffer.byteLength(body));
   response.end(body);
+}
+
+function normalizeHttpPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === '/') return trimmed;
+  return trimmed.replace(/\/+$/, '') || '/';
 }
 
 function readBridgeState(value: unknown): ChatDiscordBridgeState {

@@ -346,6 +346,31 @@ export function createApplication(
           logger,
         })
       : undefined);
+  const chatDiscordBridge =
+    dependencies?.chatDiscordBridge ??
+    (config.chatDiscordBridge.enabled
+      ? createChatDiscordBridge({
+          config: config.chatDiscordBridge,
+          publisher: {
+            send: (channelId, message) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for the Minecraft chat bridge'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(
+                channelId,
+                typeof message === 'string'
+                  ? { content: message, allowedMentions: { parse: [] } }
+                  : message,
+              );
+            },
+          },
+          state,
+          logger,
+        })
+      : undefined);
   const discord =
     dependencies?.discord ??
     createDiscordGateway(config, logger, {
@@ -362,72 +387,9 @@ export function createApplication(
       ...(ask ? { ask } : {}),
       ...(userLevels ? { userLevels } : {}),
       ...(uptime ? { uptime } : {}),
+      ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
     });
   discordGatewayRef.current = discord;
-  const cakeDayAnnouncementChannelId = config.cakeDays.announcementChannelId;
-  const cakeDays =
-    dependencies?.cakeDays ??
-    (config.cakeDays.enabled && cakeDayAnnouncementChannelId
-      ? createCakeDayService({
-          config: config.cakeDays,
-          timeZone: config.workshops.timeZone,
-          state,
-          logger,
-          memberProvider: {
-            getMembers: async () => {
-              if (!discordGatewayRef.current) {
-                throw new Error('Discord gateway is not ready for cake-day checks');
-              }
-
-              return discordGatewayRef.current.getGuildMembers();
-            },
-          },
-          publisher: {
-            send: async (announcement: CakeDayAnnouncement): Promise<void> => {
-              if (!discordGatewayRef.current) {
-                throw new Error('Discord gateway is not ready for cake-day announcements');
-              }
-
-              const card = await buildCakeDayCard(announcement);
-              await discordGatewayRef.current.sendChannelMessage(announcement.channelId, {
-                content: announcement.content,
-                files: [{ attachment: card, name: 'stembot-cake-day.png' }],
-                ...(announcement.allowedUserIds.length > 0
-                  ? { allowedMentions: { users: [...announcement.allowedUserIds] } }
-                  : {}),
-              });
-            },
-          },
-        })
-      : undefined);
-  const chatDiscordBridge =
-    dependencies?.chatDiscordBridge ??
-    (config.chatDiscordBridge.enabled
-      ? createChatDiscordBridge({
-          config: config.chatDiscordBridge,
-          publisher: {
-            send: (channelId, message: string | ChatDiscordBridgeMessage) => {
-              if (!discordGatewayRef.current) {
-                return Promise.reject(
-                  new Error('Discord gateway is not ready for the Minecraft chat bridge'),
-                );
-              }
-
-              const discordMessage: DiscordChannelMessage =
-                typeof message === 'string'
-                  ? { content: message, allowedMentions: { parse: [] } }
-                  : {
-                      content: message.content,
-                      ...(message.embeds ? { embeds: message.embeds } : {}),
-                      allowedMentions: { parse: [] },
-                    };
-              return discordGatewayRef.current.sendChannelMessage(channelId, discordMessage);
-            },
-          },
-          state,
-          logger,
-        })
-      : undefined);
   const scheduler = dependencies?.scheduler ?? new IntervalJobScheduler(logger);
   const uptimeStatus =
     dependencies?.uptimeStatus ??

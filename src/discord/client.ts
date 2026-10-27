@@ -45,6 +45,7 @@ import type {
 import type { UserLevelService } from '../services/user-levels.js';
 import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
 import { isMinigameHintRequest } from '../services/minigame-hints.js';
+import { createDiscordChatMessage, type ChatDiscordBridge } from '../http/chat-discord-bridge.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -96,6 +97,7 @@ export interface DiscordCommandDependencies {
   userLevels?: UserLevelService;
   uptime?: UptimeKumaIntegration;
   reminders?: AdminReminderService;
+  chatDiscordBridge?: Pick<ChatDiscordBridge, 'forwardDiscordMessage'>;
 }
 
 export function createDiscordGateway(
@@ -110,6 +112,12 @@ export function createDiscordGateway(
     intents.push(GatewayIntentBits.GuildMembers);
   }
   const askMessageTrackingEnabled = Boolean(config.ask.enabled && dependencies.ask);
+  const minecraftChatForwardingEnabled = Boolean(
+    config.chatDiscordBridge.enabled &&
+    config.chatDiscordBridge.channelId &&
+    config.chatDiscordBridge.minecraftUrl &&
+    dependencies.chatDiscordBridge,
+  );
   const messageTrackingEnabled =
     (config.countingChain.enabled && dependencies.countingChain) ||
     (config.quiz.enabled && dependencies.quiz) ||
@@ -118,7 +126,8 @@ export function createDiscordGateway(
     (config.wordReveal.enabled && dependencies.wordReveal) ||
     (config.codeFix.enabled && dependencies.codeFix) ||
     askMessageTrackingEnabled ||
-    (config.levels.enabled && dependencies.userLevels);
+    (config.levels.enabled && dependencies.userLevels) ||
+    minecraftChatForwardingEnabled;
   const reactionTrackingEnabled =
     (config.countingChain.enabled && config.countingChain.reviewEnabled) || config.levels.enabled;
   if (messageTrackingEnabled) {
@@ -325,6 +334,48 @@ export function createDiscordGateway(
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });
   });
+
+  if (minecraftChatForwardingEnabled) {
+    client.on(Events.MessageCreate, (message) => {
+      if (
+        message.channelId !== config.chatDiscordBridge.channelId ||
+        message.author.bot ||
+        Boolean(message.webhookId) ||
+        message.system
+      ) {
+        return;
+      }
+
+      const chatMessage = createDiscordChatMessage({
+        messageId: message.id,
+        username: message.author.username,
+        displayName:
+          message.member?.displayName ?? message.author.globalName ?? message.author.username,
+        content: message.cleanContent,
+      });
+      if (!chatMessage) {
+        logger.debug(
+          {
+            channelId: message.channelId,
+            messageId: message.id,
+            attachmentCount: message.attachments.size,
+            embedCount: message.embeds.length,
+          },
+          'Discord message ignored by Minecraft chat bridge because it has no text',
+        );
+        return;
+      }
+
+      void dependencies
+        .chatDiscordBridge!.forwardDiscordMessage(chatMessage)
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'Discord chat could not be forwarded to Minecraft',
+          );
+        });
+    });
+  }
 
   if (dependencies.countingChain && config.countingChain.enabled) {
     const handleCountingChainMessage = (message: Message, eventType: string): void => {
