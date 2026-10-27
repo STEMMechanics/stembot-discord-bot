@@ -59,7 +59,6 @@ function createService(
   generator: WordRevealGenerator,
   publisher: StemWordRevealPublisher = {
     send: vi.fn().mockResolvedValue('round-message-1'),
-    edit: vi.fn().mockResolvedValue(true),
   },
 ): PersistentStemWordRevealService {
   return new PersistentStemWordRevealService({
@@ -103,6 +102,8 @@ describe('STEM Word Reveal service', () => {
       send: vi
         .fn()
         .mockResolvedValueOnce('round-message-1')
+        .mockResolvedValueOnce('progress-message-1')
+        .mockResolvedValueOnce('solved-message-1')
         .mockResolvedValueOnce('round-message-2'),
       edit: vi.fn().mockResolvedValue(true),
     };
@@ -116,10 +117,10 @@ describe('STEM Word Reveal service', () => {
 
     expect(letter.react).toHaveBeenCalledWith('✅');
     expect(answer.react).toHaveBeenCalledWith('✅');
-    expect(publisher.send).toHaveBeenCalledTimes(2);
-    expect(publisher.edit).toHaveBeenCalledWith(
+    expect(publisher.send).toHaveBeenCalledTimes(4);
+    expect(publisher.edit).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledWith(
       'word-reveal-channel',
-      'round-message-1',
       expect.objectContaining({
         embeds: [
           expect.objectContaining({
@@ -156,6 +157,8 @@ describe('STEM Word Reveal service', () => {
       send: vi
         .fn()
         .mockResolvedValueOnce('round-message-1')
+        .mockResolvedValueOnce('progress-message-1')
+        .mockResolvedValueOnce('revealed-message-1')
         .mockResolvedValueOnce('round-message-2'),
       edit: vi.fn().mockResolvedValue(true),
     };
@@ -165,9 +168,10 @@ describe('STEM Word Reveal service', () => {
     await service.handleMessage(createMessage('wrong-1', 'z'));
     await service.handleMessage(createMessage('wrong-2', 'q'));
 
-    expect(publisher.edit).toHaveBeenCalledWith(
+    expect(publisher.edit).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(4);
+    expect(publisher.send).toHaveBeenCalledWith(
       'word-reveal-channel',
-      'round-message-1',
       expect.objectContaining({
         embeds: [expect.objectContaining({ description: expect.stringContaining('ATOM') })],
       }),

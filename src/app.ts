@@ -380,16 +380,6 @@ export function createApplication(
                 allowedMentions: { parse: [] },
               });
             },
-            edit: (channelId, messageId, message) => {
-              if (!discordGatewayRef.current) {
-                return Promise.reject(new Error('Discord gateway is not ready for Mystery Lab'));
-              }
-
-              return discordGatewayRef.current.editChannelMessage(channelId, messageId, {
-                ...message,
-                allowedMentions: { parse: [] },
-              });
-            },
           },
           state,
           logger,
