@@ -48,6 +48,7 @@ import { createChatDiscordBridge, type ChatDiscordBridge } from './http/chat-dis
 import { createStemCodeFixService, type StemCodeFixService } from './services/code-fix.js';
 import { createNumberGameService, type NumberGameService } from './services/number-game.js';
 import { createConnectFourService, type ConnectFourService } from './services/connect-four.js';
+import { createGlobalChaseService, type GlobalChaseService } from './services/global-chase.js';
 import { createTicTacToeService, type TicTacToeService } from './services/tic-tac-toe.js';
 import { createStemWordRevealService, type StemWordRevealService } from './services/word-reveal.js';
 import {
@@ -84,6 +85,7 @@ export interface ApplicationDependencies {
   numberGame?: NumberGameService;
   ticTacToe?: TicTacToeService;
   connectFour?: ConnectFourService;
+  globalChase?: GlobalChaseService;
   cakeDays?: CakeDayService;
   workshopNotifications: WorkshopNotificationService;
 }
@@ -368,12 +370,25 @@ export function createApplication(
             logger,
           }),
           publisher: {
-            send: (channelId, content) => {
+            send: (channelId, message) => {
               if (!discordGatewayRef.current) {
                 return Promise.reject(new Error('Discord gateway is not ready for Mystery Lab'));
               }
 
-              return discordGatewayRef.current.sendChannelMessage(channelId, content);
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                ...message,
+                allowedMentions: { parse: [] },
+              });
+            },
+            edit: (channelId, messageId, message) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Mystery Lab'));
+              }
+
+              return discordGatewayRef.current.editChannelMessage(channelId, messageId, {
+                ...message,
+                allowedMentions: { parse: [] },
+              });
             },
           },
           state,
@@ -400,6 +415,38 @@ export function createApplication(
               }
 
               return discordGatewayRef.current.sendChannelMessage(channelId, content);
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
+  const globalChase =
+    dependencies?.globalChase ??
+    (config.globalChase.enabled
+      ? createGlobalChaseService({
+          config: config.globalChase,
+          publisher: {
+            send: (channelId, message) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Global Chase'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                ...message,
+                allowedMentions: { parse: [] },
+              });
+            },
+            edit: (channelId, messageId, message) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Global Chase'));
+              }
+
+              return discordGatewayRef.current.editChannelMessage(channelId, messageId, {
+                ...message,
+                allowedMentions: { parse: [] },
+              });
             },
           },
           state,
@@ -466,6 +513,7 @@ export function createApplication(
       ...(numberGame ? { numberGame } : {}),
       ...(ticTacToe ? { ticTacToe } : {}),
       ...(connectFour ? { connectFour } : {}),
+      ...(globalChase ? { globalChase } : {}),
       ...(uptime ? { uptime } : {}),
       ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
     });
@@ -618,6 +666,17 @@ export function createApplication(
       run: async () => {
         await connectFour.checkInactivity();
         await connectFour.ensureRound();
+      },
+    });
+  }
+
+  if (globalChase && config.globalChase.enabled) {
+    scheduler.register({
+      name: 'global-chase-maintenance',
+      intervalMs: config.globalChase.retryIntervalMs,
+      run: async () => {
+        await globalChase.checkInactivity();
+        await globalChase.ensureRound();
       },
     });
   }

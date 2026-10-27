@@ -28,6 +28,7 @@ import type { AdminReminderService } from '../services/admin-reminders.js';
 import type { ButtonGameBoard, ButtonGameInteraction } from '../services/button-games.js';
 import type { StemCodeFixMessage, StemCodeFixService } from '../services/code-fix.js';
 import type { ConnectFourService } from '../services/connect-four.js';
+import type { GlobalChaseMessage, GlobalChaseService } from '../services/global-chase.js';
 import type { NumberGameMessage, NumberGameService } from '../services/number-game.js';
 import type { TicTacToeService } from '../services/tic-tac-toe.js';
 import type {
@@ -110,6 +111,7 @@ export interface DiscordCommandDependencies {
   numberGame?: NumberGameService;
   ticTacToe?: TicTacToeService;
   connectFour?: ConnectFourService;
+  globalChase?: GlobalChaseService;
   chatDiscordBridge?: Pick<ChatDiscordBridge, 'forwardDiscordMessage'>;
 }
 
@@ -139,6 +141,7 @@ export function createDiscordGateway(
     (config.wordReveal.enabled && dependencies.wordReveal) ||
     (config.codeFix.enabled && dependencies.codeFix) ||
     Boolean(dependencies.numberGame) ||
+    (config.globalChase.enabled && dependencies.globalChase) ||
     askMessageTrackingEnabled ||
     (config.levels.enabled && dependencies.userLevels) ||
     minecraftChatForwardingEnabled;
@@ -231,6 +234,7 @@ export function createDiscordGateway(
             dependencies.scramble,
             dependencies.wordChain,
             dependencies.wordReveal,
+            dependencies.globalChase,
             dependencies.codeFix,
             dependencies.ticTacToe,
             dependencies.connectFour,
@@ -292,6 +296,17 @@ export function createDiscordGateway(
           logger.warn(
             { err: error, channelId: config.wordReveal.channelId },
             'STEM word reveal startup initialization failed',
+          );
+        }),
+      );
+    }
+
+    if (dependencies.globalChase && config.globalChase.enabled && config.globalChase.channelId) {
+      initializationTasks.push(
+        dependencies.globalChase.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.globalChase.channelId },
+            'Global Chase startup initialization failed',
           );
         }),
       );
@@ -716,6 +731,38 @@ export function createDiscordGateway(
     });
   }
 
+  if (dependencies.globalChase && config.globalChase.enabled && config.globalChase.channelId) {
+    client.on(Events.MessageCreate, (message) => {
+      if (
+        message.channelId !== config.globalChase.channelId ||
+        message.author.bot ||
+        messageMentionsBot(message, client.user?.id)
+      ) {
+        return;
+      }
+
+      logger.info(
+        {
+          channelId: message.channelId,
+          messageId: message.id,
+          authorId: message.author.id,
+          contentLength: message.content.length,
+        },
+        'Global Chase Discord message received',
+      );
+
+      void dependencies
+        .globalChase!.handleMessage(toGlobalChaseMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'Global Chase message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
+
   if (dependencies.codeFix && config.codeFix.enabled && config.codeFix.channelId) {
     client.on(Events.MessageCreate, (message) => {
       if (
@@ -760,7 +807,8 @@ export function createDiscordGateway(
         message.channelId === config.scramble.channelId ||
         message.channelId === config.wordChain.channelId ||
         message.channelId === config.wordReveal.channelId ||
-        message.channelId === config.codeFix.channelId;
+        message.channelId === config.codeFix.channelId ||
+        message.channelId === config.globalChase.channelId;
       const supportsHintRequests =
         message.channelId === config.quiz.channelId ||
         message.channelId === config.scramble.channelId ||
@@ -1135,6 +1183,22 @@ function toStemWordRevealMessage(message: Message): StemWordRevealMessage {
   };
 }
 
+function toGlobalChaseMessage(message: Message): GlobalChaseMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
+    },
+  };
+}
+
 function toStemCodeFixMessage(message: Message): StemCodeFixMessage {
   return {
     id: message.id,
@@ -1445,6 +1509,7 @@ function createCountingChainInfoPublisher(
   scramble: StemScrambleService | undefined,
   wordChain: StemWordChainService | undefined,
   wordReveal: StemWordRevealService | undefined,
+  globalChase: GlobalChaseService | undefined,
   codeFix: StemCodeFixService | undefined,
   ticTacToe: TicTacToeService | undefined,
   connectFour: ConnectFourService | undefined,
@@ -1494,6 +1559,7 @@ function createCountingChainInfoPublisher(
       scrambleLeaderboard,
       wordChainLeaderboard,
       wordRevealLeaderboard,
+      globalChaseLeaderboard,
       codeFixLeaderboard,
       ticTacToeLeaderboard,
       connectFourLeaderboard,
@@ -1504,6 +1570,7 @@ function createCountingChainInfoPublisher(
       readMinigameLeaderboard(scramble),
       readMinigameLeaderboard(wordChain),
       readMinigameLeaderboard(wordReveal),
+      readMinigameLeaderboard(globalChase),
       readMinigameLeaderboard(codeFix),
       readMinigameLeaderboard(ticTacToe),
       readMinigameLeaderboard(connectFour),
@@ -1515,6 +1582,7 @@ function createCountingChainInfoPublisher(
       scramble: scramble ? scrambleLeaderboard : undefined,
       wordChain: wordChain ? wordChainLeaderboard : undefined,
       wordReveal: wordReveal ? wordRevealLeaderboard : undefined,
+      globalChase: globalChase ? globalChaseLeaderboard : undefined,
       codeFix: codeFix ? codeFixLeaderboard : undefined,
       ticTacToe: ticTacToe ? ticTacToeLeaderboard : undefined,
       connectFour: connectFour ? connectFourLeaderboard : undefined,
@@ -1574,7 +1642,7 @@ export function buildMinigameInfoEmbed(
       'Post a GIF or picture containing the next number.',
       '',
       '**Other games**',
-      'Guess the Number, answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore Mystery Lab, play Tic Tac Toe or Connect 4, or fix a small code bug.',
+      'Guess the Number, answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore Mystery Lab, chase a thief around the world, play Tic Tac Toe or Connect 4, or fix a small code bug.',
       '',
       'Each game has its own top-three record leaderboard.',
     ].join('\n'),
@@ -1650,6 +1718,16 @@ export function buildMinigameInfoEmbed(
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
+        name: 'Global Chase · solved cases',
+        value: formatMinigameLeaderboard(
+          leaderboards.globalChase,
+          'solved cases',
+          'Global Chase is not enabled.',
+        ),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
         name: 'Tic Tac Toe · wins',
         value: formatMinigameLeaderboard(
           leaderboards.ticTacToe,
@@ -1700,6 +1778,7 @@ interface MinigameLeaderboards {
   scramble: readonly MinigameLeaderboardEntry[] | undefined;
   wordChain: readonly MinigameLeaderboardEntry[] | undefined;
   wordReveal?: readonly MinigameLeaderboardEntry[] | undefined;
+  globalChase?: readonly MinigameLeaderboardEntry[] | undefined;
   codeFix?: readonly MinigameLeaderboardEntry[] | undefined;
   ticTacToe?: readonly MinigameLeaderboardEntry[] | undefined;
   connectFour?: readonly MinigameLeaderboardEntry[] | undefined;

@@ -58,6 +58,7 @@ interface ConnectFourServiceDependencies {
   userLevels?: UserLevelService;
   clock?: () => Date;
   idFactory?: () => string;
+  random?: () => number;
 }
 
 const STATE_KEY = 'connectFour';
@@ -72,11 +73,13 @@ const EMPTY_TOKEN = '⚪';
 export class PersistentConnectFourService implements ConnectFourService {
   private readonly currentTime: () => Date;
   private readonly idFactory: () => string;
+  private readonly random: () => number;
   private eventQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: ConnectFourServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
     this.idFactory = dependencies.idFactory ?? randomUUID;
+    this.random = dependencies.random ?? Math.random;
   }
 
   public async initialize(): Promise<void> {
@@ -189,7 +192,7 @@ export class PersistentConnectFourService implements ConnectFourService {
     let draw = !winner && nextGame.board.every((cell) => cell !== null);
     let botColumn: number | undefined;
     if (!winner && !draw) {
-      botColumn = chooseBotColumn(nextGame.board);
+      botColumn = chooseBotColumn(nextGame.board, this.random);
       if (botColumn !== undefined) {
         dropToken(nextGame.board, botColumn, 'O');
       }
@@ -407,23 +410,94 @@ function dropToken(
   return undefined;
 }
 
-function chooseBotColumn(board: ConnectFourCell[]): number | undefined {
-  return (
-    findWinningColumn(board, 'O') ??
-    findWinningColumn(board, 'X') ??
-    [3, 2, 4, 1, 5, 0, 6].find((column) => board[column] === null) ??
-    undefined
-  );
+function chooseBotColumn(board: ConnectFourCell[], random: () => number): number | undefined {
+  const candidateColumns = [3, 2, 4, 1, 5, 0, 6].filter((column) => board[column] === null);
+  if (candidateColumns.length === 0) {
+    return undefined;
+  }
+
+  const scores = candidateColumns.map((column) => {
+    const candidate = [...board];
+    dropToken(candidate, column, 'O');
+    return {
+      column,
+      score: minimaxConnectFour(candidate, false, CONNECT_FOUR_SEARCH_DEPTH - 1),
+    };
+  });
+  const bestScore = Math.max(...scores.map(({ score }) => score));
+  const bestColumns = scores.filter(({ score }) => score === bestScore).map(({ column }) => column);
+  const rawRandomValue = random();
+  const randomValue = Number.isFinite(rawRandomValue)
+    ? Math.max(0, Math.min(0.999999, rawRandomValue))
+    : 0;
+  return bestColumns[Math.floor(randomValue * bestColumns.length)];
 }
 
-function findWinningColumn(board: ConnectFourCell[], mark: ConnectFourMark): number | undefined {
-  for (let column = 0; column < COLUMNS; column += 1) {
+const CONNECT_FOUR_SEARCH_DEPTH = 5;
+
+function minimaxConnectFour(board: ConnectFourCell[], botTurn: boolean, depth: number): number {
+  const winner = getWinner(board);
+  if (winner === 'O') {
+    return 100000 + depth;
+  }
+  if (winner === 'X') {
+    return -100000 - depth;
+  }
+  if (depth === 0 || board.every((cell) => cell !== null)) {
+    return evaluateConnectFourBoard(board);
+  }
+
+  const columns = [3, 2, 4, 1, 5, 0, 6].filter((column) => board[column] === null);
+  const scores = columns.map((column) => {
     const candidate = [...board];
-    if (dropToken(candidate, column, mark) !== undefined && getWinner(candidate) === mark) {
-      return column;
+    dropToken(candidate, column, botTurn ? 'O' : 'X');
+    return minimaxConnectFour(candidate, !botTurn, depth - 1);
+  });
+  return botTurn ? Math.max(...scores) : Math.min(...scores);
+}
+
+function evaluateConnectFourBoard(board: ConnectFourCell[]): number {
+  let score = 0;
+  for (let row = 0; row < ROWS; row += 1) {
+    if (board[row * COLUMNS + 3] === 'O') {
+      score += 3;
+    } else if (board[row * COLUMNS + 3] === 'X') {
+      score -= 3;
     }
   }
-  return undefined;
+
+  const directions: readonly (readonly [number, number])[] = [
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [1, -1],
+  ];
+  for (let row = 0; row < ROWS; row += 1) {
+    for (let column = 0; column < COLUMNS; column += 1) {
+      for (const [rowStep, columnStep] of directions) {
+        const endRow = row + rowStep * 3;
+        const endColumn = column + columnStep * 3;
+        if (endRow < 0 || endRow >= ROWS || endColumn < 0 || endColumn >= COLUMNS) {
+          continue;
+        }
+
+        const window = Array.from(
+          { length: 4 },
+          (_, index) => board[(row + rowStep * index) * COLUMNS + column + columnStep * index],
+        );
+        const botTokens = window.filter((cell) => cell === 'O').length;
+        const playerTokens = window.filter((cell) => cell === 'X').length;
+        const emptyCells = window.filter((cell) => cell === null).length;
+        if (playerTokens === 0) {
+          score += botTokens === 3 && emptyCells === 1 ? 100 : botTokens === 2 ? 10 : botTokens;
+        } else if (botTokens === 0) {
+          score -=
+            playerTokens === 3 && emptyCells === 1 ? 100 : playerTokens === 2 ? 10 : playerTokens;
+        }
+      }
+    }
+  }
+  return score;
 }
 
 function getWinner(board: ConnectFourCell[]): ConnectFourMark | undefined {
