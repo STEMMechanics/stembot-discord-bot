@@ -62,7 +62,13 @@ describe('Global Chase service', () => {
   it('follows three correct locations and records the solver', async () => {
     const state = new MemoryStateStore();
     const publisher = {
-      send: vi.fn().mockResolvedValueOnce('case-message-1').mockResolvedValueOnce('case-message-2'),
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('case-message-1')
+        .mockResolvedValueOnce('case-message-2')
+        .mockResolvedValueOnce('case-message-3')
+        .mockResolvedValueOnce('case-message-4')
+        .mockResolvedValueOnce('case-message-5'),
       edit: vi.fn().mockResolvedValue(true),
     };
     const service = createService(state, publisher);
@@ -72,14 +78,14 @@ describe('Global Chase service', () => {
     await service.handleMessage(createMessage('guess-2', '2'));
     await service.handleMessage(createMessage('guess-3', '3'));
 
-    expect(publisher.edit).toHaveBeenCalledWith(
+    expect(publisher.edit).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(5);
+    expect(publisher.send).toHaveBeenCalledWith(
       'chase-channel',
-      'case-message-1',
       expect.objectContaining({
         embeds: [expect.objectContaining({ description: expect.stringContaining('recovered') })],
       }),
     );
-    expect(publisher.send).toHaveBeenCalledTimes(2);
     await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
     expect(state.state).toMatchObject({
       globalChase: { nextCaseNumber: 3, round: { caseNumber: 2 } },
@@ -89,7 +95,13 @@ describe('Global Chase service', () => {
   it('ends a case after three decoy choices', async () => {
     const state = new MemoryStateStore();
     const publisher = {
-      send: vi.fn().mockResolvedValueOnce('case-message-1').mockResolvedValueOnce('case-message-2'),
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('case-message-1')
+        .mockResolvedValueOnce('case-message-2')
+        .mockResolvedValueOnce('case-message-3')
+        .mockResolvedValueOnce('case-message-4')
+        .mockResolvedValueOnce('case-message-5'),
       edit: vi.fn().mockResolvedValue(true),
     };
     const service = createService(state, publisher);
@@ -99,14 +111,14 @@ describe('Global Chase service', () => {
     await service.handleMessage(createMessage('wrong-2', '3'));
     await service.handleMessage(createMessage('wrong-3', '2'));
 
-    expect(publisher.edit).toHaveBeenCalledWith(
+    expect(publisher.edit).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(5);
+    expect(publisher.send).toHaveBeenCalledWith(
       'chase-channel',
-      'case-message-1',
       expect.objectContaining({
         embeds: [expect.objectContaining({ description: expect.stringContaining('Amsterdam') })],
       }),
     );
-    expect(publisher.send).toHaveBeenCalledTimes(2);
     await expect(service.getLeaderboard(3)).resolves.toEqual([]);
   });
 });
