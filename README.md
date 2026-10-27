@@ -246,8 +246,8 @@ as blue circles for unknown positions and Discord `:regional_indicator_a:` throu
 `:regional_indicator_z:` names for revealed positions. The default `challenging`
 difficulty uses longer words and clues that
 require a little more thought without giving away the answer. Members can submit
-one letter or the whole word. Every guess edits the board embed so the current
-state stays visible during a busy round. A completed word records the member's
+one letter or the whole word. Every board update posts a fresh embed so earlier
+guesses stay visible during a busy round. A completed word records the member's
 solved-round score and starts the next word. After the idle timeout, the answer is
 revealed and the game advances without changing the leaderboard.
 `/mystery-lab reset` is available to moderators when a round needs to be

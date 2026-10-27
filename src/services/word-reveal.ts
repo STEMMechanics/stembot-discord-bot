@@ -40,11 +40,6 @@ export interface StemWordRevealMessage {
 
 export interface StemWordRevealPublisher {
   send(channelId: string, message: StemWordRevealPublisherMessage): Promise<string>;
-  edit(
-    channelId: string,
-    messageId: string,
-    message: StemWordRevealPublisherMessage,
-  ): Promise<boolean>;
 }
 
 export interface StemWordRevealPublisherMessage {
@@ -153,7 +148,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       state.round = null;
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
-      await this.editBoardSafely(
+      await this.postBoardSafely(
         round,
         formatWordRevealProgress(
           round,
@@ -184,7 +179,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       if (previousRound) {
-        await this.editBoardSafely(
+        await this.postBoardSafely(
           previousRound,
           formatWordRevealProgress(
             previousRound,
@@ -273,7 +268,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, UNCLEAR_REACTION);
-      await this.editBoardSafely(
+      const messageId = await this.postBoardSafely(
         round,
         formatWordRevealProgress(
           round,
@@ -281,6 +276,11 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
           `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.`,
         ),
       );
+      if (messageId) {
+        round.messageId = messageId;
+      }
+      writeStemWordRevealState(rootState, state);
+      await this.dependencies.state.save(rootState);
       return;
     }
 
@@ -302,10 +302,8 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       return;
     }
 
-    writeStemWordRevealState(rootState, state);
-    await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
-    await this.editBoardSafely(
+    const messageId = await this.postBoardSafely(
       round,
       formatWordRevealProgress(
         round,
@@ -313,6 +311,11 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
         `✅ **${guess.toUpperCase()}** is in the mystery word!`,
       ),
     );
+    if (messageId) {
+      round.messageId = messageId;
+    }
+    writeStemWordRevealState(rootState, state);
+    await this.dependencies.state.save(rootState);
   }
 
   private async handleWrongGuess(
@@ -328,7 +331,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, WRONG_REACTION);
-      await this.editBoardSafely(
+      await this.postBoardSafely(
         round,
         formatWordRevealProgress(
           round,
@@ -341,13 +344,16 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       return;
     }
 
-    writeStemWordRevealState(rootState, state);
-    await this.dependencies.state.save(rootState);
     await this.react(message, WRONG_REACTION);
-    await this.editBoardSafely(
+    const messageId = await this.postBoardSafely(
       round,
       formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses, `❌ ${feedback}`),
     );
+    if (messageId) {
+      round.messageId = messageId;
+    }
+    writeStemWordRevealState(rootState, state);
+    await this.dependencies.state.save(rootState);
   }
 
   private async completeRound(
@@ -362,7 +368,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
     await this.recordGameParticipation(message.authorId, message);
-    await this.editBoardSafely(
+    await this.postBoardSafely(
       round,
       formatWordRevealProgress(
         round,
@@ -437,26 +443,24 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.dependencies.state.save(rootState);
   }
 
-  private async editBoardSafely(round: StemWordRevealRoundState, embed: APIEmbed): Promise<void> {
+  private async postBoardSafely(
+    round: StemWordRevealRoundState,
+    embed: APIEmbed,
+  ): Promise<string | undefined> {
     try {
-      const edited = await this.dependencies.publisher.edit(
-        this.dependencies.config.channelId!,
-        round.messageId,
-        {
-          embeds: [embed],
-        },
-      );
-      if (!edited) {
-        this.dependencies.logger.warn(
-          { channelId: this.dependencies.config.channelId, messageId: round.messageId },
-          'STEM word reveal board could not be found for editing',
-        );
-      }
+      return await this.dependencies.publisher.send(this.dependencies.config.channelId!, {
+        embeds: [embed],
+      });
     } catch (error: unknown) {
       this.dependencies.logger.warn(
-        { err: error, channelId: this.dependencies.config.channelId, messageId: round.messageId },
-        'STEM word reveal board could not be updated',
+        {
+          err: error,
+          channelId: this.dependencies.config.channelId,
+          roundNumber: round.roundNumber,
+        },
+        'STEM word reveal board could not be posted',
       );
+      return undefined;
     }
   }
 
