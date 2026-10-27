@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, an optional AI-generated STEM question chain, an optional AI word-scramble minigame, an optional themed word-chain minigame, optional mention-based AI STEM answers, a persistent participation XP and level system, and optional join-date cake-day announcements. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, AI-generated STEM games, a reply-based number game, persistent channel-based Tic Tac Toe and Connect 4, and a hangman-style Mystery Lab, plus optional mention-based AI STEM answers, a persistent participation XP and level system, and optional join-date cake-day announcements. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -42,6 +42,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/ping` — Discord gateway latency.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
+- `/number` — STEMBot thinks of a number from 1 to 20; reply to its message with your one guess.
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/counting-chain number:<number>` — set the next counting-chain number; requires Manage Messages.
 - `/minecraft` — server availability, player count, capacity, maintenance state, version, and online Minecraft usernames. If the configured STEMCraft response has no permitted player list, it reports that names are unavailable.
@@ -53,6 +54,16 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/code-fix reset` — reset the active Code Fix challenge and start a new one; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
+
+### Number game
+
+Use `/number` to start a personal number-guessing challenge. STEMBot thinks of a number from 1 to 20, and the player gets one attempt by replying directly to that bot message. The first reply to that exact prompt consumes the challenge and reveals the answer.
+
+### Channel board games
+
+When enabled, Tic Tac Toe and Connect 4 post one persistent board in their configured
+channels. Players click the board buttons; the first click claims the round and starts a
+game against STEMBot. There are no slash commands to start or stop these games.
 
 ### Counting-chain minigame
 
@@ -218,15 +229,14 @@ wrong-answer penalty or an extra round change.
 ### Mystery Lab
 
 When `STEM_MYSTERY_LAB_ENABLED=true`, STEMBot opens a Mystery Lab round with
-one age-appropriate word and one clue, shown as masked letters with a wrong
-guess meter. The default `challenging` difficulty uses longer words and clues
-that require a little more thought without giving away the answer. Members can
-submit one letter or the whole word. Correct letters reveal their positions;
-incorrect letters use one of the configured wrong guesses. Every progress reply
-repeats the clue so it stays visible during a busy round. A completed word
-records the member's solved-round score and starts the next word. After the
-idle timeout, the answer is revealed and the game advances without changing the
-leaderboard.
+one age-appropriate word and one clue. The board now uses a hangman-style gallows,
+masked letters, wrong-guess meter, tried letters, and clue. The default `challenging`
+difficulty uses longer words and clues that require a little more thought without
+giving away the answer. Members can submit one letter or the whole word. Correct
+letters reveal their positions; incorrect letters add to the gallows. Every progress
+reply repeats the clue so it stays visible during a busy round. A completed word
+records the member's solved-round score and starts the next word. After the idle
+timeout, the answer is revealed and the game advances without changing the leaderboard.
 `/mystery-lab reset` is available to moderators when a round needs to be
 restarted.
 
@@ -303,12 +313,13 @@ that intent in the Discord Developer Portal when cake days are enabled.
 
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single STEMBot minigame
 dashboard embed with the counting streak, best counting streak, a separate
-top-three record leaderboard for counting, quiz, scramble, word chain, STEM
-Mystery Lab and Code Fix, plus the last counting round. The counting record is each
-member's highest number,
-quiz records correct answers, scramble records solved rounds, and word chain
-records a member's best correct-guess streak in one round. Mystery Lab records
-solved rounds and Code Fix records correct fixes. Set
+top-three record leaderboard for counting, Number, quiz, scramble, word chain,
+STEM Mystery Lab, Tic Tac Toe, Connect 4 and Code Fix, plus the last counting
+round. The counting record is each member's highest number, Number records
+correct guesses, quiz records correct answers, scramble records solved rounds,
+and word chain records a member's best correct-guess streak in one round. Mystery
+Lab records solved rounds, Tic Tac Toe and Connect 4 record wins, and Code Fix
+records correct fixes. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
 edited. If the message ID is omitted, STEMBot searches the most recent 100
 messages for its `STEMBot Minigames` embed (and can reuse the old counting
@@ -557,6 +568,14 @@ npm run validate
 | `STEM_CODE_FIX_TARGET_AGE_MAX`              | No                  | Upper end of the Code Fix age range; defaults to `14`.                                      |
 | `STEM_CODE_FIX_MAX_WRONG_ANSWERS`           | No                  | Wrong answers before the fix is shown; defaults to `5`.                                     |
 | `STEM_CODE_FIX_IDLE_TIMEOUT_MS`             | No                  | Time before an unanswered challenge is revealed; defaults to 3 days.                        |
+| `STEM_TICTACTOE_ENABLED`                    | No                  | Enable the persistent Tic Tac Toe channel game; defaults to `false`.                        |
+| `STEM_TICTACTOE_CHANNEL_ID`                 | When enabled        | Discord channel where Tic Tac Toe posts its board.                                          |
+| `STEM_TICTACTOE_RETRY_INTERVAL_MS`          | No                  | Retry interval for posting a Tic Tac Toe board; defaults to 5 minutes.                      |
+| `STEM_TICTACTOE_IDLE_TIMEOUT_MS`            | No                  | Time before an idle Tic Tac Toe round is reset; defaults to 3 days.                         |
+| `STEM_CONNECT4_ENABLED`                     | No                  | Enable the persistent Connect 4 channel game; defaults to `false`.                          |
+| `STEM_CONNECT4_CHANNEL_ID`                  | When enabled        | Discord channel where Connect 4 posts its board.                                            |
+| `STEM_CONNECT4_RETRY_INTERVAL_MS`           | No                  | Retry interval for posting a Connect 4 board; defaults to 5 minutes.                        |
+| `STEM_CONNECT4_IDLE_TIMEOUT_MS`             | No                  | Time before an idle Connect 4 round is reset; defaults to 3 days.                           |
 | `STEM_ASK_ENABLED`                          | No                  | Enable mention-based AI STEM answers; defaults to `false`.                                  |
 | `STEM_ASK_MAX_QUESTION_LENGTH`              | No                  | Maximum question length; defaults to 500 characters.                                        |
 | `STEM_ASK_USER_COOLDOWN_SECONDS`            | No                  | Minimum time between a user's questions; defaults to 30 seconds.                            |

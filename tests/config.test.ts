@@ -90,6 +90,16 @@ describe('loadConfig', () => {
         maxWrongAnswers: 5,
         idleTimeoutMs: 259200000,
       },
+      ticTacToe: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        idleTimeoutMs: 259200000,
+      },
+      connectFour: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        idleTimeoutMs: 259200000,
+      },
       reminders: {
         enabled: false,
         checkIntervalMs: 60000,
@@ -712,6 +722,35 @@ describe('loadConfig', () => {
       targetAgeMax: 16,
       maxWrongGuesses: 6,
       idleTimeoutMs: 120000,
+    });
+  });
+
+  it('accepts channel game environment names', () => {
+    const config = loadConfig({
+      DISCORD_CLIENT_ID: '1234567890',
+      DISCORD_GUILD_ID: '2234567890',
+      DISCORD_TOKEN: 'test-token',
+      STEM_TICTACTOE_ENABLED: 'true',
+      STEM_TICTACTOE_CHANNEL_ID: '3234567890',
+      STEM_TICTACTOE_RETRY_INTERVAL_MS: '60000',
+      STEM_TICTACTOE_IDLE_TIMEOUT_MS: '120000',
+      STEM_CONNECT4_ENABLED: 'true',
+      STEM_CONNECT4_CHANNEL_ID: '4234567890',
+      STEM_CONNECT4_RETRY_INTERVAL_MS: '90000',
+      STEM_CONNECT4_IDLE_TIMEOUT_MS: '180000',
+    });
+
+    expect(config.ticTacToe).toEqual({
+      enabled: true,
+      channelId: '3234567890',
+      retryIntervalMs: 60000,
+      idleTimeoutMs: 120000,
+    });
+    expect(config.connectFour).toEqual({
+      enabled: true,
+      channelId: '4234567890',
+      retryIntervalMs: 90000,
+      idleTimeoutMs: 180000,
     });
   });
 });

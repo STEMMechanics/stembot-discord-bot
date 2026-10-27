@@ -5,6 +5,7 @@ import {
   type DiscordChannelMessage,
   type DiscordGateway,
 } from './discord/client.js';
+import { toDiscordButtonRows } from './discord/button-components.js';
 import { createOpenAINumberRecognizer } from './integrations/openai.js';
 import { createOpenAIStemAskAnswerer } from './integrations/openai-ask.js';
 import { createOpenAIStemQuizEngine } from './integrations/openai-quiz.js';
@@ -45,6 +46,9 @@ import { createStemWordChainService, type StemWordChainService } from './service
 import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
 import { createChatDiscordBridge, type ChatDiscordBridge } from './http/chat-discord-bridge.js';
 import { createStemCodeFixService, type StemCodeFixService } from './services/code-fix.js';
+import { createNumberGameService, type NumberGameService } from './services/number-game.js';
+import { createConnectFourService, type ConnectFourService } from './services/connect-four.js';
+import { createTicTacToeService, type TicTacToeService } from './services/tic-tac-toe.js';
 import { createStemWordRevealService, type StemWordRevealService } from './services/word-reveal.js';
 import {
   createUserLevelService,
@@ -77,6 +81,9 @@ export interface ApplicationDependencies {
   ask?: StemAskService;
   chatDiscordBridge?: ChatDiscordBridge;
   userLevels?: UserLevelService;
+  numberGame?: NumberGameService;
+  ticTacToe?: TicTacToeService;
+  connectFour?: ConnectFourService;
   cakeDays?: CakeDayService;
   workshopNotifications: WorkshopNotificationService;
 }
@@ -111,6 +118,12 @@ export function createApplication(
       : undefined);
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
   const discordGatewayRef: { current?: DiscordGateway } = {};
+  const numberGame =
+    dependencies?.numberGame ??
+    createNumberGameService({
+      state,
+      logger,
+    });
   const userLevels =
     dependencies?.userLevels ??
     (config.levels.enabled
@@ -141,6 +154,74 @@ export function createApplication(
                 },
               }
             : {}),
+        })
+      : undefined);
+  const ticTacToe =
+    dependencies?.ticTacToe ??
+    (config.ticTacToe.enabled
+      ? createTicTacToeService({
+          config: config.ticTacToe,
+          publisher: {
+            send: (channelId, board) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Tic Tac Toe'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                content: board.content,
+                components: toDiscordButtonRows(board),
+                allowedMentions: { parse: [] },
+              });
+            },
+            edit: (channelId, messageId, board) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Tic Tac Toe'));
+              }
+
+              return discordGatewayRef.current.editChannelMessage(channelId, messageId, {
+                content: board.content,
+                components: toDiscordButtonRows(board),
+                allowedMentions: { parse: [] },
+              });
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
+        })
+      : undefined);
+  const connectFour =
+    dependencies?.connectFour ??
+    (config.connectFour.enabled
+      ? createConnectFourService({
+          config: config.connectFour,
+          publisher: {
+            send: (channelId, board) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Connect 4'));
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, {
+                content: board.content,
+                components: toDiscordButtonRows(board),
+                allowedMentions: { parse: [] },
+              });
+            },
+            edit: (channelId, messageId, board) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(new Error('Discord gateway is not ready for Connect 4'));
+              }
+
+              return discordGatewayRef.current.editChannelMessage(channelId, messageId, {
+                content: board.content,
+                components: toDiscordButtonRows(board),
+                allowedMentions: { parse: [] },
+              });
+            },
+          },
+          state,
+          logger,
+          ...(userLevels ? { userLevels } : {}),
         })
       : undefined);
   const countingChain =
@@ -382,6 +463,9 @@ export function createApplication(
       ...(reminders ? { reminders } : {}),
       ...(ask ? { ask } : {}),
       ...(userLevels ? { userLevels } : {}),
+      ...(numberGame ? { numberGame } : {}),
+      ...(ticTacToe ? { ticTacToe } : {}),
+      ...(connectFour ? { connectFour } : {}),
       ...(uptime ? { uptime } : {}),
       ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
     });
@@ -512,6 +596,28 @@ export function createApplication(
       run: async () => {
         await codeFix.checkInactivity();
         await codeFix.ensureChallenge();
+      },
+    });
+  }
+
+  if (ticTacToe && config.ticTacToe.enabled) {
+    scheduler.register({
+      name: 'tic-tac-toe-maintenance',
+      intervalMs: config.ticTacToe.retryIntervalMs,
+      run: async () => {
+        await ticTacToe.checkInactivity();
+        await ticTacToe.ensureRound();
+      },
+    });
+  }
+
+  if (connectFour && config.connectFour.enabled) {
+    scheduler.register({
+      name: 'connect-four-maintenance',
+      intervalMs: config.connectFour.retryIntervalMs,
+      run: async () => {
+        await connectFour.checkInactivity();
+        await connectFour.ensureRound();
       },
     });
   }

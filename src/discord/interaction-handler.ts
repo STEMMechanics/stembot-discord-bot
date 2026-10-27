@@ -66,6 +66,7 @@ export async function handleInteraction(
     ...(context.timeZone ? { timeZone: context.timeZone } : {}),
     ...(context.userLevels ? { userLevels: context.userLevels } : {}),
     ...(context.reminders ? { reminders: context.reminders } : {}),
+    ...(context.numberGame ? { numberGame: context.numberGame } : {}),
     ...(context.countingChain ? { countingChain: context.countingChain } : {}),
     ...(context.getCurrentTime ? { getCurrentTime: context.getCurrentTime } : {}),
     ...(context.requestCountingChainReview

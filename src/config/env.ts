@@ -268,6 +268,14 @@ const environmentSchema = z.object({
   STEM_CODE_FIX_TARGET_AGE_MAX: positiveInteger(14, 18),
   STEM_CODE_FIX_MAX_WRONG_ANSWERS: positiveInteger(5, 50),
   STEM_CODE_FIX_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_TICTACTOE_ENABLED: booleanFromEnvironment(false),
+  STEM_TICTACTOE_CHANNEL_ID: optionalDiscordId,
+  STEM_TICTACTOE_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_TICTACTOE_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_CONNECT4_ENABLED: booleanFromEnvironment(false),
+  STEM_CONNECT4_CHANNEL_ID: optionalDiscordId,
+  STEM_CONNECT4_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_CONNECT4_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_REMINDERS_ENABLED: booleanFromEnvironment(false),
   STEM_REMINDERS_CHANNEL_ID: optionalDiscordId,
   STEM_REMINDERS_CHECK_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
@@ -390,6 +398,18 @@ export interface AppConfig {
     targetAgeMin: number;
     targetAgeMax: number;
     maxWrongAnswers: number;
+    idleTimeoutMs: number;
+  };
+  ticTacToe: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+    idleTimeoutMs: number;
+  };
+  connectFour: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
     idleTimeoutMs: number;
   };
   reminders: {
@@ -582,6 +602,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  if (values.STEM_TICTACTOE_ENABLED && !values.STEM_TICTACTOE_CHANNEL_ID) {
+    throw new Error('STEM_TICTACTOE_CHANNEL_ID is required when STEM_TICTACTOE_ENABLED is true');
+  }
+
+  if (values.STEM_CONNECT4_ENABLED && !values.STEM_CONNECT4_CHANNEL_ID) {
+    throw new Error('STEM_CONNECT4_CHANNEL_ID is required when STEM_CONNECT4_ENABLED is true');
+  }
+
   if (values.STEM_REMINDERS_ENABLED && !values.STEM_REMINDERS_CHANNEL_ID) {
     throw new Error('STEM_REMINDERS_CHANNEL_ID is required when STEM_REMINDERS_ENABLED is true');
   }
@@ -720,6 +748,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       targetAgeMax: values.STEM_CODE_FIX_TARGET_AGE_MAX,
       maxWrongAnswers: values.STEM_CODE_FIX_MAX_WRONG_ANSWERS,
       idleTimeoutMs: values.STEM_CODE_FIX_IDLE_TIMEOUT_MS,
+    },
+    ticTacToe: {
+      enabled: values.STEM_TICTACTOE_ENABLED,
+      ...(values.STEM_TICTACTOE_CHANNEL_ID ? { channelId: values.STEM_TICTACTOE_CHANNEL_ID } : {}),
+      retryIntervalMs: values.STEM_TICTACTOE_RETRY_INTERVAL_MS,
+      idleTimeoutMs: values.STEM_TICTACTOE_IDLE_TIMEOUT_MS,
+    },
+    connectFour: {
+      enabled: values.STEM_CONNECT4_ENABLED,
+      ...(values.STEM_CONNECT4_CHANNEL_ID ? { channelId: values.STEM_CONNECT4_CHANNEL_ID } : {}),
+      retryIntervalMs: values.STEM_CONNECT4_RETRY_INTERVAL_MS,
+      idleTimeoutMs: values.STEM_CONNECT4_IDLE_TIMEOUT_MS,
     },
     reminders: {
       enabled: values.STEM_REMINDERS_ENABLED,

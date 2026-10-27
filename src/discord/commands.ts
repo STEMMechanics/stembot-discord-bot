@@ -33,6 +33,7 @@ import type { UptimeKumaIntegration, UptimeKumaStatus } from '../integrations/up
 import type { CountingChainService } from '../services/counting-chain.js';
 import { parseReminderDuration, type AdminReminderService } from '../services/admin-reminders.js';
 import type { StemCodeFixService } from '../services/code-fix.js';
+import type { NumberGameService } from '../services/number-game.js';
 import type { StemWordRevealService } from '../services/word-reveal.js';
 
 export interface CommandContext {
@@ -49,6 +50,7 @@ export interface CommandContext {
   reminders?: AdminReminderService;
   wordReveal?: StemWordRevealService;
   codeFix?: StemCodeFixService;
+  numberGame?: NumberGameService;
 }
 
 export interface DiscordCommand {
@@ -243,6 +245,31 @@ export const jokeCommand: DiscordCommand = {
 
   async execute(interaction): Promise<void> {
     await interaction.reply({ content: getRandomRobotJoke() });
+  },
+};
+
+export const numberCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('number')
+    .setDescription('Guess the number STEMBot is thinking of.'),
+
+  async execute(interaction, context): Promise<void> {
+    const numberGame = context.numberGame;
+    if (!numberGame) {
+      await interaction.reply({
+        content: 'The number game is not available.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const challenge = await numberGame.startChallenge(interaction.user.id, interaction.channelId);
+    const prompt = await interaction.reply({
+      content: challenge.content,
+      fetchReply: true,
+      allowedMentions: { parse: [] },
+    });
+    await numberGame.activateChallenge(challenge.challengeId, prompt.id);
   },
 };
 
@@ -602,6 +629,7 @@ export const commands: readonly DiscordCommand[] = [
   pingCommand,
   workshopsCommand,
   jokeCommand,
+  numberCommand,
   levelCommand,
   statusCommand,
   scrambleCommand,

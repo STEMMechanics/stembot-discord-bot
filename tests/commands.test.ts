@@ -16,6 +16,7 @@ import {
   minecraftCommand,
   jokeCommand,
   levelCommand,
+  numberCommand,
   pingCommand,
   reviewCommand,
   robotJokes,
@@ -49,6 +50,7 @@ describe('Discord commands', () => {
       'ping',
       'workshops',
       'joke',
+      'number',
       'level',
       'status',
       'scramble',
@@ -474,5 +476,37 @@ describe('Discord commands', () => {
 
     expect(reply).toHaveBeenCalledTimes(1);
     expect(robotJokes).toContain(reply.mock.calls[0]?.[0]?.content);
+  });
+
+  it('starts /number and activates the reply-bound challenge', async () => {
+    const reply = vi.fn().mockResolvedValue({ id: 'number-prompt-1' });
+    const startChallenge = vi.fn().mockResolvedValue({
+      challengeId: 'number-challenge-1',
+      content: 'number prompt',
+    });
+    const activateChallenge = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      user: { id: 'user-1' },
+      channelId: 'channel-1',
+      reply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await numberCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      numberGame: {
+        startChallenge,
+        activateChallenge,
+        handleMessage: vi.fn().mockResolvedValue(undefined),
+        getLeaderboard: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(startChallenge).toHaveBeenCalledWith('user-1', 'channel-1');
+    expect(reply).toHaveBeenCalledWith({
+      content: 'number prompt',
+      fetchReply: true,
+      allowedMentions: { parse: [] },
+    });
+    expect(activateChallenge).toHaveBeenCalledWith('number-challenge-1', 'number-prompt-1');
   });
 });

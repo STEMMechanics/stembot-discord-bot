@@ -2,9 +2,13 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   Partials,
   PermissionsBitField,
   type APIEmbed,
+  type ActionRowBuilder,
+  type ButtonInteraction,
+  type ButtonBuilder,
   type Message,
   type MessageMentionOptions,
   type MessageReaction,
@@ -21,7 +25,11 @@ import type { WebsiteIntegration } from '../integrations/website.js';
 import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
 import type { AdminReminderService } from '../services/admin-reminders.js';
+import type { ButtonGameBoard, ButtonGameInteraction } from '../services/button-games.js';
 import type { StemCodeFixMessage, StemCodeFixService } from '../services/code-fix.js';
+import type { ConnectFourService } from '../services/connect-four.js';
+import type { NumberGameMessage, NumberGameService } from '../services/number-game.js';
+import type { TicTacToeService } from '../services/tic-tac-toe.js';
 import type {
   CountingChainGameStatus,
   CountingChainHistoryMessage,
@@ -46,6 +54,7 @@ import type { UserLevelService } from '../services/user-levels.js';
 import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
 import { isMinigameHintRequest } from '../services/minigame-hints.js';
 import { createDiscordChatMessage, type ChatDiscordBridge } from '../http/chat-discord-bridge.js';
+import { toDiscordButtonRows } from './button-components.js';
 import { handleInteraction } from './interaction-handler.js';
 
 const COUNTING_CHAIN_EMBED_SETTLE_MS = 2_000;
@@ -66,6 +75,7 @@ export interface DiscordGateway {
 export interface DiscordChannelMessage {
   content?: string;
   embeds?: APIEmbed[];
+  components?: readonly ActionRowBuilder<ButtonBuilder>[];
   allowedMentions?: MessageMentionOptions;
   files?: readonly { attachment: Buffer; name: string }[];
   /** Internal image URL that is downloaded and attached to the message. */
@@ -97,6 +107,9 @@ export interface DiscordCommandDependencies {
   userLevels?: UserLevelService;
   uptime?: UptimeKumaIntegration;
   reminders?: AdminReminderService;
+  numberGame?: NumberGameService;
+  ticTacToe?: TicTacToeService;
+  connectFour?: ConnectFourService;
   chatDiscordBridge?: Pick<ChatDiscordBridge, 'forwardDiscordMessage'>;
 }
 
@@ -125,6 +138,7 @@ export function createDiscordGateway(
     (config.wordChain.enabled && dependencies.wordChain) ||
     (config.wordReveal.enabled && dependencies.wordReveal) ||
     (config.codeFix.enabled && dependencies.codeFix) ||
+    Boolean(dependencies.numberGame) ||
     askMessageTrackingEnabled ||
     (config.levels.enabled && dependencies.userLevels) ||
     minecraftChatForwardingEnabled;
@@ -212,11 +226,14 @@ export function createDiscordGateway(
             config.countingChain.infoMessageId,
             config.workshops.timeZone,
             dependencies.countingChain,
+            dependencies.numberGame,
             dependencies.quiz,
             dependencies.scramble,
             dependencies.wordChain,
             dependencies.wordReveal,
             dependencies.codeFix,
+            dependencies.ticTacToe,
+            dependencies.connectFour,
           )
         : undefined;
       refreshMinigameDashboard = infoPublisher?.refresh;
@@ -291,6 +308,28 @@ export function createDiscordGateway(
       );
     }
 
+    if (dependencies.ticTacToe && config.ticTacToe.enabled && config.ticTacToe.channelId) {
+      initializationTasks.push(
+        dependencies.ticTacToe.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.ticTacToe.channelId },
+            'Tic Tac Toe startup initialization failed',
+          );
+        }),
+      );
+    }
+
+    if (dependencies.connectFour && config.connectFour.enabled && config.connectFour.channelId) {
+      initializationTasks.push(
+        dependencies.connectFour.initialize().catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: config.connectFour.channelId },
+            'Connect 4 startup initialization failed',
+          );
+        }),
+      );
+    }
+
     void Promise.all(initializationTasks).finally(() => {
       resolveClientReady();
     });
@@ -318,6 +357,29 @@ export function createDiscordGateway(
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (interaction.isButton()) {
+      let buttonGame: TicTacToeService | ConnectFourService | undefined;
+      if (interaction.customId.startsWith('ttt:')) {
+        buttonGame = dependencies.ticTacToe;
+      } else if (interaction.customId.startsWith('connect4:')) {
+        buttonGame = dependencies.connectFour;
+      }
+      if (!buttonGame) {
+        return;
+      }
+
+      void buttonGame
+        .handleButton(toButtonGameInteraction(interaction))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, customId: interaction.customId, messageId: interaction.message.id },
+            'Discord button game interaction could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+      return;
+    }
+
     void handleInteraction(interaction, {
       getGatewayPing: () => client.ws.ping,
       logger,
@@ -331,9 +393,30 @@ export function createDiscordGateway(
       ...(dependencies.codeFix ? { codeFix: dependencies.codeFix } : {}),
       ...(dependencies.userLevels ? { userLevels: dependencies.userLevels } : {}),
       ...(dependencies.reminders ? { reminders: dependencies.reminders } : {}),
+      ...(dependencies.numberGame ? { numberGame: dependencies.numberGame } : {}),
+      ...(dependencies.ticTacToe ? { ticTacToe: dependencies.ticTacToe } : {}),
+      ...(dependencies.connectFour ? { connectFour: dependencies.connectFour } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
     });
   });
+
+  if (dependencies.numberGame) {
+    client.on(Events.MessageCreate, (message) => {
+      if (message.author.bot || !message.reference?.messageId) {
+        return;
+      }
+
+      void dependencies
+        .numberGame!.handleMessage(toNumberGameMessage(message))
+        .catch((error: unknown) => {
+          logger.warn(
+            { err: error, channelId: message.channelId, messageId: message.id },
+            'Number game message could not be processed',
+          );
+        })
+        .finally(refreshDashboardSafely);
+    });
+  }
 
   if (minecraftChatForwardingEnabled) {
     client.on(Events.MessageCreate, (message) => {
@@ -847,6 +930,7 @@ export function createDiscordGateway(
       await targetMessage.edit({
         ...(message.content !== undefined ? { content: message.content } : {}),
         ...(message.embeds !== undefined ? { embeds: message.embeds } : {}),
+        ...(message.components !== undefined ? { components: message.components } : {}),
         allowedMentions: message.allowedMentions ?? { parse: [] },
       });
       return true;
@@ -944,6 +1028,46 @@ function toStemQuizMessage(message: Message, botUserId?: string): StemQuizMessag
     reply: async (content: string): Promise<void> => {
       await message.reply({
         content,
+        allowedMentions: { parse: [] },
+      });
+    },
+  };
+}
+
+function toNumberGameMessage(message: Message): NumberGameMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    content: message.content,
+    ...(message.reference?.messageId ? { referencedMessageId: message.reference.messageId } : {}),
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
+    },
+  };
+}
+
+function toButtonGameInteraction(interaction: ButtonInteraction): ButtonGameInteraction {
+  return {
+    channelId: interaction.channelId,
+    messageId: interaction.message.id,
+    userId: interaction.user.id,
+    customId: interaction.customId,
+    update: async (board: ButtonGameBoard): Promise<void> => {
+      await interaction.update({
+        content: board.content,
+        components: toDiscordButtonRows(board),
+        allowedMentions: { parse: [] },
+      });
+    },
+    reply: async (content: string): Promise<void> => {
+      await interaction.reply({
+        content,
+        flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [] },
       });
     },
@@ -1316,11 +1440,14 @@ function createCountingChainInfoPublisher(
   configuredMessageId: string | undefined,
   timeZone: string,
   countingChain: CountingChainService | undefined,
+  numberGame: NumberGameService | undefined,
   quiz: StemQuizService | undefined,
   scramble: StemScrambleService | undefined,
   wordChain: StemWordChainService | undefined,
   wordReveal: StemWordRevealService | undefined,
   codeFix: StemCodeFixService | undefined,
+  ticTacToe: TicTacToeService | undefined,
+  connectFour: ConnectFourService | undefined,
 ): CountingChainInfoPublisher & { refresh(): Promise<void> } {
   let messageId = configuredMessageId;
   let latestStatus: CountingChainGameStatus | undefined;
@@ -1362,26 +1489,35 @@ function createCountingChainInfoPublisher(
 
     const [
       countingLeaderboard,
+      numberLeaderboard,
       quizLeaderboard,
       scrambleLeaderboard,
       wordChainLeaderboard,
       wordRevealLeaderboard,
       codeFixLeaderboard,
+      ticTacToeLeaderboard,
+      connectFourLeaderboard,
     ] = await Promise.all([
       readMinigameLeaderboard(countingChain, providedCountingLeaderboard),
+      readMinigameLeaderboard(numberGame),
       readMinigameLeaderboard(quiz),
       readMinigameLeaderboard(scramble),
       readMinigameLeaderboard(wordChain),
       readMinigameLeaderboard(wordReveal),
       readMinigameLeaderboard(codeFix),
+      readMinigameLeaderboard(ticTacToe),
+      readMinigameLeaderboard(connectFour),
     ]);
     const embed = buildMinigameInfoEmbed(status, timeZone, {
       counting: countingChain ? countingLeaderboard : undefined,
+      numberGame: numberGame ? numberLeaderboard : undefined,
       quiz: quiz ? quizLeaderboard : undefined,
       scramble: scramble ? scrambleLeaderboard : undefined,
       wordChain: wordChain ? wordChainLeaderboard : undefined,
       wordReveal: wordReveal ? wordRevealLeaderboard : undefined,
       codeFix: codeFix ? codeFixLeaderboard : undefined,
+      ticTacToe: ticTacToe ? ticTacToeLeaderboard : undefined,
+      connectFour: connectFour ? connectFourLeaderboard : undefined,
     });
     if (infoMessage) {
       await infoMessage.edit({ embeds: [embed], allowedMentions: { parse: [] } });
@@ -1438,7 +1574,7 @@ export function buildMinigameInfoEmbed(
       'Post a GIF or picture containing the next number.',
       '',
       '**Other games**',
-      'Answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore Mystery Lab, or fix a small code bug.',
+      'Guess the Number, answer Trivia, solve Word Scramble, keep the themed Word Chain going, explore Mystery Lab, play Tic Tac Toe or Connect 4, or fix a small code bug.',
       '',
       'Each game has its own top-three record leaderboard.',
     ].join('\n'),
@@ -1459,6 +1595,16 @@ export function buildMinigameInfoEmbed(
           leaderboards.counting,
           'highest number reached',
           'Counting chain is not enabled.',
+        ),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: 'Number · correct guesses',
+        value: formatMinigameLeaderboard(
+          leaderboards.numberGame,
+          'correct guesses',
+          'Number game is not available.',
         ),
         inline: false,
       },
@@ -1504,6 +1650,26 @@ export function buildMinigameInfoEmbed(
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
+        name: 'Tic Tac Toe · wins',
+        value: formatMinigameLeaderboard(
+          leaderboards.ticTacToe,
+          'wins',
+          'Tic Tac Toe is not enabled.',
+        ),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: 'Connect 4 · wins',
+        value: formatMinigameLeaderboard(
+          leaderboards.connectFour,
+          'wins',
+          'Connect 4 is not enabled.',
+        ),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
         name: 'Code Fix · correct fixes',
         value: formatMinigameLeaderboard(
           leaderboards.codeFix,
@@ -1529,11 +1695,14 @@ export function buildMinigameInfoEmbed(
 
 interface MinigameLeaderboards {
   counting: readonly MinigameLeaderboardEntry[] | undefined;
+  numberGame?: readonly MinigameLeaderboardEntry[] | undefined;
   quiz: readonly MinigameLeaderboardEntry[] | undefined;
   scramble: readonly MinigameLeaderboardEntry[] | undefined;
   wordChain: readonly MinigameLeaderboardEntry[] | undefined;
   wordReveal?: readonly MinigameLeaderboardEntry[] | undefined;
   codeFix?: readonly MinigameLeaderboardEntry[] | undefined;
+  ticTacToe?: readonly MinigameLeaderboardEntry[] | undefined;
+  connectFour?: readonly MinigameLeaderboardEntry[] | undefined;
 }
 
 async function readMinigameLeaderboard(

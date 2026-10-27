@@ -89,6 +89,17 @@ const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_GENERATION_ATTEMPTS = 3;
 const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 const DEFAULT_MAX_WRONG_GUESSES = 8;
+const MYSTERY_LAB_HANGMAN_ART = [
+  ['  +---+', '  |   |', '      |', '      |', '      |', '========='],
+  ['  +---+', '  |   |', '  O   |', '      |', '      |', '========='],
+  ['  +---+', '  |   |', '  O   |', '  |   |', '      |', '========='],
+  ['  +---+', '  |   |', '  O   |', ' /|   |', '      |', '========='],
+  ['  +---+', '  |   |', '  O   |', ' /|\\  |', '      |', '========='],
+  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' /    |', '========='],
+  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' / \\  |', '========='],
+  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' / \\  |', '    😵'],
+  ['  +---+', '  |   |', '  ☠   |', ' /|\\  |', ' / \\  |', '========='],
+] as const;
 
 export class PersistentStemWordRevealService implements StemWordRevealService {
   private readonly currentTime: () => Date;
@@ -460,12 +471,13 @@ export function formatStemWordReveal(
   return [
     leadIn,
     `🕵️ **Mystery Lab · Round ${roundNumber}**`,
-    'A mystery word is hidden in plain sight. Reveal it one letter at a time!',
-    `🧩 **Hidden word:** \`${maskedWord}\``,
+    'Guess the hidden word before the investigation runs out of chances!',
+    `\`\`\`text\n${formatMysteryLabHangmanArt(0, maxWrongGuesses).join('\n')}\n\`\`\``,
+    `🧩 **Word:** \`${maskedWord}\``,
     `💡 **Clue:** ${challenge.hint}`,
     `❤️ **Wrong guesses:** ${formatAttemptMeter(0, maxWrongGuesses)}`,
     '🔎 **Tried letters:** `none`',
-    '✏️ Guess one letter or the whole word!',
+    '✏️ Guess one letter or the whole word by posting it in this channel!',
   ]
     .filter((section): section is string => Boolean(section))
     .join('\n\n');
@@ -480,11 +492,24 @@ function formatWordRevealProgress(
     .map((letter) => (round.revealedLetters.includes(letter) ? letter.toUpperCase() : '＿'))
     .join(' ');
   return [
-    `🧩 **Hidden word:** \`${displayed}\``,
+    `\`\`\`text\n${formatMysteryLabHangmanArt(round.wrongGuesses, maxWrongGuesses).join('\n')}\n\`\`\``,
+    `🧩 **Word:** \`${displayed}\``,
     `❤️ **Wrong guesses:** ${formatAttemptMeter(round.wrongGuesses, maxWrongGuesses)}`,
     `🔎 **Tried letters:** \`${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}\``,
     `💡 **Clue:** ${round.hint}`,
   ].join('\n');
+}
+
+function formatMysteryLabHangmanArt(
+  wrongGuesses: number,
+  maxWrongGuesses: number,
+): readonly string[] {
+  const maxStage = MYSTERY_LAB_HANGMAN_ART.length - 1;
+  const stage = Math.min(
+    maxStage,
+    Math.max(0, Math.round((Math.max(0, wrongGuesses) / Math.max(1, maxWrongGuesses)) * maxStage)),
+  );
+  return MYSTERY_LAB_HANGMAN_ART[stage] ?? MYSTERY_LAB_HANGMAN_ART[0];
 }
 
 function formatAttemptMeter(wrongGuesses: number, maxWrongGuesses: number): string {
