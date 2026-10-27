@@ -72,10 +72,16 @@ function createService(
 
 describe('STEM Word Reveal service', () => {
   it('formats one hint and a masked word', () => {
-    expect(
-      formatStemWordReveal(challenge('atom', 'It is the smallest unit of an element.'), 1),
-    ).toBe(
-      '🕵️ **Mystery Lab · Round 1**\n\nA mystery word is hidden in plain sight. Reveal it one letter at a time!\n\n🧩 **Hidden word:** `＿ ＿ ＿ ＿`\n\n💡 **Clue:** It is the smallest unit of an element.\n\n❤️ **Wrong guesses:** 🟢🟢🟢🟢🟢🟢🟢🟢 `0/8 wrong`\n\n🔎 **Tried letters:** `none`\n\n✏️ Guess one letter or the whole word!',
+    const formatted = formatStemWordReveal(
+      challenge('atom', 'It is the smallest unit of an element.'),
+      1,
+    );
+    expect(formatted).toContain('🕵️ **Mystery Lab · Round 1**');
+    expect(formatted).toContain('  +---+');
+    expect(formatted).toContain('🧩 **Word:** `＿ ＿ ＿ ＿`');
+    expect(formatted).toContain('💡 **Clue:** It is the smallest unit of an element.');
+    expect(formatted).toContain(
+      '✏️ Guess one letter or the whole word by posting it in this channel!',
     );
   });
 

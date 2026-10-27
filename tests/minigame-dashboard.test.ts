@@ -19,11 +19,14 @@ describe('STEM minigame dashboard', () => {
   it('renders an independent top-three record section for each game', () => {
     const embed = buildMinigameInfoEmbed(status, 'Australia/Brisbane', {
       counting: [{ userId: 'counting-user', score: 7 }],
+      numberGame: [{ userId: 'number-user', score: 4 }],
       quiz: [{ userId: 'quiz-user', score: 12 }],
       scramble: [{ userId: 'scramble-user', score: 5 }],
       wordChain: [{ userId: 'word-user', score: 6 }],
       wordReveal: [{ userId: 'reveal-user', score: 4 }],
       codeFix: [{ userId: 'code-user', score: 3 }],
+      ticTacToe: [{ userId: 'ttt-user', score: 2 }],
+      connectFour: [{ userId: 'connect-user', score: 1 }],
     });
 
     expect(embed.fields).toEqual(
@@ -35,6 +38,10 @@ describe('STEM minigame dashboard', () => {
         expect.objectContaining({
           name: 'Trivia · correct answers',
           value: expect.stringContaining('<@quiz-user> · **12** correct answers'),
+        }),
+        expect.objectContaining({
+          name: 'Number · correct guesses',
+          value: expect.stringContaining('<@number-user> · **4** correct guesses'),
         }),
         expect.objectContaining({
           name: 'Word Scramble · solved rounds',
@@ -52,11 +59,19 @@ describe('STEM minigame dashboard', () => {
           name: 'Code Fix · correct fixes',
           value: expect.stringContaining('<@code-user> · **3** correct fixes'),
         }),
+        expect.objectContaining({
+          name: 'Tic Tac Toe · wins',
+          value: expect.stringContaining('<@ttt-user> · **2** wins'),
+        }),
+        expect.objectContaining({
+          name: 'Connect 4 · wins',
+          value: expect.stringContaining('<@connect-user> · **1** wins'),
+        }),
       ]),
     );
     expect(embed.fields?.some((field) => field.name === 'Minigame leaderboard')).toBe(false);
     expect(
       embed.fields?.filter((field) => field.name === '\u200b' && field.value === '\u200b'),
-    ).toHaveLength(5);
+    ).toHaveLength(8);
   });
 });
