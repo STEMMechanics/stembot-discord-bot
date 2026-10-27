@@ -58,6 +58,7 @@ interface TicTacToeServiceDependencies {
   userLevels?: UserLevelService;
   clock?: () => Date;
   idFactory?: () => string;
+  random?: () => number;
 }
 
 const STATE_KEY = 'ticTacToe';
@@ -67,11 +68,13 @@ const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 export class PersistentTicTacToeService implements TicTacToeService {
   private readonly currentTime: () => Date;
   private readonly idFactory: () => string;
+  private readonly random: () => number;
   private eventQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: TicTacToeServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
     this.idFactory = dependencies.idFactory ?? randomUUID;
+    this.random = dependencies.random ?? Math.random;
   }
 
   public async initialize(): Promise<void> {
@@ -185,7 +188,7 @@ export class PersistentTicTacToeService implements TicTacToeService {
     let draw = !winner && nextGame.board.every((cell) => cell !== null);
     let botMove: number | undefined;
     if (!winner && !draw) {
-      botMove = chooseBotMove(nextGame.board);
+      botMove = chooseBotMove(nextGame.board, this.random);
       if (botMove !== undefined) {
         nextGame.board[botMove] = 'O';
       }
@@ -381,28 +384,75 @@ function parseButtonId(customId: string): { gameId: string; square: number } | u
   return { gameId, square };
 }
 
-function chooseBotMove(board: TicTacToeCell[]): number | undefined {
-  return (
-    findWinningMove(board, 'O') ??
-    findWinningMove(board, 'X') ??
-    (board[4] === null ? 4 : undefined) ??
-    [0, 2, 6, 8].find((index) => board[index] === null) ??
-    board.findIndex((cell) => cell === null)
-  );
+function chooseBotMove(board: TicTacToeCell[], random: () => number): number | undefined {
+  const candidates: number[] = [];
+  let bestScore = Number.NEGATIVE_INFINITY;
+  const memo = new Map<string, number>();
+
+  for (let index = 0; index < board.length; index += 1) {
+    if (board[index] !== null) {
+      continue;
+    }
+
+    const candidate = [...board];
+    candidate[index] = 'O';
+    const score = minimaxTicTacToe(candidate, false, memo);
+    if (score > bestScore) {
+      bestScore = score;
+      candidates.length = 0;
+    }
+    if (score === bestScore) {
+      candidates.push(index);
+    }
+  }
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const rawRandomValue = random();
+  const randomValue = Number.isFinite(rawRandomValue)
+    ? Math.max(0, Math.min(0.999999, rawRandomValue))
+    : 0;
+  return candidates[Math.floor(randomValue * candidates.length)];
 }
 
-function findWinningMove(board: TicTacToeCell[], mark: TicTacToeMark): number | undefined {
+function minimaxTicTacToe(
+  board: TicTacToeCell[],
+  botTurn: boolean,
+  memo: Map<string, number>,
+  depth = 0,
+): number {
+  const winner = getWinner(board);
+  if (winner === 'O') {
+    return 10 - depth;
+  }
+  if (winner === 'X') {
+    return depth - 10;
+  }
+  if (board.every((cell) => cell !== null)) {
+    return 0;
+  }
+
+  const key = `${board.map((cell) => cell ?? '-').join('')}:${botTurn ? 'O' : 'X'}`;
+  const cached = memo.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const scores: number[] = [];
   for (let index = 0; index < board.length; index += 1) {
     if (board[index] !== null) {
       continue;
     }
     const candidate = [...board];
-    candidate[index] = mark;
-    if (getWinner(candidate) === mark) {
-      return index;
-    }
+    candidate[index] = botTurn ? 'O' : 'X';
+    scores.push(minimaxTicTacToe(candidate, !botTurn, memo, depth + 1));
   }
-  return undefined;
+
+  const score = botTurn ? Math.max(...scores) : Math.min(...scores);
+  memo.set(key, score);
+  return score;
 }
 
 function getWinner(board: TicTacToeCell[]): TicTacToeMark | undefined {

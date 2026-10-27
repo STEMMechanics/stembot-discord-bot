@@ -100,6 +100,12 @@ describe('loadConfig', () => {
         retryIntervalMs: 300000,
         idleTimeoutMs: 259200000,
       },
+      globalChase: {
+        enabled: false,
+        retryIntervalMs: 300000,
+        maxStrikes: 3,
+        idleTimeoutMs: 259200000,
+      },
       reminders: {
         enabled: false,
         checkIntervalMs: 60000,
@@ -738,6 +744,11 @@ describe('loadConfig', () => {
       STEM_CONNECT4_CHANNEL_ID: '4234567890',
       STEM_CONNECT4_RETRY_INTERVAL_MS: '90000',
       STEM_CONNECT4_IDLE_TIMEOUT_MS: '180000',
+      STEM_GLOBAL_CHASE_ENABLED: 'true',
+      STEM_GLOBAL_CHASE_CHANNEL_ID: '5234567890',
+      STEM_GLOBAL_CHASE_RETRY_INTERVAL_MS: '120000',
+      STEM_GLOBAL_CHASE_MAX_STRIKES: '4',
+      STEM_GLOBAL_CHASE_IDLE_TIMEOUT_MS: '240000',
     });
 
     expect(config.ticTacToe).toEqual({
@@ -751,6 +762,13 @@ describe('loadConfig', () => {
       channelId: '4234567890',
       retryIntervalMs: 90000,
       idleTimeoutMs: 180000,
+    });
+    expect(config.globalChase).toEqual({
+      enabled: true,
+      channelId: '5234567890',
+      retryIntervalMs: 120000,
+      maxStrikes: 4,
+      idleTimeoutMs: 240000,
     });
   });
 });

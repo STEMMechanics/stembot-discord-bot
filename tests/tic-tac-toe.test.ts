@@ -57,6 +57,7 @@ function createService(
     state,
     logger,
     idFactory: vi.fn().mockReturnValueOnce('game-1').mockReturnValue('game-next'),
+    random: () => 0,
   });
 }
 

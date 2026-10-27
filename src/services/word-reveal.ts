@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { APIEmbed } from 'discord.js';
 
 import type {
   WordRevealChallenge,
@@ -38,7 +39,16 @@ export interface StemWordRevealMessage {
 }
 
 export interface StemWordRevealPublisher {
-  send(channelId: string, content: string): Promise<string>;
+  send(channelId: string, message: StemWordRevealPublisherMessage): Promise<string>;
+  edit(
+    channelId: string,
+    messageId: string,
+    message: StemWordRevealPublisherMessage,
+  ): Promise<boolean>;
+}
+
+export interface StemWordRevealPublisherMessage {
+  embeds: APIEmbed[];
 }
 
 export interface StemWordRevealService {
@@ -89,17 +99,7 @@ const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_GENERATION_ATTEMPTS = 3;
 const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
 const DEFAULT_MAX_WRONG_GUESSES = 8;
-const MYSTERY_LAB_HANGMAN_ART = [
-  ['  +---+', '  |   |', '      |', '      |', '      |', '========='],
-  ['  +---+', '  |   |', '  O   |', '      |', '      |', '========='],
-  ['  +---+', '  |   |', '  O   |', '  |   |', '      |', '========='],
-  ['  +---+', '  |   |', '  O   |', ' /|   |', '      |', '========='],
-  ['  +---+', '  |   |', '  O   |', ' /|\\  |', '      |', '========='],
-  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' /    |', '========='],
-  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' / \\  |', '========='],
-  ['  +---+', '  |   |', '  O   |', ' /|\\  |', ' / \\  |', '    😵'],
-  ['  +---+', '  |   |', '  ☠   |', ' /|\\  |', ' / \\  |', '========='],
-] as const;
+const MYSTERY_LAB_BLUE = 0x3498db;
 
 export class PersistentStemWordRevealService implements StemWordRevealService {
   private readonly currentTime: () => Date;
@@ -153,11 +153,16 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       state.round = null;
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
-      await this.publishNextRound(
-        rootState,
-        state,
-        `⏰ This mystery went quiet for too long. The answer was **${round.word.toUpperCase()}**.`,
+      await this.editBoardSafely(
+        round,
+        formatWordRevealProgress(
+          round,
+          this.dependencies.config.maxWrongGuesses,
+          `⏰ This mystery went quiet for too long. The answer was **${round.word.toUpperCase()}**.`,
+          true,
+        ),
       );
+      await this.publishNextRound(rootState, state, '⏰ A fresh Mystery Lab round is ready.');
       this.dependencies.logger.info(
         { channelId: this.dependencies.config.channelId, roundNumber: round.roundNumber },
         'STEM word reveal inactivity timeout revealed the answer and advanced the round',
@@ -173,10 +178,22 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     return this.enqueue(async () => {
       const rootState = await this.dependencies.state.load();
       const state = readStemWordRevealState(rootState[STATE_KEY]);
-      const previousWord = state.round?.word;
+      const previousRound = state.round;
+      const previousWord = previousRound?.word;
       state.round = null;
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
+      if (previousRound) {
+        await this.editBoardSafely(
+          previousRound,
+          formatWordRevealProgress(
+            previousRound,
+            this.dependencies.config.maxWrongGuesses,
+            '🔄 A moderator reset the Mystery Lab.',
+            true,
+          ),
+        );
+      }
       await this.publishNextRound(
         rootState,
         state,
@@ -231,10 +248,7 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, UNCLEAR_REACTION);
-      await this.replySafely(
-        message,
-        `🤔 Send one letter or the whole word to make a guess.\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}`,
-      );
+      await this.replySafely(message, '🤔 Send one letter or the whole word to make a guess.');
       return;
     }
 
@@ -259,9 +273,13 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, UNCLEAR_REACTION);
-      await this.replySafely(
-        message,
-        `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}`,
+      await this.editBoardSafely(
+        round,
+        formatWordRevealProgress(
+          round,
+          this.dependencies.config.maxWrongGuesses,
+          `🤔 The letter **${guess.toUpperCase()}** has already been checked in this mystery.`,
+        ),
       );
       return;
     }
@@ -287,9 +305,13 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     writeStemWordRevealState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
-    await this.replySafely(
-      message,
-      `✅ **${guess.toUpperCase()}** is in the mystery word!\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}\n\nKeep investigating!`,
+    await this.editBoardSafely(
+      round,
+      formatWordRevealProgress(
+        round,
+        this.dependencies.config.maxWrongGuesses,
+        `✅ **${guess.toUpperCase()}** is in the mystery word!`,
+      ),
     );
   }
 
@@ -306,20 +328,25 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
       writeStemWordRevealState(rootState, state);
       await this.dependencies.state.save(rootState);
       await this.react(message, WRONG_REACTION);
-      await this.publishNextRound(
-        rootState,
-        state,
-        `${feedback}\n\n💥 The mystery is over! The answer was **${round.word.toUpperCase()}**.`,
+      await this.editBoardSafely(
+        round,
+        formatWordRevealProgress(
+          round,
+          this.dependencies.config.maxWrongGuesses,
+          `${feedback}\n\n💥 The mystery is over! The answer was **${round.word.toUpperCase()}**.`,
+          true,
+        ),
       );
+      await this.publishNextRound(rootState, state, '💥 A fresh Mystery Lab round is ready.');
       return;
     }
 
     writeStemWordRevealState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.react(message, WRONG_REACTION);
-    await this.replySafely(
-      message,
-      `❌ ${feedback}\n\n${formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses)}\n\n${this.dependencies.config.maxWrongGuesses - round.wrongGuesses} wrong ${this.dependencies.config.maxWrongGuesses - round.wrongGuesses === 1 ? 'guess' : 'guesses'} left.`,
+    await this.editBoardSafely(
+      round,
+      formatWordRevealProgress(round, this.dependencies.config.maxWrongGuesses, `❌ ${feedback}`),
     );
   }
 
@@ -335,11 +362,16 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     await this.dependencies.state.save(rootState);
     await this.react(message, PASS_REACTION);
     await this.recordGameParticipation(message.authorId, message);
-    await this.publishNextRound(
-      rootState,
-      state,
-      `🎉 <@${message.authorId}> solved the mystery! The word was **${round.word.toUpperCase()}**.\n🏆 +1 solved round!`,
+    await this.editBoardSafely(
+      round,
+      formatWordRevealProgress(
+        round,
+        this.dependencies.config.maxWrongGuesses,
+        `🎉 <@${message.authorId}> solved the mystery! The word was **${round.word.toUpperCase()}**.\n🏆 +1 solved round!`,
+        true,
+      ),
     );
+    await this.publishNextRound(rootState, state, '🎉 A fresh Mystery Lab round is ready.');
   }
 
   private async publishNextRound(
@@ -379,15 +411,16 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     }
 
     const roundNumber = state.nextRoundNumber;
-    const messageId = await this.dependencies.publisher.send(
-      this.dependencies.config.channelId!,
-      formatStemWordReveal(
-        challenge,
-        roundNumber,
-        leadIn,
-        this.dependencies.config.maxWrongGuesses,
-      ),
-    );
+    const messageId = await this.dependencies.publisher.send(this.dependencies.config.channelId!, {
+      embeds: [
+        formatStemWordReveal(
+          challenge,
+          roundNumber,
+          leadIn,
+          this.dependencies.config.maxWrongGuesses,
+        ),
+      ],
+    });
     state.round = {
       ...challenge,
       id: this.idFactory(),
@@ -402,6 +435,29 @@ export class PersistentStemWordRevealService implements StemWordRevealService {
     state.recentWords = [...state.recentWords, challenge.word].slice(-MAX_RECENT_WORDS);
     writeStemWordRevealState(rootState, state);
     await this.dependencies.state.save(rootState);
+  }
+
+  private async editBoardSafely(round: StemWordRevealRoundState, embed: APIEmbed): Promise<void> {
+    try {
+      const edited = await this.dependencies.publisher.edit(
+        this.dependencies.config.channelId!,
+        round.messageId,
+        {
+          embeds: [embed],
+        },
+      );
+      if (!edited) {
+        this.dependencies.logger.warn(
+          { channelId: this.dependencies.config.channelId, messageId: round.messageId },
+          'STEM word reveal board could not be found for editing',
+        );
+      }
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: this.dependencies.config.channelId, messageId: round.messageId },
+        'STEM word reveal board could not be updated',
+      );
+    }
   }
 
   private async recordGameParticipation(
@@ -465,58 +521,71 @@ export function formatStemWordReveal(
   roundNumber: number,
   leadIn?: string,
   maxWrongGuesses = DEFAULT_MAX_WRONG_GUESSES,
-): string {
-  const word = normalizeWordRevealWord(challenge.word);
-  const maskedWord = [...word].map(() => '＿').join(' ');
-  return [
-    leadIn,
-    `🕵️ **Mystery Lab · Round ${roundNumber}**`,
-    'Guess the hidden word before the investigation runs out of chances!',
-    `\`\`\`text\n${formatMysteryLabHangmanArt(0, maxWrongGuesses).join('\n')}\n\`\`\``,
-    `🧩 **Word:** \`${maskedWord}\``,
-    `💡 **Clue:** ${challenge.hint}`,
-    `❤️ **Wrong guesses:** ${formatAttemptMeter(0, maxWrongGuesses)}`,
-    '🔎 **Tried letters:** `none`',
-    '✏️ Guess one letter or the whole word by posting it in this channel!',
-  ]
-    .filter((section): section is string => Boolean(section))
-    .join('\n\n');
+): APIEmbed {
+  return formatWordRevealEmbed(challenge, roundNumber, [], [], 0, maxWrongGuesses, leadIn);
 }
 
 function formatWordRevealProgress(
   round: StemWordRevealRoundState,
   maxWrongGuesses: number,
-): string {
-  const word = normalizeWordRevealWord(round.word);
-  const displayed = [...word]
-    .map((letter) => (round.revealedLetters.includes(letter) ? letter.toUpperCase() : '＿'))
-    .join(' ');
-  return [
-    `\`\`\`text\n${formatMysteryLabHangmanArt(round.wrongGuesses, maxWrongGuesses).join('\n')}\n\`\`\``,
-    `🧩 **Word:** \`${displayed}\``,
-    `❤️ **Wrong guesses:** ${formatAttemptMeter(round.wrongGuesses, maxWrongGuesses)}`,
-    `🔎 **Tried letters:** \`${round.triedLetters.map((letter) => letter.toUpperCase()).join(', ') || 'none'}\``,
-    `💡 **Clue:** ${round.hint}`,
-  ].join('\n');
+  leadIn?: string,
+  revealAnswer = false,
+): APIEmbed {
+  return formatWordRevealEmbed(
+    round,
+    round.roundNumber,
+    round.triedLetters,
+    round.revealedLetters,
+    round.wrongGuesses,
+    maxWrongGuesses,
+    leadIn,
+    revealAnswer,
+  );
 }
 
-function formatMysteryLabHangmanArt(
+function formatWordRevealEmbed(
+  challenge: WordRevealChallenge,
+  roundNumber: number,
+  triedLetters: readonly string[],
+  revealedLetters: readonly string[],
   wrongGuesses: number,
   maxWrongGuesses: number,
-): readonly string[] {
-  const maxStage = MYSTERY_LAB_HANGMAN_ART.length - 1;
-  const stage = Math.min(
-    maxStage,
-    Math.max(0, Math.round((Math.max(0, wrongGuesses) / Math.max(1, maxWrongGuesses)) * maxStage)),
-  );
-  return MYSTERY_LAB_HANGMAN_ART[stage] ?? MYSTERY_LAB_HANGMAN_ART[0];
+  leadIn?: string,
+  revealAnswer = false,
+): APIEmbed {
+  const word = normalizeWordRevealWord(challenge.word);
+  const guessed = new Set([...revealedLetters, ...(revealAnswer ? [...word] : [])]);
+  const displayedWord = [...word]
+    .map((letter) => (guessed.has(letter) ? toRegionalIndicator(letter) : '🔵'))
+    .join(' ');
+  const guesses = triedLetters.map((letter) => letter.toUpperCase()).join(',') || 'none';
+  const status = leadIn ? `\n\n${leadIn}` : '';
+
+  return {
+    title: `🕵️ Mystery Lab · Round ${roundNumber}`,
+    color: MYSTERY_LAB_BLUE,
+    description: `💡 **Clue**\n${challenge.hint}${status}`,
+    fields: [
+      {
+        name: '🔤 Guesses',
+        value: `\`${guesses}\``,
+        inline: false,
+      },
+      {
+        name: '🧩 Word',
+        value: displayedWord,
+        inline: false,
+      },
+    ],
+    footer: {
+      text: `Guess one letter or the whole word in this channel · ${wrongGuesses}/${Math.max(1, maxWrongGuesses)} wrong guesses`,
+    },
+  };
 }
 
-function formatAttemptMeter(wrongGuesses: number, maxWrongGuesses: number): string {
-  const total = Math.max(1, maxWrongGuesses);
-  const used = Math.min(Math.max(0, wrongGuesses), total);
-  const remaining = total - used;
-  return `${'🟢'.repeat(remaining)}${'⚫'.repeat(used)} \`${used}/${total} wrong\``;
+function toRegionalIndicator(letter: string): string {
+  const codePoint = letter.toLowerCase().charCodeAt(0);
+  return String.fromCodePoint(0x1f1e6 + codePoint - 97);
 }
 
 function normalizeWordRevealGuess(value: string): string | undefined {

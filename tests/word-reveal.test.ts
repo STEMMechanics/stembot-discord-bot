@@ -57,7 +57,10 @@ function createMessage(id: string, content: string): StemWordRevealMessage {
 function createService(
   state: MemoryStateStore,
   generator: WordRevealGenerator,
-  publisher: StemWordRevealPublisher = { send: vi.fn().mockResolvedValue('round-message-1') },
+  publisher: StemWordRevealPublisher = {
+    send: vi.fn().mockResolvedValue('round-message-1'),
+    edit: vi.fn().mockResolvedValue(true),
+  },
 ): PersistentStemWordRevealService {
   return new PersistentStemWordRevealService({
     config,
@@ -76,13 +79,16 @@ describe('STEM Word Reveal service', () => {
       challenge('atom', 'It is the smallest unit of an element.'),
       1,
     );
-    expect(formatted).toContain('🕵️ **Mystery Lab · Round 1**');
-    expect(formatted).toContain('  +---+');
-    expect(formatted).toContain('🧩 **Word:** `＿ ＿ ＿ ＿`');
-    expect(formatted).toContain('💡 **Clue:** It is the smallest unit of an element.');
-    expect(formatted).toContain(
-      '✏️ Guess one letter or the whole word by posting it in this channel!',
-    );
+    expect(formatted).toMatchObject({
+      title: '🕵️ Mystery Lab · Round 1',
+      description: '💡 **Clue**\nIt is the smallest unit of an element.',
+      color: 0x3498db,
+    });
+    expect(formatted.fields).toEqual([
+      { name: '🔤 Guesses', value: '`none`', inline: false },
+      { name: '🧩 Word', value: '🔵 🔵 🔵 🔵', inline: false },
+    ]);
+    expect(formatted.footer?.text).toContain('Guess one letter or the whole word');
   });
 
   it('accepts a letter, then a whole-word answer and records the solver', async () => {
@@ -98,6 +104,7 @@ describe('STEM Word Reveal service', () => {
         .fn()
         .mockResolvedValueOnce('round-message-1')
         .mockResolvedValueOnce('round-message-2'),
+      edit: vi.fn().mockResolvedValue(true),
     };
     const service = createService(state, generator, publisher);
     const letter = createMessage('letter-1', 'a');
@@ -110,6 +117,20 @@ describe('STEM Word Reveal service', () => {
     expect(letter.react).toHaveBeenCalledWith('✅');
     expect(answer.react).toHaveBeenCalledWith('✅');
     expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.edit).toHaveBeenCalledWith(
+      'word-reveal-channel',
+      'round-message-1',
+      expect.objectContaining({
+        embeds: [
+          expect.objectContaining({
+            fields: expect.arrayContaining([
+              { name: '🔤 Guesses', value: '`A`', inline: false },
+              { name: '🧩 Word', value: '🇦 🔵 🔵 🔵', inline: false },
+            ]),
+          }),
+        ],
+      }),
+    );
     await expect(service.getLeaderboard(3)).resolves.toEqual([{ userId: 'user-1', score: 1 }]);
     expect(state.state).toMatchObject({
       stemWordReveal: {
@@ -132,6 +153,7 @@ describe('STEM Word Reveal service', () => {
         .fn()
         .mockResolvedValueOnce('round-message-1')
         .mockResolvedValueOnce('round-message-2'),
+      edit: vi.fn().mockResolvedValue(true),
     };
     const service = createService(state, generator, publisher);
 
@@ -139,7 +161,13 @@ describe('STEM Word Reveal service', () => {
     await service.handleMessage(createMessage('wrong-1', 'z'));
     await service.handleMessage(createMessage('wrong-2', 'q'));
 
-    expect(publisher.send.mock.calls[1]?.[1]).toContain('The answer was **ATOM**.');
+    expect(publisher.edit).toHaveBeenCalledWith(
+      'word-reveal-channel',
+      'round-message-1',
+      expect.objectContaining({
+        embeds: [expect.objectContaining({ description: expect.stringContaining('ATOM') })],
+      }),
+    );
     expect(state.state).toMatchObject({ stemWordReveal: { round: { word: 'mars' } } });
   });
 });

@@ -276,6 +276,11 @@ const environmentSchema = z.object({
   STEM_CONNECT4_CHANNEL_ID: optionalDiscordId,
   STEM_CONNECT4_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
   STEM_CONNECT4_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_GLOBAL_CHASE_ENABLED: booleanFromEnvironment(false),
+  STEM_GLOBAL_CHASE_CHANNEL_ID: optionalDiscordId,
+  STEM_GLOBAL_CHASE_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  STEM_GLOBAL_CHASE_MAX_STRIKES: positiveInteger(3, 10),
+  STEM_GLOBAL_CHASE_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
   STEM_REMINDERS_ENABLED: booleanFromEnvironment(false),
   STEM_REMINDERS_CHANNEL_ID: optionalDiscordId,
   STEM_REMINDERS_CHECK_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
@@ -410,6 +415,13 @@ export interface AppConfig {
     enabled: boolean;
     channelId?: string;
     retryIntervalMs: number;
+    idleTimeoutMs: number;
+  };
+  globalChase: {
+    enabled: boolean;
+    channelId?: string;
+    retryIntervalMs: number;
+    maxStrikes: number;
     idleTimeoutMs: number;
   };
   reminders: {
@@ -610,6 +622,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('STEM_CONNECT4_CHANNEL_ID is required when STEM_CONNECT4_ENABLED is true');
   }
 
+  if (values.STEM_GLOBAL_CHASE_ENABLED && !values.STEM_GLOBAL_CHASE_CHANNEL_ID) {
+    throw new Error(
+      'STEM_GLOBAL_CHASE_CHANNEL_ID is required when STEM_GLOBAL_CHASE_ENABLED is true',
+    );
+  }
+
   if (values.STEM_REMINDERS_ENABLED && !values.STEM_REMINDERS_CHANNEL_ID) {
     throw new Error('STEM_REMINDERS_CHANNEL_ID is required when STEM_REMINDERS_ENABLED is true');
   }
@@ -760,6 +778,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ...(values.STEM_CONNECT4_CHANNEL_ID ? { channelId: values.STEM_CONNECT4_CHANNEL_ID } : {}),
       retryIntervalMs: values.STEM_CONNECT4_RETRY_INTERVAL_MS,
       idleTimeoutMs: values.STEM_CONNECT4_IDLE_TIMEOUT_MS,
+    },
+    globalChase: {
+      enabled: values.STEM_GLOBAL_CHASE_ENABLED,
+      ...(values.STEM_GLOBAL_CHASE_CHANNEL_ID
+        ? { channelId: values.STEM_GLOBAL_CHASE_CHANNEL_ID }
+        : {}),
+      retryIntervalMs: values.STEM_GLOBAL_CHASE_RETRY_INTERVAL_MS,
+      maxStrikes: values.STEM_GLOBAL_CHASE_MAX_STRIKES,
+      idleTimeoutMs: values.STEM_GLOBAL_CHASE_IDLE_TIMEOUT_MS,
     },
     reminders: {
       enabled: values.STEM_REMINDERS_ENABLED,

@@ -2,7 +2,7 @@
 
 STEMBot is the official STEMMechanics Discord bot. It is a TypeScript service designed for an independent Docker deployment on TrueNAS.
 
-The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, AI-generated STEM games, a reply-based number game, persistent channel-based Tic Tac Toe and Connect 4, and a hangman-style Mystery Lab, plus optional mention-based AI STEM answers, a persistent participation XP and level system, and optional join-date cake-day announcements. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
+The current implementation connects Discord to the public STEMMechanics workshop RSS feed and the STEMCraft status endpoint. It provides read-only workshop and server commands, persistent workshop announcements, 24-hour and 1-hour reminders, an optional image-based counting-chain minigame, AI-generated STEM games, a reply-based number game, persistent channel-based Tic Tac Toe and Connect 4, an embed-based Mystery Lab, and a cooperative Global Chase location mystery, plus optional mention-based AI STEM answers, a persistent participation XP and level system, and optional join-date cake-day announcements. The deployed Website and STEMCraft response shapes were verified on 22 October 2026, and the adapters retain compatibility with older responses.
 
 ## Architecture
 
@@ -64,6 +64,16 @@ Use `/number` to start a personal number-guessing challenge. STEMBot thinks of a
 When enabled, Tic Tac Toe and Connect 4 post one persistent board in their configured
 channels. Players click the board buttons; the first click claims the round and starts a
 game against STEMBot. There are no slash commands to start or stop these games.
+
+### Global Chase
+
+When `STEM_GLOBAL_CHASE_ENABLED=true`, STEMBot posts a cooperative location
+mystery in the configured channel. Each clue offers three possible destinations;
+players reply with a location or `1`, `2`, or `3`. A case has three correct
+locations to follow, while decoy choices add strikes. Three strikes ends the
+case and starts a new one. The board embed keeps the clue, current location,
+route, choices, and strike count visible. Solved cases are recorded on the
+minigame leaderboard.
 
 ### Counting-chain minigame
 
@@ -229,14 +239,15 @@ wrong-answer penalty or an extra round change.
 ### Mystery Lab
 
 When `STEM_MYSTERY_LAB_ENABLED=true`, STEMBot opens a Mystery Lab round with
-one age-appropriate word and one clue. The board now uses a hangman-style gallows,
-masked letters, wrong-guess meter, tried letters, and clue. The default `challenging`
-difficulty uses longer words and clues that require a little more thought without
-giving away the answer. Members can submit one letter or the whole word. Correct
-letters reveal their positions; incorrect letters add to the gallows. Every progress
-reply repeats the clue so it stays visible during a busy round. A completed word
-records the member's solved-round score and starts the next word. After the idle
-timeout, the answer is revealed and the game advances without changing the leaderboard.
+one age-appropriate word and one clue. The board is a blue embed with the clue at
+the top, a comma-separated code-style list of guessed letters, and the word shown
+as blue circles for unknown positions and blue-square letter emojis for revealed
+positions. The default `challenging` difficulty uses longer words and clues that
+require a little more thought without giving away the answer. Members can submit
+one letter or the whole word. Every guess edits the board embed so the current
+state stays visible during a busy round. A completed word records the member's
+solved-round score and starts the next word. After the idle timeout, the answer is
+revealed and the game advances without changing the leaderboard.
 `/mystery-lab reset` is available to moderators when a round needs to be
 restarted.
 
@@ -314,12 +325,12 @@ that intent in the Discord Developer Portal when cake days are enabled.
 Set `COUNTING_CHAIN_INFO_CHANNEL_ID` to maintain a single STEMBot minigame
 dashboard embed with the counting streak, best counting streak, a separate
 top-three record leaderboard for counting, Number, quiz, scramble, word chain,
-STEM Mystery Lab, Tic Tac Toe, Connect 4 and Code Fix, plus the last counting
+STEM Mystery Lab, Global Chase, Tic Tac Toe, Connect 4 and Code Fix, plus the last counting
 round. The counting record is each member's highest number, Number records
 correct guesses, quiz records correct answers, scramble records solved rounds,
 and word chain records a member's best correct-guess streak in one round. Mystery
-Lab records solved rounds, Tic Tac Toe and Connect 4 record wins, and Code Fix
-records correct fixes. Set
+Lab and Global Chase record solved rounds, Tic Tac Toe and Connect 4 record wins,
+and Code Fix records correct fixes. Set
 `COUNTING_CHAIN_INFO_MESSAGE_ID` when an existing STEMBot message should be
 edited. If the message ID is omitted, STEMBot searches the most recent 100
 messages for its `STEMBot Minigames` embed (and can reuse the old counting
@@ -576,6 +587,11 @@ npm run validate
 | `STEM_CONNECT4_CHANNEL_ID`                  | When enabled        | Discord channel where Connect 4 posts its board.                                            |
 | `STEM_CONNECT4_RETRY_INTERVAL_MS`           | No                  | Retry interval for posting a Connect 4 board; defaults to 5 minutes.                        |
 | `STEM_CONNECT4_IDLE_TIMEOUT_MS`             | No                  | Time before an idle Connect 4 round is reset; defaults to 3 days.                           |
+| `STEM_GLOBAL_CHASE_ENABLED`                 | No                  | Enable the cooperative Global Chase channel game; defaults to `false`.                      |
+| `STEM_GLOBAL_CHASE_CHANNEL_ID`              | When enabled        | Discord channel where Global Chase posts its case board.                                    |
+| `STEM_GLOBAL_CHASE_RETRY_INTERVAL_MS`       | No                  | Retry interval for posting a Global Chase case; defaults to 5 minutes.                      |
+| `STEM_GLOBAL_CHASE_MAX_STRIKES`             | No                  | Wrong destination choices before a case ends; defaults to `3`.                              |
+| `STEM_GLOBAL_CHASE_IDLE_TIMEOUT_MS`         | No                  | Time before an idle Global Chase case is reset; defaults to 3 days.                         |
 | `STEM_ASK_ENABLED`                          | No                  | Enable mention-based AI STEM answers; defaults to `false`.                                  |
 | `STEM_ASK_MAX_QUESTION_LENGTH`              | No                  | Maximum question length; defaults to 500 characters.                                        |
 | `STEM_ASK_USER_COOLDOWN_SECONDS`            | No                  | Minimum time between a user's questions; defaults to 30 seconds.                            |
