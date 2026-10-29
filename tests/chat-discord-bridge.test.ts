@@ -367,6 +367,46 @@ describe('Minecraft chat Discord bridge', () => {
     expect(send).toHaveBeenCalledTimes(cases.length);
   });
 
+  it('routes server lifecycle and server-message events to their configured channels', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const bridge = new HttpChatDiscordBridge({
+      config: {
+        ...config(43130),
+        serverStartChannelId: 'startup-channel',
+        serverStopChannelId: 'shutdown-channel',
+        serverMessageChannelId: 'server-message-channel',
+      },
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const events = [
+      ['minecraft.server_start', 'startup-channel'],
+      ['minecraft.server_stop', 'shutdown-channel'],
+      ['minecraft.server_message', 'server-message-channel'],
+    ] as const;
+    for (const [index, [event, channelId]] of events.entries()) {
+      const data = event === 'minecraft.server_message' ? { message: 'Maintenance soon' } : {};
+      const response = await request(
+        JSON.stringify({
+          event,
+          event_id: `routed-event-${index}`,
+          data,
+        }),
+        undefined,
+        43130,
+      );
+
+      expect(response.status).toBe(200);
+      expect(send.mock.calls[index]?.[0]).toBe(channelId);
+    }
+  });
+
   it('rejects missing or invalid bearer tokens before reading the event', async () => {
     const state = new MemoryStateStore();
     const publisher: ChatDiscordBridgePublisher = { send: vi.fn() };

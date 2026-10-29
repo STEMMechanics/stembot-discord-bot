@@ -26,7 +26,12 @@ import type { AppLogger } from '../logging/logger.js';
 import { configureNetworkDefaults } from '../network.js';
 import type { AdminReminderService } from '../services/admin-reminders.js';
 import type { ButtonGameBoard, ButtonGameInteraction } from '../services/button-games.js';
-import type { StemCodeFixMessage, StemCodeFixService } from '../services/code-fix.js';
+import {
+  isStemCodeFixConfirmRequest,
+  isStemCodeFixSkipRequest,
+  type StemCodeFixMessage,
+  type StemCodeFixService,
+} from '../services/code-fix.js';
 import type { ConnectFourService } from '../services/connect-four.js';
 import type { GlobalChaseMessage, GlobalChaseService } from '../services/global-chase.js';
 import type { NumberGameMessage, NumberGameService } from '../services/number-game.js';
@@ -40,7 +45,11 @@ import type {
   CountingChainService,
 } from '../services/counting-chain.js';
 import type { StemAskMessage, StemAskService } from '../services/stem-ask.js';
-import type { StemScrambleMessage, StemScrambleService } from '../services/scramble.js';
+import {
+  isStemScrambleSkipRequest,
+  type StemScrambleMessage,
+  type StemScrambleService,
+} from '../services/scramble.js';
 import {
   isStemQuizSkipRequest,
   type StemQuizMessage,
@@ -636,7 +645,9 @@ export function createDiscordGateway(
       if (
         message.channelId !== config.scramble.channelId ||
         message.author.bot ||
-        (botMentioned && !isMinigameHintRequest(gameContent))
+        (botMentioned &&
+          !isMinigameHintRequest(gameContent) &&
+          !isStemScrambleSkipRequest(gameContent))
       ) {
         return;
       }
@@ -765,10 +776,17 @@ export function createDiscordGateway(
 
   if (dependencies.codeFix && config.codeFix.enabled && config.codeFix.channelId) {
     client.on(Events.MessageCreate, (message) => {
+      const botMentioned = messageMentionsBot(message, client.user?.id);
+      const gameContent = client.user
+        ? removeBotMentions(message.content, client.user.id)
+        : message.content;
       if (
         message.channelId !== config.codeFix.channelId ||
         message.author.bot ||
-        messageMentionsBot(message, client.user?.id)
+        (botMentioned &&
+          !isMinigameHintRequest(gameContent) &&
+          !isStemCodeFixSkipRequest(gameContent) &&
+          !isStemCodeFixConfirmRequest(gameContent))
       ) {
         return;
       }
@@ -784,7 +802,7 @@ export function createDiscordGateway(
       );
 
       void dependencies
-        .codeFix!.handleMessage(toStemCodeFixMessage(message))
+        .codeFix!.handleMessage(toStemCodeFixMessage(message, client.user?.id))
         .catch((error: unknown) => {
           logger.warn(
             { err: error, channelId: message.channelId, messageId: message.id },
@@ -815,9 +833,14 @@ export function createDiscordGateway(
         message.channelId === config.wordChain.channelId;
       const isQuizSkipRequest =
         message.channelId === config.quiz.channelId && isStemQuizSkipRequest(question);
+      const isScrambleSkipRequest =
+        message.channelId === config.scramble.channelId && isStemScrambleSkipRequest(question);
       if (
         isMinigameChannel &&
-        (!supportsHintRequests || isMinigameHintRequest(question) || isQuizSkipRequest)
+        (!supportsHintRequests ||
+          isMinigameHintRequest(question) ||
+          isQuizSkipRequest ||
+          isScrambleSkipRequest)
       ) {
         return;
       }
@@ -1199,15 +1222,21 @@ function toGlobalChaseMessage(message: Message): GlobalChaseMessage {
   };
 }
 
-function toStemCodeFixMessage(message: Message): StemCodeFixMessage {
+function toStemCodeFixMessage(message: Message, botUserId?: string): StemCodeFixMessage {
   return {
     id: message.id,
     channelId: message.channelId,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
-    content: message.content,
+    content: botUserId ? removeBotMentions(message.content, botUserId) : message.content,
     react: async (emoji: string): Promise<void> => {
       await message.react(emoji);
+    },
+    reply: async (content: string): Promise<void> => {
+      await message.reply({
+        content,
+        allowedMentions: { parse: [] },
+      });
     },
   };
 }

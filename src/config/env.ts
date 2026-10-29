@@ -168,6 +168,10 @@ const environmentSchema = z.object({
   STEMCRAFT_STATUS_URL: z.string().trim().url().default('http://play.stemcraft.com.au:8950/status'),
   STEMCRAFT_STATUS_TOKEN: optionalSecret,
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
+  STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED: booleanFromEnvironment(false),
+  STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID: optionalDiscordId,
+  STEMCRAFT_SERVER_OFFLINE_ALERT_THRESHOLD_MS: positiveMilliseconds(300000, 31536000000),
+  STEMCRAFT_SERVER_OFFLINE_ALERT_POLL_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
   UPTIME_KUMA_ENABLED: booleanFromEnvironment(false),
   UPTIME_KUMA_STATUS_PAGE_URL: optionalUrl,
   UPTIME_KUMA_POLL_INTERVAL_MS: positiveMilliseconds(60000, 86400000),
@@ -290,6 +294,9 @@ const environmentSchema = z.object({
   CHAT_DISCORD_BRIDGE_PATH: z.string().trim().min(1).default('/minecraft/event'),
   CHAT_DISCORD_BRIDGE_BEARER_TOKEN: optionalSecret,
   CHAT_DISCORD_BRIDGE_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_SERVER_START_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_SERVER_STOP_CHANNEL_ID: optionalDiscordId,
+  CHAT_DISCORD_BRIDGE_SERVER_MESSAGE_CHANNEL_ID: optionalDiscordId,
   CHAT_DISCORD_BRIDGE_STEMCRAFT_URL: optionalUrl,
   CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: positiveInteger(64 * 1024, 2 * 1024 * 1024),
   STEM_ASK_ENABLED: booleanFromEnvironment(false),
@@ -332,6 +339,12 @@ export interface AppConfig {
     statusUrl: string;
     requestTimeoutMs: number;
     token?: string;
+  };
+  serverStatus: {
+    offlineAlertsEnabled: boolean;
+    offlineAlertChannelId?: string;
+    offlineAlertThresholdMs: number;
+    pollIntervalMs: number;
   };
   uptime: {
     enabled: boolean;
@@ -443,6 +456,9 @@ export interface AppConfig {
     path: string;
     bearerToken?: string;
     channelId?: string;
+    serverStartChannelId?: string;
+    serverStopChannelId?: string;
+    serverMessageChannelId?: string;
     minecraftUrl?: string;
     maxBodyBytes: number;
   };
@@ -543,6 +559,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (values.UPTIME_KUMA_ENABLED && !values.DISCORD_UPTIME_STATUS_CHANNEL_ID) {
     throw new Error(
       'DISCORD_UPTIME_STATUS_CHANNEL_ID is required when UPTIME_KUMA_ENABLED is true',
+    );
+  }
+
+  if (
+    values.STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED &&
+    !values.STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID
+  ) {
+    throw new Error(
+      'STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID is required when STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED is true',
     );
   }
 
@@ -683,6 +708,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       requestTimeoutMs: values.STEMCRAFT_REQUEST_TIMEOUT_MS,
       ...(values.STEMCRAFT_STATUS_TOKEN ? { token: values.STEMCRAFT_STATUS_TOKEN } : {}),
     },
+    serverStatus: {
+      offlineAlertsEnabled: values.STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED,
+      ...(values.STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID
+        ? { offlineAlertChannelId: values.STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID }
+        : {}),
+      offlineAlertThresholdMs: values.STEMCRAFT_SERVER_OFFLINE_ALERT_THRESHOLD_MS,
+      pollIntervalMs: values.STEMCRAFT_SERVER_OFFLINE_ALERT_POLL_INTERVAL_MS,
+    },
     uptime: {
       enabled: values.UPTIME_KUMA_ENABLED,
       ...(values.UPTIME_KUMA_STATUS_PAGE_URL
@@ -810,6 +843,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : {}),
       ...(values.CHAT_DISCORD_BRIDGE_CHANNEL_ID
         ? { channelId: values.CHAT_DISCORD_BRIDGE_CHANNEL_ID }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_SERVER_START_CHANNEL_ID
+        ? { serverStartChannelId: values.CHAT_DISCORD_BRIDGE_SERVER_START_CHANNEL_ID }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_SERVER_STOP_CHANNEL_ID
+        ? { serverStopChannelId: values.CHAT_DISCORD_BRIDGE_SERVER_STOP_CHANNEL_ID }
+        : {}),
+      ...(values.CHAT_DISCORD_BRIDGE_SERVER_MESSAGE_CHANNEL_ID
+        ? { serverMessageChannelId: values.CHAT_DISCORD_BRIDGE_SERVER_MESSAGE_CHANNEL_ID }
         : {}),
       ...(values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL
         ? { minecraftUrl: values.CHAT_DISCORD_BRIDGE_STEMCRAFT_URL }

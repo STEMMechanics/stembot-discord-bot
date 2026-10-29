@@ -24,7 +24,9 @@ GuildMessages. Give it View Channel, Read Message History and Send Messages in
 each configured notification, counting or counting-info channel, Add Reactions
 in the counting channel, and the permissions required to use application
 commands. If an existing counting-info message is configured, it must be a
-message authored by STEMBot.
+message authored by STEMBot. Give the bot View Channel, Read Message History
+and Send Messages in each configured Minecraft lifecycle, server-message and
+extended-offline channel as well.
 
 ## Configure the host
 
@@ -60,6 +62,39 @@ The default WORKSHOP_ANNOUNCE_INITIAL_SYNC=false records the current feed
 without sending a startup burst of lifecycle announcements. Set it to true
 only when an initial announcement is intentional. The first synchronization
 can still deliver reminders that are already due for future workshops.
+
+## TrueNAS Custom App YAML
+
+The application settings do not need to be entered one by one in the TrueNAS
+UI. Docker Compose supports a service-level `env_file`, and the repository
+includes [truenas-custom-app.yml](truenas-custom-app.yml) as a ready-to-paste
+configuration.
+
+1. Create a dataset directory such as `/mnt/tank/appdata/stembot`, with a
+   `data` subdirectory for persistent state.
+2. Copy `.env.example` to `/mnt/tank/appdata/stembot/.env`, replace the
+   placeholders, and protect the file with the dataset ACLs. The file contains
+   the Discord token and may contain other bearer tokens.
+3. Change the two `/mnt/tank/appdata/stembot` paths in
+   `truenas-custom-app.yml` if necessary.
+4. In TrueNAS, choose **Apps > Discover > Install via YAML** and paste the
+   template contents into **Custom Config**.
+
+The `env_file` path is a host path used by Docker Compose; it does not need to
+be mounted into `/app`. `NODE_ENV` and `STATE_PATH` remain explicit because
+the TrueNAS deployment should always run in production and store state in the
+mounted data directory. If the Minecraft bridge is enabled with a non-default
+`CHAT_DISCORD_BRIDGE_PORT`, update the `8080:8080` port mapping to match.
+
+If the deployment checkout is available on TrueNAS, an even smaller Custom
+Config is possible with Docker Compose's external include support:
+
+    include:
+      - path: /mnt/tank/appdata/stembot/docker-compose.yml
+
+Keep that `docker-compose.yml` and its `.env` file in the same directory. The
+existing Compose file already declares `env_file: .env`, the persistent data
+mount, DNS settings, and the container hardening options.
 
 ## Validate and start
 

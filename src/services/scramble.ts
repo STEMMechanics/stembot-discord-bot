@@ -289,6 +289,11 @@ export class PersistentStemScrambleService implements StemScrambleService {
       return;
     }
 
+    if (isStemScrambleSkipRequest(message.content)) {
+      await this.processSkipRequest(rootState, state, round, message);
+      return;
+    }
+
     state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
     const answer = normalizeScrambleText(message.content);
     if (answer !== normalizeScrambleText(round.word)) {
@@ -401,6 +406,31 @@ export class PersistentStemScrambleService implements StemScrambleService {
     writeStemScrambleState(rootState, state);
     await this.dependencies.state.save(rootState);
     await this.replySafely(message, `💡 Another hint: ${hint}`);
+  }
+
+  private async processSkipRequest(
+    rootState: JsonState,
+    state: StemScrambleState,
+    round: StemScrambleRoundState,
+    message: StemScrambleMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    state.round = null;
+    writeStemScrambleState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.publishNextRound(
+      rootState,
+      state,
+      `⏭️ Scramble skipped. The answer was **${round.word}**.`,
+    );
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        roundNumber: round.roundNumber,
+      },
+      'STEM scramble round skipped by a player',
+    );
   }
 
   private async publishNextRound(
@@ -563,9 +593,17 @@ export function formatStemScramble(
     `🔤 **Scramble ${roundNumber}**`,
     `Unscramble: \`${scrambled}\``,
     `Hint: ${word.hint}`,
+    '*You can ask for a hint or skip this scramble.*',
   ]
     .filter((section): section is string => Boolean(section))
     .join('\n\n');
+}
+
+export function isStemScrambleSkipRequest(content: string): boolean {
+  const normalized = normalizeScrambleCommand(content);
+  return /^(?:skip|skip scramble|skip this scramble|skip word scramble|skip this word scramble)$/.test(
+    normalized,
+  );
 }
 
 export function scrambleWord(word: string, random: () => number = Math.random): string {
@@ -696,6 +734,14 @@ function normalizeScrambleText(value: string): string {
     .normalize('NFKC')
     .toLocaleLowerCase()
     .replace(/[^a-z]+/g, '');
+}
+
+function normalizeScrambleCommand(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function hasSameLetters(left: string, right: string): boolean {

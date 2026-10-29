@@ -5,6 +5,7 @@ import type {
   CodeFixChallenge,
   CodeFixEngine,
   CodeFixDifficulty,
+  CodeFixConfirmationResult,
 } from '../integrations/openai-code-fix.js';
 import type { AppLogger } from '../logging/logger.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
@@ -15,6 +16,7 @@ import {
   type MinigameLeaderboardEntry,
 } from './minigame-leaderboards.js';
 import type { UserLevelService } from './user-levels.js';
+import { isMinigameHintRequest } from './minigame-hints.js';
 
 export interface StemCodeFixConfig {
   enabled: boolean;
@@ -35,6 +37,7 @@ export interface StemCodeFixMessage {
   authorIsBot: boolean;
   content: string;
   react(emoji: string): Promise<void>;
+  reply?(content: string): Promise<void>;
 }
 
 export interface StemCodeFixPublisher {
@@ -55,6 +58,7 @@ interface StemCodeFixChallengeState extends CodeFixChallenge {
   messageId: string;
   challengeNumber: number;
   wrongAttempts: number;
+  hints: string[];
   askedAt: string;
 }
 
@@ -92,11 +96,18 @@ const MAX_RECENT_CHALLENGES = 20;
 const MAX_PROCESSED_MESSAGE_IDS = 500;
 const MAX_GENERATION_ATTEMPTS = 3;
 const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
+const MAX_HINTS_PER_CHALLENGE = 5;
+const CODE_FIX_HINT_USER_COOLDOWN_MS = 5_000;
+const CODE_FIX_HINT_GLOBAL_WINDOW_MS = 60_000;
+const CODE_FIX_HINT_GLOBAL_LIMIT = 30;
 
 export class PersistentStemCodeFixService implements StemCodeFixService {
   private readonly currentTime: () => Date;
   private readonly idFactory: () => string;
   private eventQueue: Promise<void> = Promise.resolve();
+  private readonly lastHintAt = new Map<string, number>();
+  private hintWindowStartedAt = 0;
+  private hintWindowRequestCount = 0;
 
   public constructor(private readonly dependencies: StemCodeFixServiceDependencies) {
     this.currentTime = dependencies.clock ?? (() => new Date());
@@ -220,6 +231,21 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
       return;
     }
 
+    if (isMinigameHintRequest(message.content)) {
+      await this.processHintRequest(rootState, state, challenge, message);
+      return;
+    }
+
+    if (isStemCodeFixSkipRequest(message.content)) {
+      await this.processSkipRequest(rootState, state, challenge, message);
+      return;
+    }
+
+    if (isStemCodeFixConfirmRequest(message.content)) {
+      await this.processConfirmRequest(rootState, state, challenge, message);
+      return;
+    }
+
     let result: CodeFixAnswerResult;
     try {
       result = await this.evaluateAnswer(challenge, message.content);
@@ -303,6 +329,141 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
     );
   }
 
+  private async processHintRequest(
+    rootState: JsonState,
+    state: StemCodeFixState,
+    challenge: StemCodeFixChallengeState,
+    message: StemCodeFixMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemCodeFixState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    if (challenge.hints.length >= MAX_HINTS_PER_CHALLENGE) {
+      await this.replySafely(
+        message,
+        '💡 I have given all the extra clues I have for this challenge. Have another look at the code!',
+      );
+      return;
+    }
+
+    if (!this.canRequestHint(message.authorId)) {
+      await this.replySafely(
+        message,
+        '💡 Give me a moment to think before asking for another clue.',
+      );
+      return;
+    }
+
+    let hint: string | undefined;
+    if (this.dependencies.engine.generateHint) {
+      try {
+        const generatedHint = (
+          await this.dependencies.engine.generateHint(challenge, challenge.hints)
+        ).trim();
+        if (isUsableCodeFixHint(generatedHint, challenge, challenge.hints)) {
+          hint = generatedHint;
+        }
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, challengeId: challenge.id },
+          'STEM code-fix hint could not be generated; using a local clue',
+        );
+      }
+    }
+
+    if (!hint) {
+      hint = createFallbackCodeFixHint(challenge);
+    }
+
+    challenge.hints = [...challenge.hints, hint].slice(-MAX_HINTS_PER_CHALLENGE);
+    writeStemCodeFixState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.replySafely(message, `💡 Hint: ${hint}`);
+  }
+
+  private async processSkipRequest(
+    rootState: JsonState,
+    state: StemCodeFixState,
+    challenge: StemCodeFixChallengeState,
+    message: StemCodeFixMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    state.challenge = null;
+    writeStemCodeFixState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.publishNextChallenge(
+      rootState,
+      state,
+      `⏭️ Challenge skipped. The fix was: **${challenge.answer}**.\n${challenge.explanation}`,
+    );
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        challengeId: challenge.id,
+      },
+      'STEM code-fix challenge skipped by a player',
+    );
+  }
+
+  private async processConfirmRequest(
+    rootState: JsonState,
+    state: StemCodeFixState,
+    challenge: StemCodeFixChallengeState,
+    message: StemCodeFixMessage,
+  ): Promise<void> {
+    state.processedMessageIds = rememberMessageId(state.processedMessageIds, message.id);
+    writeStemCodeFixState(rootState, state);
+    await this.dependencies.state.save(rootState);
+
+    let result: CodeFixConfirmationResult = 'confirmed';
+    if (this.dependencies.engine.confirmChallenge) {
+      try {
+        result = await this.dependencies.engine.confirmChallenge(challenge);
+      } catch (error: unknown) {
+        this.dependencies.logger.warn(
+          { err: error, channelId: message.channelId, challengeId: challenge.id },
+          'STEM code-fix challenge could not be confirmed',
+        );
+        result = 'unclear';
+      }
+    }
+
+    if (result === 'confirmed') {
+      await this.replySafely(
+        message,
+        '✅ Confirmed — this challenge contains one intended bug. Look for the line or expression that does not match the task.',
+      );
+      return;
+    }
+
+    if (result === 'unclear') {
+      await this.replySafely(
+        message,
+        '🤔 I could not confidently confirm this challenge. It will stay open while you inspect it.',
+      );
+      return;
+    }
+
+    state.challenge = null;
+    writeStemCodeFixState(rootState, state);
+    await this.dependencies.state.save(rootState);
+    await this.publishNextChallenge(
+      rootState,
+      state,
+      '🔄 This challenge did not contain one clear bug, so it has been replaced.',
+    );
+    this.dependencies.logger.info(
+      {
+        channelId: message.channelId,
+        messageId: message.id,
+        challengeId: challenge.id,
+      },
+      'STEM code-fix challenge failed the bug confirmation and was replaced',
+    );
+  }
+
   private async publishNextChallenge(
     rootState: JsonState,
     state: StemCodeFixState,
@@ -355,6 +516,7 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
       messageId,
       challengeNumber,
       wrongAttempts: 0,
+      hints: [],
       askedAt: this.currentTime().toISOString(),
     };
     state.nextChallengeNumber += 1;
@@ -391,6 +553,46 @@ export class PersistentStemCodeFixService implements StemCodeFixService {
     }
   }
 
+  private canRequestHint(authorId: string): boolean {
+    const now = Date.now();
+    const lastRequestedAt = this.lastHintAt.get(authorId);
+    if (lastRequestedAt && now - lastRequestedAt < CODE_FIX_HINT_USER_COOLDOWN_MS) {
+      return false;
+    }
+
+    if (now - this.hintWindowStartedAt >= CODE_FIX_HINT_GLOBAL_WINDOW_MS) {
+      this.hintWindowStartedAt = now;
+      this.hintWindowRequestCount = 0;
+    }
+
+    if (this.hintWindowRequestCount >= CODE_FIX_HINT_GLOBAL_LIMIT) {
+      return false;
+    }
+
+    this.lastHintAt.set(authorId, now);
+    this.hintWindowRequestCount += 1;
+    return true;
+  }
+
+  private async replySafely(message: StemCodeFixMessage, content: string): Promise<void> {
+    if (!message.reply) {
+      this.dependencies.logger.warn(
+        { channelId: message.channelId, messageId: message.id },
+        'STEM code-fix reply could not be sent because the message adapter has no reply method',
+      );
+      return;
+    }
+
+    try {
+      await message.reply(content);
+    } catch (error: unknown) {
+      this.dependencies.logger.warn(
+        { err: error, channelId: message.channelId, messageId: message.id },
+        'STEM code-fix reply could not be sent',
+      );
+    }
+  }
+
   private isEnabled(): boolean {
     return this.dependencies.config.enabled && Boolean(this.dependencies.config.channelId);
   }
@@ -423,13 +625,58 @@ export function formatStemCodeFix(
     challenge.prompt,
     `\`\`\`${challenge.language}\n${code}\n\`\`\``,
     'What should be fixed?',
+    '*You can ask for a hint, skip the challenge, or type `confirm` to check that it has a real bug.*',
   ]
     .filter((section): section is string => Boolean(section))
     .join('\n\n');
 }
 
+export function isStemCodeFixSkipRequest(content: string): boolean {
+  const normalized = normalizeCodeFixCommand(content);
+  return /^(?:skip|skip challenge|skip this challenge|skip code fix)$/.test(normalized);
+}
+
+export function isStemCodeFixConfirmRequest(content: string): boolean {
+  const normalized = normalizeCodeFixCommand(content);
+  return /^(?:confirm|confirm bug|confirm this bug|confirm there is a bug)$/.test(normalized);
+}
+
 function normalizeCodeFixAnswer(value: string): string {
   return value.toLocaleLowerCase().replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeCodeFixCommand(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function isUsableCodeFixHint(
+  hint: string,
+  challenge: StemCodeFixChallengeState,
+  previousHints: readonly string[],
+): boolean {
+  const normalizedHint = normalizeCodeFixAnswer(hint);
+  if (normalizedHint.length < 5 || normalizedHint.length > 280) {
+    return false;
+  }
+
+  if (
+    previousHints.some((previousHint) => normalizeCodeFixAnswer(previousHint) === normalizedHint)
+  ) {
+    return false;
+  }
+
+  const forbiddenAnswers = [challenge.answer, ...challenge.acceptedAnswers]
+    .map(normalizeCodeFixAnswer)
+    .filter((answer) => answer.length >= 3);
+  return !forbiddenAnswers.some((answer) => normalizedHint.includes(answer));
+}
+
+function createFallbackCodeFixHint(_challenge: StemCodeFixChallengeState): string {
+  return 'Compare each operation, condition, and value with what the task says the code should do. One line does not match the intended behaviour.';
 }
 
 function normalizeCodeSample(value: string): string {
@@ -551,6 +798,7 @@ function readChallengeState(value: unknown): StemCodeFixChallengeState | null {
     explanation: value.explanation,
     challengeNumber: value.challengeNumber,
     wrongAttempts: value.wrongAttempts,
+    hints: readHintList(value.hints),
     askedAt: value.askedAt,
   };
 }
@@ -567,6 +815,17 @@ function isChallengeHistory(value: unknown): value is StemCodeFixChallengeHistor
     typeof value.answer === 'string' &&
     value.answer.trim().length > 0
   );
+}
+
+function readHintList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((hint): hint is string => typeof hint === 'string' && hint.trim().length > 0)
+    .map((hint) => hint.trim())
+    .slice(-MAX_HINTS_PER_CHALLENGE);
 }
 
 function createInitialState(): StemCodeFixState {

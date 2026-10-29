@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ScrambleWord, ScrambleWordGenerator } from '../src/integrations/openai-scramble.js';
 import {
   formatStemScramble,
+  isStemScrambleSkipRequest,
   PersistentStemScrambleService,
   scrambleWord,
   type StemScrambleConfig,
@@ -155,6 +156,38 @@ describe('STEM scramble service', () => {
           wrongAttempts: 0,
           hints: ['A clue for circuit.', 'It can carry electricity around a loop.'],
         },
+      },
+    });
+  });
+
+  it('skips the active round, reveals the answer and advances without a wrong guess', async () => {
+    const state = new MemoryStateStore();
+    const generator: ScrambleWordGenerator = {
+      generateWord: vi
+        .fn()
+        .mockResolvedValueOnce(word('circuit'))
+        .mockResolvedValueOnce(word('robot')),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('scramble-message-1')
+        .mockResolvedValueOnce('scramble-message-2'),
+    };
+    const service = createService(state, generator, publisher);
+    const skip = createMessage('user-1', 'skip-1', 'skip');
+
+    await service.initialize();
+    await service.handleMessage(skip);
+
+    expect(skip.react).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '⏭️ Scramble skipped. The answer was **circuit**.',
+    );
+    expect(state.state).toMatchObject({
+      stemScramble: {
+        round: { word: 'robot', wrongAttempts: 0 },
       },
     });
   });
@@ -350,7 +383,14 @@ describe('STEM scramble service', () => {
   it('keeps the scrambled output different from the source word', () => {
     expect(scrambleWord('robot', () => 0.9)).not.toBe('robot');
     expect(formatStemScramble(word('robot', 'A machine that can sense and act.'), 'tobor', 4)).toBe(
-      '🔤 **Scramble 4**\n\nUnscramble: `tobor`\n\nHint: A machine that can sense and act.',
+      '🔤 **Scramble 4**\n\nUnscramble: `tobor`\n\nHint: A machine that can sense and act.\n\n*You can ask for a hint or skip this scramble.*',
     );
   });
+
+  it.each(['skip', 'skip scramble', 'skip this scramble', 'skip word scramble'])(
+    'recognises %j as a skip request',
+    (content) => {
+      expect(isStemScrambleSkipRequest(content)).toBe(true);
+    },
+  );
 });

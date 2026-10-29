@@ -1,0 +1,35 @@
+# TrueNAS Custom App YAML.
+#
+# Before installing, copy .env.example to the host path used below, replace the
+# placeholder values, and protect the file with the appropriate dataset ACLs.
+# Change both /mnt/tank/appdata/stembot paths to match the TrueNAS dataset.
+#
+# env_file is read by Docker on the TrueNAS host and its entries are injected
+# into the container. It is not necessary to duplicate the application
+# settings in the TrueNAS Environment Variables section.
+services:
+  stembot:
+    image: ghcr.io/stemmechanics/stembot-discord-bot:latest
+    pull_policy: always
+    env_file:
+      - /mnt/tank/appdata/stembot/.env
+    environment:
+      NODE_ENV: production
+      STATE_PATH: /app/data/state.json
+    ports:
+      - '8080:8080'
+    dns:
+      - '1.1.1.1'
+      - '9.9.9.9'
+    init: true
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    volumes:
+      - /mnt/tank/appdata/stembot/data:/app/data
