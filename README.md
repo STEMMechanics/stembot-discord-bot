@@ -212,7 +212,8 @@ round. Incorrect guesses receive `❌`; after five incorrect guesses the answer
 is revealed and the game moves on. The last 50 words are retained and sent as
 exclusions so the generator does not quickly repeat a word; exact duplicates
 are also rejected locally and regenerated.
-The active round is persistent across restarts. Moderators can use
+Players can type `hint` for another clue or `skip` to reveal the answer and
+move on. The active round is persistent across restarts. Moderators can use
 `/scramble reset` to discard a stuck round and publish a replacement.
 
 Set `STEM_SCRAMBLE_CHANNEL_ID` to the channel where the game should run. The
@@ -265,9 +266,11 @@ canonical answers and equivalent variants are accepted locally; other
 natural-language explanations are sent to OpenAI for a structured
 `correct`, `incorrect` or `unclear` decision. Unclear answers do not consume an
 attempt. After the wrong-answer limit, the fix and teaching explanation are
-shown and the next challenge starts. `/code-fix reset` is available to
-moderators. The challenge title and fix history are retained to reduce
-repetition.
+shown and the next challenge starts. Players can type `hint` for a clue,
+`skip` to reveal the fix and move on, or `confirm` to ask STEMBot to verify
+that the challenge contains one real bug; invalid challenges are replaced.
+`/code-fix reset` is available to moderators. The challenge title and fix
+history are retained to reduce repetition.
 
 ### Mention-based STEM answers
 
@@ -276,8 +279,9 @@ question in any channel. STEMBot answers with the shared OpenAI model without
 storing the question text. Empty or oversized questions are ignored. A message
 that mentions STEMBot is normally excluded from counting, quiz, scramble, word-chain,
 Mystery Lab and Code Fix answer processing so the bot can answer it safely
-anywhere. In the quiz, scramble and word-chain channels, `@STEMBot hint`
-continues to route to the game hint behavior; quiz also accepts `@STEMBot skip`.
+anywhere. In the quiz, scramble, word-chain and Code Fix channels, `@STEMBot hint`
+continues to route to the game hint behavior; quiz, scramble and Code Fix also
+accept `@STEMBot skip`, while Code Fix accepts `@STEMBot confirm`.
 The service allows one request per user every 30 seconds, ten requests per user
 per UTC day, and 100 requests across the bot per UTC day by default. Requests
 that reach a limit receive a short playful cooldown or quota response without
@@ -364,9 +368,11 @@ When `CHAT_DISCORD_BRIDGE_ENABLED=true`, STEMBot listens for authenticated
 `POST` requests on `CHAT_DISCORD_BRIDGE_HOST`, `CHAT_DISCORD_BRIDGE_PORT` and
 `CHAT_DISCORD_BRIDGE_PATH`. Put that listener behind the public HTTPS URL used
 by the Minecraft plugin and keep the bearer token in the plugin secret store.
-Every accepted event is posted to `CHAT_DISCORD_BRIDGE_CHANNEL_ID`; the
-incoming `server` and `channel` values are accepted but the configured Discord
-channel remains authoritative. The `X-STEMCraft-Event-Id` header must match the
+Every accepted event uses `CHAT_DISCORD_BRIDGE_CHANNEL_ID` by default; the
+incoming `server` and `channel` values are accepted but configured Discord
+channels remain authoritative. `minecraft.server_start`,
+`minecraft.server_stop`, and `minecraft.server_message` can each use their own
+optional channel override. The `X-STEMCraft-Event-Id` header must match the
 JSON `event_id` when supplied, and retries with an already delivered event ID
 are acknowledged without a second Discord message. The receiver accepts
 `minecraft.chat`, `minecraft.player_join`, `minecraft.player_quit`,
@@ -387,6 +393,15 @@ events use compact embeds; command, minigame, server lifecycle, and server
 message events use structured embeds. Server messages are rendered as a bold
 message-only amber embed, with no additional label. Embed mentions are disabled,
 and valid `occurred_at` timestamps appear in the embed timestamp.
+
+Set `STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED=true` with a public
+`STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID` to enable the separate extended
+offline alert. STEMBot starts its own timer when the status endpoint reports the
+server offline, posts one compact red `Server offline` embed after
+`STEMCRAFT_SERVER_OFFLINE_ALERT_THRESHOLD_MS` (5 minutes by default), and posts
+one green `Server online` embed when the server returns. Short outages are
+silent, the feature is disabled by default, and the timer/alert state survives
+restarts. Status endpoint errors are treated as offline for this alert.
 The recommended path is `/minecraft/event`; requests with a trailing slash are
 accepted as well. Existing deployments can keep `/minecraft/chat` when that
 path is explicitly configured in both the bot and the Minecraft plugin.
@@ -638,6 +653,18 @@ npm run validate
 | `NODE_ENV`                                  | No                  | `development`, `test`, or `production`; defaults to `production`.                           |
 | `LOG_LEVEL`                                 | No                  | Pino level; defaults to `info`.                                                             |
 
+### STEMCraft server and bridge options
+
+| Variable                                          | Required     | Purpose                                                                            |
+| ------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------- |
+| `STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED`          | No           | Enable delayed public offline/recovery messages; defaults to `false`.              |
+| `STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID`       | When enabled | Public channel for delayed server offline/online embeds.                           |
+| `STEMCRAFT_SERVER_OFFLINE_ALERT_THRESHOLD_MS`     | No           | Offline duration before alerting; defaults to 5 minutes.                           |
+| `STEMCRAFT_SERVER_OFFLINE_ALERT_POLL_INTERVAL_MS` | No           | Offline-alert status poll interval; defaults to 60 seconds.                        |
+| `CHAT_DISCORD_BRIDGE_SERVER_START_CHANNEL_ID`     | No           | Override channel for `minecraft.server_start`; falls back to the bridge channel.   |
+| `CHAT_DISCORD_BRIDGE_SERVER_STOP_CHANNEL_ID`      | No           | Override channel for `minecraft.server_stop`; falls back to the bridge channel.    |
+| `CHAT_DISCORD_BRIDGE_SERVER_MESSAGE_CHANNEL_ID`   | No           | Override channel for `minecraft.server_message`; falls back to the bridge channel. |
+
 The previous `STEM_WORD_REVEAL_*` environment names remain accepted as legacy aliases during migration.
 The loader validates Discord IDs, URLs, positive intervals, booleans, and the IANA timezone. Blank optional values are treated as unset.
 
@@ -647,7 +674,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft event IDs and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft event IDs, server offline-alert state and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:
@@ -742,6 +769,12 @@ GitHub Actions workflow on `main` and version tags. Set `STEMBOT_IMAGE_TAG` to
 an immutable SHA or release tag for controlled rollouts, and run `docker login
 ghcr.io` first if the package is private.
 Use a GitHub token with `read:packages` permission for a private package.
+
+For a TrueNAS Custom App installed from YAML, use
+[truenas-custom-app.yml](truenas-custom-app.yml). It passes a protected host
+`.env` file through Compose's `env_file` setting, so the TrueNAS YAML does not
+need to repeat the application's environment variables. The deployment guide
+contains the setup steps and an external-Compose-file alternative.
 
 The Compose service uses the Node.js 24 slim image, runs as the unprivileged `node` user, mounts only the state directory for writes, uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, and restarts unless stopped. It uses explicit configurable DNS resolvers by default (`1.1.1.1` and `9.9.9.9`); set `STEMBOT_DNS_PRIMARY` and `STEMBOT_DNS_SECONDARY` when the deployment network requires different resolvers. Give the dataset to the container user with permissions that allow the atomic state-file rename.
 

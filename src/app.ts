@@ -44,6 +44,10 @@ import { createStemScrambleService, type StemScrambleService } from './services/
 import { createStemQuizService, type StemQuizService } from './services/stem-quiz.js';
 import { createStemWordChainService, type StemWordChainService } from './services/word-chain.js';
 import { createUptimeStatusService, type UptimeStatusService } from './services/uptime-status.js';
+import {
+  createServerStatusNotificationService,
+  type ServerStatusNotificationService,
+} from './services/server-status-notifications.js';
 import { createChatDiscordBridge, type ChatDiscordBridge } from './http/chat-discord-bridge.js';
 import { createStemCodeFixService, type StemCodeFixService } from './services/code-fix.js';
 import { createNumberGameService, type NumberGameService } from './services/number-game.js';
@@ -72,6 +76,7 @@ export interface ApplicationDependencies {
   stemcraft: StemCraftIntegration;
   uptime?: UptimeKumaIntegration;
   uptimeStatus?: UptimeStatusService;
+  serverStatusNotifications?: ServerStatusNotificationService;
   countingChain?: CountingChainService;
   quiz?: StemQuizService;
   scramble?: StemScrambleService;
@@ -120,6 +125,31 @@ export function createApplication(
       : undefined);
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
   const discordGatewayRef: { current?: DiscordGateway } = {};
+  const serverStatusNotifications =
+    dependencies?.serverStatusNotifications ??
+    (config.serverStatus.offlineAlertsEnabled && config.serverStatus.offlineAlertChannelId
+      ? createServerStatusNotificationService({
+          stemcraft,
+          state,
+          logger,
+          config: {
+            enabled: config.serverStatus.offlineAlertsEnabled,
+            channelId: config.serverStatus.offlineAlertChannelId,
+            offlineThresholdMs: config.serverStatus.offlineAlertThresholdMs,
+          },
+          discord: {
+            sendChannelMessage: (channelId, message) => {
+              if (!discordGatewayRef.current) {
+                return Promise.reject(
+                  new Error('Discord gateway is not ready for server status notifications'),
+                );
+              }
+
+              return discordGatewayRef.current.sendChannelMessage(channelId, message);
+            },
+          },
+        })
+      : undefined);
   const numberGame =
     dependencies?.numberGame ??
     createNumberGameService({
@@ -695,6 +725,14 @@ export function createApplication(
     });
   }
 
+  if (serverStatusNotifications && config.serverStatus.offlineAlertsEnabled) {
+    scheduler.register({
+      name: 'server-status-notifications',
+      intervalMs: config.serverStatus.pollIntervalMs,
+      run: () => serverStatusNotifications.synchronize(),
+    });
+  }
+
   let started = false;
   let stopped = false;
 
@@ -719,6 +757,11 @@ export function createApplication(
         if (uptimeStatus && config.uptime.enabled) {
           void uptimeStatus.synchronize().catch((error: unknown) => {
             logger.error({ err: error }, 'Initial uptime status synchronization failed');
+          });
+        }
+        if (serverStatusNotifications && config.serverStatus.offlineAlertsEnabled) {
+          void serverStatusNotifications.synchronize().catch((error: unknown) => {
+            logger.error({ err: error }, 'Initial server status notification check failed');
           });
         }
         if (cakeDays && config.cakeDays.enabled) {

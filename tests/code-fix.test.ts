@@ -55,6 +55,7 @@ function createMessage(id: string, content: string): StemCodeFixMessage {
     authorIsBot: false,
     content,
     react: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -177,5 +178,85 @@ describe('STEM Code Fix service', () => {
       expect.objectContaining({ answer: 'Change + to *' }),
       'The calculation should multiply the two dimensions.',
     );
+  });
+
+  it('provides a hint without counting it as an answer', async () => {
+    const state = new MemoryStateStore();
+    const generateHint = vi.fn().mockResolvedValue('Look closely at the operation used for area.');
+    const engine: CodeFixEngine = {
+      generateChallenge: vi.fn().mockResolvedValue(challenge()),
+      evaluateAnswer: vi.fn(),
+      generateHint,
+    };
+    const service = createService(state, engine);
+
+    await service.initialize();
+    const hint = createMessage('hint-1', 'hint');
+    await service.handleMessage(hint);
+
+    expect(generateHint).toHaveBeenCalledWith(
+      expect.objectContaining({ answer: 'Change + to *' }),
+      [],
+    );
+    expect(hint.reply).toHaveBeenCalledWith(
+      '💡 Hint: Look closely at the operation used for area.',
+    );
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({
+      stemCodeFix: { challenge: { hints: ['Look closely at the operation used for area.'] } },
+    });
+  });
+
+  it('skips the active challenge and reveals the fix', async () => {
+    const state = new MemoryStateStore();
+    const engine: CodeFixEngine = {
+      generateChallenge: vi
+        .fn()
+        .mockResolvedValueOnce(challenge())
+        .mockResolvedValueOnce(challenge('Loop condition needs checking')),
+      evaluateAnswer: vi.fn(),
+    };
+    const publisher = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce('challenge-message-1')
+        .mockResolvedValueOnce('challenge-message-2'),
+    };
+    const service = createService(state, engine, publisher);
+
+    await service.initialize();
+    await service.handleMessage(createMessage('skip-1', 'skip'));
+
+    expect(publisher.send).toHaveBeenCalledTimes(2);
+    expect(publisher.send.mock.calls[1]?.[1]).toContain(
+      '⏭️ Challenge skipped. The fix was: **Change + to ***.',
+    );
+    expect(state.state).toMatchObject({
+      stemCodeFix: { challenge: { title: 'Loop condition needs checking' } },
+    });
+  });
+
+  it('confirms that a challenge contains a real bug without counting an attempt', async () => {
+    const state = new MemoryStateStore();
+    const confirmChallenge = vi.fn().mockResolvedValue('confirmed');
+    const engine: CodeFixEngine = {
+      generateChallenge: vi.fn().mockResolvedValue(challenge()),
+      evaluateAnswer: vi.fn(),
+      confirmChallenge,
+    };
+    const service = createService(state, engine);
+
+    await service.initialize();
+    const confirm = createMessage('confirm-1', 'confirm');
+    await service.handleMessage(confirm);
+
+    expect(confirmChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({ title: challenge().title }),
+    );
+    expect(confirm.reply).toHaveBeenCalledWith(
+      '✅ Confirmed — this challenge contains one intended bug. Look for the line or expression that does not match the task.',
+    );
+    expect(engine.evaluateAnswer).not.toHaveBeenCalled();
+    expect(state.state).toMatchObject({ stemCodeFix: { challenge: { wrongAttempts: 0 } } });
   });
 });

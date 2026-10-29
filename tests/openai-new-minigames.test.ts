@@ -115,4 +115,59 @@ describe('OpenAI Code Fix engine', () => {
     expect(evaluationBody.input[0]?.content[0]?.text).toContain('Change + to *');
     expect(evaluationBody.input[0]?.content[0]?.text).toContain('Multiply the width and height.');
   });
+
+  it('generates hints and confirms whether a challenge contains one real bug', async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              hint: 'Compare the operation in the final calculation with the task wording.',
+            }),
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ output_text: '{"result":"confirmed"}' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const engine = new OpenAICodeFixEngine({
+      apiKey: 'test-key',
+      model: 'test-model',
+      reasoningEffort: 'low',
+      timeoutMs: 1000,
+      logger,
+      fetchImplementation,
+    });
+    const challenge = {
+      language: 'python' as const,
+      title: 'Area uses the wrong operation',
+      prompt: 'This should calculate the area of a rectangle. What should be fixed?',
+      code: 'area = width + height',
+      answer: 'Change + to *',
+      acceptedAnswers: ['multiply width by height'],
+      explanation: 'Area is calculated by multiplying the two dimensions.',
+    };
+
+    await expect(engine.generateHint(challenge, ['Check the last line.'])).resolves.toBe(
+      'Compare the operation in the final calculation with the task wording.',
+    );
+    await expect(engine.confirmChallenge(challenge)).resolves.toBe('confirmed');
+
+    const hintBody = JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)) as {
+      text: { format: { name: string } };
+      input: Array<{ content: Array<{ text?: string }> }>;
+    };
+    const confirmationBody = JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)) as {
+      text: { format: { name: string } };
+      input: Array<{ content: Array<{ text?: string }> }>;
+    };
+    expect(hintBody.text.format.name).toBe('stem_code_fix_hint');
+    expect(hintBody.input[0]?.content[0]?.text).toContain('Check the last line.');
+    expect(confirmationBody.text.format.name).toBe('stem_code_fix_confirm');
+    expect(confirmationBody.input[0]?.content[0]?.text).toContain('Change + to *');
+  });
 });

@@ -14,6 +14,9 @@ export interface ChatDiscordBridgeConfig {
   path: string;
   bearerToken?: string;
   channelId?: string;
+  serverStartChannelId?: string;
+  serverStopChannelId?: string;
+  serverMessageChannelId?: string;
   minecraftUrl?: string;
   maxBodyBytes: number;
 }
@@ -391,7 +394,7 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
                 allowedMentions: { parse: [] },
               };
     const messageId = await this.dependencies.publisher.send(
-      this.dependencies.config.channelId!,
+      channelForMinecraftEvent(this.dependencies.config, event),
       message,
     );
     state.processedEventIds = [...state.processedEventIds, event.event_id].slice(
@@ -448,6 +451,23 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
   }
 }
 
+export type MinecraftServerStatusEmbedKind = 'started' | 'stopped' | 'offline' | 'online';
+
+export function buildMinecraftServerStatusEmbed(kind: MinecraftServerStatusEmbedKind): APIEmbed {
+  const started = kind === 'started' || kind === 'online';
+  const labels: Record<MinecraftServerStatusEmbedKind, string> = {
+    started: 'Server started',
+    stopped: 'Server stopped',
+    offline: 'Server offline',
+    online: 'Server online',
+  };
+
+  return {
+    color: started ? 0x00ff00 : 0xff0000,
+    author: { name: labels[kind] },
+  };
+}
+
 function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
   const data: Record<string, unknown> = event.data ?? {};
 
@@ -464,10 +484,7 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
 
   if (event.event === 'minecraft.server_start' || event.event === 'minecraft.server_stop') {
     const started = event.event === 'minecraft.server_start';
-    return {
-      color: started ? 0x00ff00 : 0xff0000,
-      author: { name: started ? 'Server started' : 'Server stopped' },
-    };
+    return buildMinecraftServerStatusEmbed(started ? 'started' : 'stopped');
   }
 
   if (event.event === 'minecraft.server_message') {
@@ -529,6 +546,22 @@ function buildMinecraftEventEmbed(event: MinecraftEmbedEvent): APIEmbed {
     ...(timestamp ? { timestamp } : {}),
     ...(fields.length > 0 ? { fields } : {}),
   };
+}
+
+function channelForMinecraftEvent(config: ChatDiscordBridgeConfig, event: MinecraftEvent): string {
+  if (event.event === 'minecraft.server_start') {
+    return config.serverStartChannelId ?? config.channelId!;
+  }
+
+  if (event.event === 'minecraft.server_stop') {
+    return config.serverStopChannelId ?? config.channelId!;
+  }
+
+  if (event.event === 'minecraft.server_message') {
+    return config.serverMessageChannelId ?? config.channelId!;
+  }
+
+  return config.channelId!;
 }
 
 function getMinecraftDeathMessage(event: MinecraftPlayerDeathEvent): string {

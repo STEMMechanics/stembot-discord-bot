@@ -27,6 +27,11 @@ describe('loadConfig', () => {
         requestTimeoutMs: 5000,
         statusUrl: 'http://play.stemcraft.com.au:8950/status',
       },
+      serverStatus: {
+        offlineAlertsEnabled: false,
+        offlineAlertThresholdMs: 300000,
+        pollIntervalMs: 60000,
+      },
       uptime: {
         enabled: false,
         pollIntervalMs: 60000,
@@ -663,8 +668,15 @@ describe('loadConfig', () => {
       CHAT_DISCORD_BRIDGE_PATH: '/bridge/minecraft',
       CHAT_DISCORD_BRIDGE_BEARER_TOKEN: 'bridge-token',
       CHAT_DISCORD_BRIDGE_CHANNEL_ID: '5234567890',
+      CHAT_DISCORD_BRIDGE_SERVER_START_CHANNEL_ID: '6234567890',
+      CHAT_DISCORD_BRIDGE_SERVER_STOP_CHANNEL_ID: '7234567890',
+      CHAT_DISCORD_BRIDGE_SERVER_MESSAGE_CHANNEL_ID: '8234567890',
       CHAT_DISCORD_BRIDGE_STEMCRAFT_URL: 'https://play.example.test:8950/api/v1/chat/discord',
       CHAT_DISCORD_BRIDGE_MAX_BODY_BYTES: '100000',
+      STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED: 'true',
+      STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID: '9234567890',
+      STEMCRAFT_SERVER_OFFLINE_ALERT_THRESHOLD_MS: '300000',
+      STEMCRAFT_SERVER_OFFLINE_ALERT_POLL_INTERVAL_MS: '60000',
     });
 
     expect(config.wordReveal).toEqual({
@@ -696,9 +708,29 @@ describe('loadConfig', () => {
       path: '/bridge/minecraft',
       bearerToken: 'bridge-token',
       channelId: '5234567890',
+      serverStartChannelId: '6234567890',
+      serverStopChannelId: '7234567890',
+      serverMessageChannelId: '8234567890',
       minecraftUrl: 'https://play.example.test:8950/api/v1/chat/discord',
       maxBodyBytes: 100000,
     });
+    expect(config.serverStatus).toEqual({
+      offlineAlertsEnabled: true,
+      offlineAlertChannelId: '9234567890',
+      offlineAlertThresholdMs: 300000,
+      pollIntervalMs: 60000,
+    });
+  });
+
+  it('requires an offline-alert channel when extended server offline alerts are enabled', () => {
+    expect(() =>
+      loadConfig({
+        DISCORD_CLIENT_ID: '1234567890',
+        DISCORD_GUILD_ID: '2234567890',
+        DISCORD_TOKEN: 'test-token',
+        STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED: 'true',
+      }),
+    ).toThrow(/STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID/);
   });
 
   it('accepts the STEM Mystery Lab environment names', () => {
