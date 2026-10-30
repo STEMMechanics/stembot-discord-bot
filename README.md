@@ -53,6 +53,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/mystery-lab reset` — reset the active Mystery Lab round and start a new one; requires Manage Messages.
 - `/code-fix reset` — reset the active Code Fix challenge and start a new one; requires Manage Messages.
 - `/tictactoe reset` — reset the active Tic Tac Toe round and start a new one; requires Manage Messages.
+- `/connect4 reset` — reset the active Connect 4 round and start a new one; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
@@ -65,8 +66,8 @@ Use `/number` to start a personal number-guessing challenge. STEMBot thinks of a
 When enabled, Tic Tac Toe and Connect 4 post one persistent board in their configured
 channels. Players click the board buttons; the first click claims the round and starts a
 game against STEMBot. A claimed Tic Tac Toe round resets after 10 minutes without a move,
-with the timer restarting after each move. Moderators can use `/tictactoe reset` to replace
-a stuck round.
+with the timer restarting after each move. Moderators can use `/tictactoe reset` or
+`/connect4 reset` to replace a stuck round.
 
 ### Global Chase
 

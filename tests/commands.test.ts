@@ -6,6 +6,7 @@ import {
   formatPlayers,
   buildUptimeStatusEmbed,
   countingChainCommand,
+  connectFourCommand,
   formatWorkshopList,
   formatUserLeaderboard,
   formatUserLevel,
@@ -26,6 +27,7 @@ import {
 import { PlayerListUnavailableError, type MinecraftPlayer } from '../src/integrations/stemcraft.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
 import type { StemScrambleService } from '../src/services/scramble.js';
+import type { ConnectFourService } from '../src/services/connect-four.js';
 import type { CountingChainService } from '../src/services/counting-chain.js';
 import type { UserLevelProfile } from '../src/services/user-levels.js';
 
@@ -57,6 +59,7 @@ describe('Discord commands', () => {
       'mystery-lab',
       'code-fix',
       'tictactoe',
+      'connect4',
       'leaderboard',
       'review',
       'counting-chain',
@@ -326,6 +329,28 @@ describe('Discord commands', () => {
     expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(editReply).toHaveBeenCalledWith({
       content: 'Scramble reset. The previous answer was **magnet**.',
+    });
+  });
+
+  it('lets members with Manage Messages reset Connect 4', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const resetRound = vi.fn().mockResolvedValue(true);
+    const interaction = {
+      memberPermissions: { has: vi.fn().mockReturnValue(true) },
+      deferReply,
+      editReply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await connectFourCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      connectFour: { resetRound } as unknown as ConnectFourService,
+    });
+
+    expect(resetRound).toHaveBeenCalledOnce();
+    expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Connect 4 reset. A fresh round has been started.',
     });
   });
 

@@ -36,6 +36,7 @@ import type { StemCodeFixService } from '../services/code-fix.js';
 import type { NumberGameService } from '../services/number-game.js';
 import type { StemWordRevealService } from '../services/word-reveal.js';
 import type { TicTacToeService } from '../services/tic-tac-toe.js';
+import type { ConnectFourService } from '../services/connect-four.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -53,6 +54,7 @@ export interface CommandContext {
   codeFix?: StemCodeFixService;
   numberGame?: NumberGameService;
   ticTacToe?: TicTacToeService;
+  connectFour?: ConnectFourService;
 }
 
 export interface DiscordCommand {
@@ -499,6 +501,42 @@ export const ticTacToeCommand: DiscordCommand = {
   },
 };
 
+export const connectFourCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('connect4')
+    .setDescription('Manage the Connect 4 game.')
+    .addSubcommand((subcommand) =>
+      subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const connectFour = context.connectFour;
+    if (!connectFour) {
+      await interaction.reply({
+        content: 'The Connect 4 game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to reset Connect 4.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const resetActiveRound = await connectFour.resetRound();
+    await interaction.editReply({
+      content: resetActiveRound
+        ? 'Connect 4 reset. A fresh round has been started.'
+        : 'No active Connect 4 round was found; a new one has been started.',
+    });
+  },
+};
+
 export const reviewCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('review')
@@ -674,6 +712,7 @@ export const commands: readonly DiscordCommand[] = [
   mysteryLabCommand,
   codeFixCommand,
   ticTacToeCommand,
+  connectFourCommand,
   leaderboardCommand,
   reviewCommand,
   countingChainCommand,
