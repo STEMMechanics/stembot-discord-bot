@@ -275,7 +275,7 @@ const environmentSchema = z.object({
   STEM_TICTACTOE_ENABLED: booleanFromEnvironment(false),
   STEM_TICTACTOE_CHANNEL_ID: optionalDiscordId,
   STEM_TICTACTOE_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
-  STEM_TICTACTOE_IDLE_TIMEOUT_MS: positiveMilliseconds(259200000, 31536000000),
+  STEM_TICTACTOE_IDLE_TIMEOUT_MS: positiveMilliseconds(600000, 31536000000),
   STEM_CONNECT4_ENABLED: booleanFromEnvironment(false),
   STEM_CONNECT4_CHANNEL_ID: optionalDiscordId,
   STEM_CONNECT4_RETRY_INTERVAL_MS: positiveMilliseconds(300000, 86400000),

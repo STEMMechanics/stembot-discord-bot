@@ -35,6 +35,7 @@ import { parseReminderDuration, type AdminReminderService } from '../services/ad
 import type { StemCodeFixService } from '../services/code-fix.js';
 import type { NumberGameService } from '../services/number-game.js';
 import type { StemWordRevealService } from '../services/word-reveal.js';
+import type { TicTacToeService } from '../services/tic-tac-toe.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -51,6 +52,7 @@ export interface CommandContext {
   wordReveal?: StemWordRevealService;
   codeFix?: StemCodeFixService;
   numberGame?: NumberGameService;
+  ticTacToe?: TicTacToeService;
 }
 
 export interface DiscordCommand {
@@ -461,6 +463,42 @@ export const codeFixCommand: DiscordCommand = {
   },
 };
 
+export const ticTacToeCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('tictactoe')
+    .setDescription('Manage the Tic Tac Toe game.')
+    .addSubcommand((subcommand) =>
+      subcommand.setName('reset').setDescription('Reset the current round and start a new one.'),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const ticTacToe = context.ticTacToe;
+    if (!ticTacToe) {
+      await interaction.reply({
+        content: 'The Tic Tac Toe game is not enabled.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to reset Tic Tac Toe.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const resetActiveRound = await ticTacToe.resetRound();
+    await interaction.editReply({
+      content: resetActiveRound
+        ? 'Tic Tac Toe reset. A fresh round has been started.'
+        : 'No active Tic Tac Toe round was found; a new one has been started.',
+    });
+  },
+};
+
 export const reviewCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
     .setName('review')
@@ -635,6 +673,7 @@ export const commands: readonly DiscordCommand[] = [
   scrambleCommand,
   mysteryLabCommand,
   codeFixCommand,
+  ticTacToeCommand,
   leaderboardCommand,
   reviewCommand,
   countingChainCommand,
