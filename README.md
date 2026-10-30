@@ -52,6 +52,7 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/scramble reset` — reset the active word scramble and start a new round; requires Manage Messages.
 - `/mystery-lab reset` — reset the active Mystery Lab round and start a new one; requires Manage Messages.
 - `/code-fix reset` — reset the active Code Fix challenge and start a new one; requires Manage Messages.
+- `/tictactoe reset` — reset the active Tic Tac Toe round and start a new one; requires Manage Messages.
 
 `/workshops` uses `WORKSHOP_TIME_ZONE`; feed timestamps retain their supplied offsets when converted to instants.
 
@@ -63,7 +64,7 @@ Use `/number` to start a personal number-guessing challenge. STEMBot thinks of a
 
 When enabled, Tic Tac Toe and Connect 4 post one persistent board in their configured
 channels. Players click the board buttons; the first click claims the round and starts a
-game against STEMBot. There are no slash commands to start or stop these games.
+game against STEMBot. Moderators can use `/tictactoe reset` to replace a stuck round.
 
 ### Global Chase
 
@@ -599,7 +600,7 @@ npm run validate
 | `STEM_TICTACTOE_ENABLED`                    | No                  | Enable the persistent Tic Tac Toe channel game; defaults to `false`.                        |
 | `STEM_TICTACTOE_CHANNEL_ID`                 | When enabled        | Discord channel where Tic Tac Toe posts its board.                                          |
 | `STEM_TICTACTOE_RETRY_INTERVAL_MS`          | No                  | Retry interval for posting a Tic Tac Toe board; defaults to 5 minutes.                      |
-| `STEM_TICTACTOE_IDLE_TIMEOUT_MS`            | No                  | Time before an idle Tic Tac Toe round is reset; defaults to 3 days.                         |
+| `STEM_TICTACTOE_IDLE_TIMEOUT_MS`            | No                  | Time after a player claims the board before an inactive round is reset; resets after each move and defaults to 10 minutes. |
 | `STEM_CONNECT4_ENABLED`                     | No                  | Enable the persistent Connect 4 channel game; defaults to `false`.                          |
 | `STEM_CONNECT4_CHANNEL_ID`                  | When enabled        | Discord channel where Connect 4 posts its board.                                            |
 | `STEM_CONNECT4_RETRY_INTERVAL_MS`           | No                  | Retry interval for posting a Connect 4 board; defaults to 5 minutes.                        |

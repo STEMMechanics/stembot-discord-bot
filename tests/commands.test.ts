@@ -56,6 +56,7 @@ describe('Discord commands', () => {
       'scramble',
       'mystery-lab',
       'code-fix',
+      'tictactoe',
       'leaderboard',
       'review',
       'counting-chain',

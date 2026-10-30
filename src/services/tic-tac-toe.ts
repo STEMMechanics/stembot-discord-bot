@@ -29,6 +29,7 @@ export interface TicTacToeService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
   checkInactivity(): Promise<void>;
+  resetRound(): Promise<boolean>;
   handleButton(interaction: ButtonGameInteraction): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
@@ -41,6 +42,7 @@ interface TicTacToeGameState {
   boardMessageId: string;
   roundNumber: number;
   startedAt: string;
+  lastActivityAt?: string;
 }
 
 interface TicTacToeState {
@@ -63,7 +65,7 @@ interface TicTacToeServiceDependencies {
 
 const STATE_KEY = 'ticTacToe';
 const BOARD_SIZE = 9;
-const DEFAULT_IDLE_TIMEOUT_MS = 259200000;
+const DEFAULT_IDLE_TIMEOUT_MS = 600000;
 
 export class PersistentTicTacToeService implements TicTacToeService {
   private readonly currentTime: () => Date;
@@ -110,9 +112,18 @@ export class PersistentTicTacToeService implements TicTacToeService {
         return;
       }
 
-      const startedAt = Date.parse(game.startedAt);
+      // An unclaimed board is open to everyone and should remain available.
+      // Once claimed, inactivity is measured from the player's most recent move.
+      if (!game.playerId) {
+        return;
+      }
+
+      const lastActivityAt = Date.parse(game.lastActivityAt ?? game.startedAt);
       const idleTimeoutMs = this.dependencies.config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-      if (!Number.isFinite(startedAt) || this.currentTime().getTime() - startedAt < idleTimeoutMs) {
+      if (
+        !Number.isFinite(lastActivityAt) ||
+        this.currentTime().getTime() - lastActivityAt < idleTimeoutMs
+      ) {
         return;
       }
 
@@ -125,6 +136,32 @@ export class PersistentTicTacToeService implements TicTacToeService {
         state,
         '⏰ Tic Tac Toe was quiet for too long, so the board has been reset.',
       );
+    });
+  }
+
+  public async resetRound(): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return false;
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readTicTacToeState(rootState[STATE_KEY]);
+      const previousGame = state.game;
+      state.game = null;
+      writeTicTacToeState(rootState, state);
+      await this.dependencies.state.save(rootState);
+
+      if (previousGame) {
+        await this.editSafely(previousGame, formatTicTacToeBoard(previousGame, 'reset'));
+      }
+
+      await this.publishNextRound(
+        rootState,
+        state,
+        '🔄 A moderator reset Tic Tac Toe. A fresh round is ready!',
+      );
+      return previousGame !== null;
     });
   }
 
@@ -181,6 +218,7 @@ export class PersistentTicTacToeService implements TicTacToeService {
       ...game,
       playerId: game.playerId ?? interaction.userId,
       board: [...game.board],
+      lastActivityAt: this.currentTime().toISOString(),
     };
     nextGame.board[square] = 'X';
 
@@ -329,7 +367,7 @@ export function createTicTacToeService(
 
 function formatTicTacToeBoard(
   game: TicTacToeGameState,
-  state: 'start' | 'turn' | 'winner' | 'draw' | 'timeout',
+  state: 'start' | 'turn' | 'winner' | 'draw' | 'timeout' | 'reset',
   winner?: TicTacToeMark,
   botMove?: number,
   leadIn?: string,
@@ -348,6 +386,8 @@ function formatTicTacToeBoard(
     status = '🤝 It is a draw!';
   } else if (state === 'timeout') {
     status = '⏰ This round timed out and has been reset.';
+  } else if (state === 'reset') {
+    status = '🔄 This round was reset by a moderator.';
   }
 
   return {
@@ -362,7 +402,12 @@ function formatTicTacToeBoard(
           customId: `ttt:${game.id}:${square}`,
           label: cell ?? `${square + 1}`,
           style: cell === 'X' ? 'success' : cell === 'O' ? 'danger' : 'primary',
-          disabled: cell !== null || state === 'winner' || state === 'draw' || state === 'timeout',
+          disabled:
+            cell !== null ||
+            state === 'winner' ||
+            state === 'draw' ||
+            state === 'timeout' ||
+            state === 'reset',
         };
       }),
     })),
