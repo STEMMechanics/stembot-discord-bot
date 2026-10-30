@@ -98,7 +98,7 @@ describe('loadConfig', () => {
       ticTacToe: {
         enabled: false,
         retryIntervalMs: 300000,
-        idleTimeoutMs: 259200000,
+        idleTimeoutMs: 600000,
       },
       connectFour: {
         enabled: false,
