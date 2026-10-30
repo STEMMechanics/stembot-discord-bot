@@ -103,4 +103,45 @@ describe('Connect 4 service', () => {
       'This round is being played by <@user-1>. Wait for the next round.',
     );
   });
+
+  it('lets a moderator reset the active round and starts a fresh board', async () => {
+    const state = new MemoryStateStore();
+    const publisher = {
+      send: vi.fn().mockResolvedValueOnce('board-0').mockResolvedValueOnce('board-1'),
+      edit: vi.fn().mockResolvedValue(true),
+    };
+    const service = createService(state, publisher);
+    await service.initialize();
+
+    await service.handleButton(createInteraction('user-1', 'connect4:game-1:0'));
+
+    await expect(service.resetRound()).resolves.toBe(true);
+    expect(publisher.edit).toHaveBeenCalledWith(
+      'game-channel',
+      'board-0',
+      expect.objectContaining({
+        content: expect.stringContaining('This round was reset by a moderator.'),
+        rows: expect.arrayContaining([
+          expect.objectContaining({
+            buttons: expect.arrayContaining([expect.objectContaining({ disabled: true })]),
+          }),
+        ]),
+      }),
+    );
+    expect(publisher.send).toHaveBeenLastCalledWith(
+      'game-channel',
+      expect.objectContaining({
+        content: expect.stringContaining('A moderator reset Connect 4.'),
+      }),
+    );
+    expect(state.state).toMatchObject({
+      connectFour: {
+        game: {
+          id: 'game-next',
+          boardMessageId: 'board-1',
+          board: Array.from({ length: 42 }, () => null),
+        },
+      },
+    });
+  });
 });

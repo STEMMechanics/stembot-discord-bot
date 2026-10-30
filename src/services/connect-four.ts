@@ -29,6 +29,7 @@ export interface ConnectFourService {
   initialize(): Promise<void>;
   ensureRound(): Promise<void>;
   checkInactivity(): Promise<void>;
+  resetRound(): Promise<boolean>;
   handleButton(interaction: ButtonGameInteraction): Promise<void>;
   getLeaderboard(limit: number): Promise<readonly MinigameLeaderboardEntry[]>;
 }
@@ -130,6 +131,32 @@ export class PersistentConnectFourService implements ConnectFourService {
         state,
         '⏰ Connect 4 was quiet for too long, so the board has been reset.',
       );
+    });
+  }
+
+  public async resetRound(): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return false;
+    }
+
+    return this.enqueue(async () => {
+      const rootState = await this.dependencies.state.load();
+      const state = readConnectFourState(rootState[STATE_KEY]);
+      const previousGame = state.game;
+      state.game = null;
+      writeConnectFourState(rootState, state);
+      await this.dependencies.state.save(rootState);
+
+      if (previousGame) {
+        await this.editSafely(previousGame, formatConnectFourBoard(previousGame, 'reset'));
+      }
+
+      await this.publishNextRound(
+        rootState,
+        state,
+        '🔄 A moderator reset Connect 4. A fresh round is ready!',
+      );
+      return previousGame !== null;
     });
   }
 
@@ -330,7 +357,7 @@ export function createConnectFourService(
 
 function formatConnectFourBoard(
   game: ConnectFourGameState,
-  state: 'start' | 'turn' | 'winner' | 'draw' | 'timeout',
+  state: 'start' | 'turn' | 'winner' | 'draw' | 'timeout' | 'reset',
   winner?: ConnectFourMark,
   botColumn?: number,
   leadIn?: string,
@@ -356,6 +383,8 @@ function formatConnectFourBoard(
     status = '🤝 It is a draw!';
   } else if (state === 'timeout') {
     status = '⏰ This round timed out and has been reset.';
+  } else if (state === 'reset') {
+    status = '🔄 This round was reset by a moderator.';
   }
 
   return {
@@ -374,7 +403,8 @@ function formatConnectFourBoard(
           game.board[column] !== null ||
           state === 'winner' ||
           state === 'draw' ||
-          state === 'timeout',
+          state === 'timeout' ||
+          state === 'reset',
       })),
     })),
   };
