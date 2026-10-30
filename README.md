@@ -64,7 +64,9 @@ Use `/number` to start a personal number-guessing challenge. STEMBot thinks of a
 
 When enabled, Tic Tac Toe and Connect 4 post one persistent board in their configured
 channels. Players click the board buttons; the first click claims the round and starts a
-game against STEMBot. Moderators can use `/tictactoe reset` to replace a stuck round.
+game against STEMBot. A claimed Tic Tac Toe round resets after 10 minutes without a move,
+with the timer restarting after each move. Moderators can use `/tictactoe reset` to replace
+a stuck round.
 
 ### Global Chase
 
@@ -600,7 +602,7 @@ npm run validate
 | `STEM_TICTACTOE_ENABLED`                    | No                  | Enable the persistent Tic Tac Toe channel game; defaults to `false`.                        |
 | `STEM_TICTACTOE_CHANNEL_ID`                 | When enabled        | Discord channel where Tic Tac Toe posts its board.                                          |
 | `STEM_TICTACTOE_RETRY_INTERVAL_MS`          | No                  | Retry interval for posting a Tic Tac Toe board; defaults to 5 minutes.                      |
-| `STEM_TICTACTOE_IDLE_TIMEOUT_MS`            | No                  | Time after a player claims the board before an inactive round is reset; resets after each move and defaults to 10 minutes. |
+| `STEM_TICTACTOE_IDLE_TIMEOUT_MS`            | No                  | Idle timeout after a player claims the board; defaults to 10 minutes.                       |
 | `STEM_CONNECT4_ENABLED`                     | No                  | Enable the persistent Connect 4 channel game; defaults to `false`.                          |
 | `STEM_CONNECT4_CHANNEL_ID`                  | When enabled        | Discord channel where Connect 4 posts its board.                                            |
 | `STEM_CONNECT4_RETRY_INTERVAL_MS`           | No                  | Retry interval for posting a Connect 4 board; defaults to 5 minutes.                        |
