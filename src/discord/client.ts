@@ -19,6 +19,8 @@ import {
 import { hostname } from 'node:os';
 
 import type { AppConfig } from '../config/env.js';
+import type { MinecraftProfileLookup } from '../integrations/minecraft-profile.js';
+import type { MinecraftPlayerProfileLookup } from '../integrations/minecraft-player-profile.js';
 import type { StemCraftIntegration } from '../integrations/stemcraft.js';
 import type { UptimeKumaIntegration } from '../integrations/uptime-kuma.js';
 import type { WebsiteIntegration } from '../integrations/website.js';
@@ -63,6 +65,7 @@ import type {
 import type { UserLevelService } from '../services/user-levels.js';
 import type { StemWordChainMessage, StemWordChainService } from '../services/word-chain.js';
 import { isMinigameHintRequest } from '../services/minigame-hints.js';
+import type { PlayerNotificationService } from '../services/player-notifications.js';
 import { createDiscordChatMessage, type ChatDiscordBridge } from '../http/chat-discord-bridge.js';
 import { toDiscordButtonRows } from './button-components.js';
 import { handleInteraction } from './interaction-handler.js';
@@ -121,6 +124,9 @@ export interface DiscordCommandDependencies {
   ticTacToe?: TicTacToeService;
   connectFour?: ConnectFourService;
   globalChase?: GlobalChaseService;
+  minecraftProfiles?: MinecraftProfileLookup;
+  minecraftPlayerProfiles?: MinecraftPlayerProfileLookup;
+  playerNotifications?: PlayerNotificationService;
   chatDiscordBridge?: Pick<ChatDiscordBridge, 'forwardDiscordMessage'>;
 }
 
@@ -421,6 +427,15 @@ export function createDiscordGateway(
       ...(dependencies.ticTacToe ? { ticTacToe: dependencies.ticTacToe } : {}),
       ...(dependencies.connectFour ? { connectFour: dependencies.connectFour } : {}),
       ...(requestCountingChainReview ? { requestCountingChainReview } : {}),
+      ...(dependencies.minecraftProfiles
+        ? { minecraftProfiles: dependencies.minecraftProfiles }
+        : {}),
+      ...(dependencies.minecraftPlayerProfiles
+        ? { minecraftPlayerProfiles: dependencies.minecraftPlayerProfiles }
+        : {}),
+      ...(dependencies.playerNotifications
+        ? { playerNotifications: dependencies.playerNotifications }
+        : {}),
     });
   });
 

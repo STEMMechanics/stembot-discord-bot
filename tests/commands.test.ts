@@ -15,6 +15,8 @@ import {
   getCommandDefinitions,
   getUpcomingWorkshops,
   minecraftCommand,
+  playerInfoCommand,
+  playerNotificationsCommand,
   jokeCommand,
   levelCommand,
   numberCommand,
@@ -65,6 +67,8 @@ describe('Discord commands', () => {
       'counting-chain',
       'remind',
       'minecraft',
+      'playerinfo',
+      'playernotifications',
     ]);
     expect(definitions.find((definition) => definition.name === 'review')?.options).toEqual([]);
   });
@@ -534,5 +538,202 @@ describe('Discord commands', () => {
       allowedMentions: { parse: [] },
     });
     expect(activateChallenge).toHaveBeenCalledWith('number-challenge-1', 'number-prompt-1');
+  });
+
+  it('lets anyone look up a Minecraft UUID with /playerinfo', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      deferReply,
+      editReply,
+      options: { getString: vi.fn().mockReturnValue('Alex') },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerInfoCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      minecraftProfiles: {
+        findByUsername: vi.fn().mockResolvedValue({
+          username: 'Alex',
+          uuid: '0123456789abcdef0123456789abcdef',
+        }),
+      },
+      stemcraft: {
+        getServerStatus: vi.fn(),
+        getOnlinePlayers: vi.fn().mockResolvedValue([{ username: 'Alex' }]),
+      },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith();
+    expect(editReply).toHaveBeenCalledWith({
+      embeds: [
+        {
+          color: 0x2ecc71,
+          author: {
+            name: "Alex's Minecraft profile",
+            icon_url: 'https://mc-heads.net/avatar/Alex/128.png',
+          },
+          thumbnail: { url: 'https://mc-heads.net/avatar/Alex/128.png' },
+          fields: [
+            { name: 'UUID', value: '`0123456789abcdef0123456789abcdef`' },
+            { name: 'Player status', value: 'Online', inline: true },
+            { name: 'Server', value: '1 players online', inline: true },
+          ],
+          footer: { text: 'Minecraft profile' },
+        },
+      ],
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it('shows STEMCraft statistics for a username and supports a selected period', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const findByUuid = vi.fn().mockResolvedValue({
+      profile: {
+        username: 'Alex',
+        uuid: '0123456789abcdef0123456789abcdef',
+      },
+      online: true,
+      stats: {
+        available: true,
+        period: '28d',
+        items: [
+          { key: 'deaths', title: 'Deaths', value: 3 },
+          { key: 'play_time', title: 'Play Time', value: 12.5 },
+        ],
+      },
+    });
+    const interaction = {
+      deferReply,
+      editReply,
+      options: {
+        getString: vi.fn((name: string) => (name === 'username' ? 'Alex' : '28d')),
+      },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerInfoCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      minecraftProfiles: {
+        findByUsername: vi.fn().mockResolvedValue({
+          username: 'Alex',
+          uuid: '0123456789abcdef0123456789abcdef',
+        }),
+      },
+      minecraftPlayerProfiles: { findByUuid },
+      stemcraft: {
+        getServerStatus: vi.fn(),
+        getOnlinePlayers: vi.fn().mockResolvedValue([{ username: 'Alex' }]),
+      },
+    });
+
+    expect(findByUuid).toHaveBeenCalledWith('0123456789abcdef0123456789abcdef', {
+      include: ['stats'],
+      period: '28d',
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      embeds: [
+        expect.objectContaining({
+          thumbnail: { url: 'https://mc-heads.net/avatar/Alex/128.png' },
+          fields: expect.arrayContaining([
+            { name: 'Statistics (last 28 days)', value: '**Deaths**: 3\n**Play Time**: 12.5' },
+          ]),
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it('accepts a UUID and uses the STEMCraft profile identity', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      deferReply,
+      editReply,
+      options: {
+        getString: vi.fn((name: string) =>
+          name === 'username' ? '01234567-89ab-cdef-0123-456789abcdef' : null,
+        ),
+      },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerInfoCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      minecraftProfiles: {
+        findByUsername: vi.fn(),
+        findByUuid: vi.fn(),
+      },
+      minecraftPlayerProfiles: {
+        findByUuid: vi.fn().mockResolvedValue({
+          profile: {
+            username: 'Alex',
+            uuid: '0123456789abcdef0123456789abcdef',
+          },
+          online: false,
+          stats: {
+            available: true,
+            period: 'all',
+            items: [],
+          },
+        }),
+      },
+      stemcraft: {
+        getServerStatus: vi.fn(),
+        getOnlinePlayers: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: [
+          expect.objectContaining({
+            author: expect.objectContaining({ name: "Alex's Minecraft profile" }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('restricts player notification changes to moderators and stores UUIDs', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const addIgnoredPlayer = vi.fn().mockResolvedValue({
+      alreadyIgnored: false,
+      player: { username: 'Alex', uuid: '0123456789abcdef0123456789abcdef' },
+    });
+    const interaction = {
+      memberPermissions: { has: vi.fn().mockReturnValue(true) },
+      deferReply,
+      editReply,
+      options: {
+        getSubcommand: vi.fn().mockReturnValue('add'),
+        getString: vi.fn().mockReturnValue('Alex'),
+      },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerNotificationsCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      minecraftProfiles: {
+        findByUsername: vi.fn().mockResolvedValue({
+          username: 'Alex',
+          uuid: '0123456789abcdef0123456789abcdef',
+        }),
+      },
+      playerNotifications: {
+        addIgnoredPlayer,
+        findIgnoredPlayerByUsername: vi.fn(),
+        removeIgnoredPlayer: vi.fn(),
+        listIgnoredPlayers: vi.fn(),
+        isIgnored: vi.fn(),
+      },
+    });
+
+    expect(addIgnoredPlayer).toHaveBeenCalledWith({
+      username: 'Alex',
+      uuid: '0123456789abcdef0123456789abcdef',
+    });
+    expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Join/leave announcements will now be suppressed for **Alex**.',
+    });
   });
 });

@@ -17,7 +17,7 @@ credential may have been exposed, say which kind so it can be rotated quickly.
 
 ## Security expectations
 
-- Keep DISCORD_TOKEN, STEMCRAFT_STATUS_TOKEN, OPENAI_API_KEY and any deployment secrets in
+- Keep DISCORD_TOKEN, STEMCRAFT_STATUS_TOKEN, STEMCRAFT_PLAYER_API_TOKEN, OPENAI_API_KEY and any deployment secrets in
   the host secret store or protected environment file. Never commit them or
   include them in issue reports.
 - Use a protected STEMCraft status path with network access controls and

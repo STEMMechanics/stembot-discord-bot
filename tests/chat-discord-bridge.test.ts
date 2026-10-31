@@ -1,4 +1,7 @@
 import { createServer } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +12,8 @@ import {
   type ChatDiscordBridgeConfig,
   type ChatDiscordBridgePublisher,
 } from '../src/http/chat-discord-bridge.js';
+import { createPlayerNotificationService } from '../src/services/player-notifications.js';
+import { createJsonFileStateStore } from '../src/state/json-file-state-store.js';
 import type { JsonState, StateStore } from '../src/state/state-store.js';
 
 const logger = pino({ level: 'silent' });
@@ -24,6 +29,32 @@ class MemoryStateStore implements StateStore<JsonState> {
   public async save(state: JsonState): Promise<void> {
     this.state = state;
   }
+}
+
+function recordedEventIds(state: JsonState): string[] {
+  const bridgeState = state.chatDiscordBridge;
+  if (
+    typeof bridgeState !== 'object' ||
+    bridgeState === null ||
+    Array.isArray(bridgeState) ||
+    !('processedEvents' in bridgeState) ||
+    !Array.isArray(bridgeState.processedEvents)
+  ) {
+    return [];
+  }
+
+  return bridgeState.processedEvents.flatMap((record) => {
+    if (
+      typeof record === 'object' &&
+      record !== null &&
+      !Array.isArray(record) &&
+      'eventId' in record &&
+      typeof record.eventId === 'string'
+    ) {
+      return [record.eventId];
+    }
+    return [];
+  });
 }
 
 afterEach(async () => {
@@ -44,10 +75,7 @@ function config(port = 43127): ChatDiscordBridgeConfig {
 
 async function request(
   body: string,
-  headers: Record<string, string> = {
-    authorization: 'Bearer test-token',
-    'content-type': 'application/json',
-  },
+  headers: Record<string, string> = defaultRequestHeaders(body),
   port = 43127,
   path = '/minecraft/event',
 ): Promise<{ status: number; body: string }> {
@@ -57,6 +85,30 @@ async function request(
     body,
   });
   return { status: response.status, body: await response.text() };
+}
+
+function defaultRequestHeaders(body: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    authorization: 'Bearer test-token',
+    'content-type': 'application/json',
+  };
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      'event_id' in parsed &&
+      typeof parsed.event_id === 'string'
+    ) {
+      headers['x-stemcraft-event-id'] = parsed.event_id;
+    }
+  } catch {
+    // Invalid JSON tests should exercise JSON validation, not header setup.
+  }
+
+  return headers;
 }
 
 describe('Minecraft chat Discord bridge', () => {
@@ -161,11 +213,304 @@ describe('Minecraft chat Discord bridge', () => {
     });
     const duplicate = await request(payload);
 
-    expect(first.status).toBe(200);
-    expect(duplicate.status).toBe(200);
+    expect(first.status).toBe(202);
+    expect(duplicate.status).toBe(202);
     expect(JSON.parse(duplicate.body)).toMatchObject({ accepted: true, duplicate: true });
     expect(publisher.send).toHaveBeenCalledOnce();
     expect(publisher.send).toHaveBeenCalledWith('discord-channel', 'Alex » Hello from Minecraft');
+  });
+
+  it('deduplicates player quits by event ID, not player UUID', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43132),
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const quitPayload = (eventId: string, onlinePlayers: number): string =>
+      JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: eventId,
+        player: { name: 'Alex', uuid: 'player-1' },
+        data: { online_players: onlinePlayers },
+      });
+    const headersFor = (eventId: string): Record<string, string> => ({
+      authorization: 'Bearer test-token',
+      'content-type': 'application/json',
+      'x-stemcraft-event-id': eventId,
+    });
+
+    const first = await request(quitPayload('quit-event-1', 10), headersFor('quit-event-1'), 43132);
+    const retry = await request(quitPayload('quit-event-1', 10), headersFor('quit-event-1'), 43132);
+    const laterQuit = await request(
+      quitPayload('quit-event-2', 9),
+      headersFor('quit-event-2'),
+      43132,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(first.status).toBe(202);
+    expect(JSON.parse(first.body)).toMatchObject({ accepted: true, duplicate: false });
+    expect(retry.status).toBe(202);
+    expect(JSON.parse(retry.body)).toMatchObject({ accepted: true, duplicate: true });
+    expect(laterQuit.status).toBe(202);
+    expect(JSON.parse(laterQuit.body)).toMatchObject({ accepted: true, duplicate: false });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(recordedEventIds(state.state)).toEqual(['quit-event-1', 'quit-event-2']);
+  });
+
+  it('acknowledges after recording an event without waiting for Discord', async () => {
+    const state = new MemoryStateStore();
+    let resolveSend: ((messageId: string) => void) | undefined;
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43133),
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const response = await request(
+      JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: 'async-quit-event',
+        player: { name: 'Alex', uuid: 'player-1' },
+      }),
+      undefined,
+      43133,
+    );
+
+    expect(response.status).toBe(202);
+    expect(JSON.parse(response.body)).toMatchObject({ accepted: true, duplicate: false });
+    expect(recordedEventIds(state.state)).toEqual(['async-quit-event']);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(send).toHaveBeenCalledOnce();
+    resolveSend?.('discord-event-message');
+  });
+
+  it('persists event ID deduplication across bridge restarts', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'stembot-bridge-'));
+    const statePath = join(temporaryDirectory, 'state.json');
+    const bridges: HttpChatDiscordBridge[] = [];
+
+    try {
+      const firstSend = vi.fn().mockResolvedValue('first-discord-message');
+      const firstBridge = new HttpChatDiscordBridge({
+        config: config(43134),
+        publisher: { send: firstSend },
+        state: createJsonFileStateStore(statePath, logger),
+        logger,
+        serverFactory: createServer,
+      });
+      bridges.push(firstBridge);
+      await firstBridge.start();
+
+      const payload = JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: 'persistent-quit-event',
+        player: { name: 'Alex', uuid: 'player-1' },
+      });
+      const first = await request(payload, undefined, 43134);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(first.status).toBe(202);
+      expect(firstSend).toHaveBeenCalledOnce();
+
+      await firstBridge.stop();
+
+      const secondSend = vi.fn().mockResolvedValue('second-discord-message');
+      const secondBridge = new HttpChatDiscordBridge({
+        config: config(43134),
+        publisher: { send: secondSend },
+        state: createJsonFileStateStore(statePath, logger),
+        logger,
+        serverFactory: createServer,
+      });
+      bridges.push(secondBridge);
+      await secondBridge.start();
+
+      const duplicate = await request(payload, undefined, 43134);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(duplicate.status).toBe(202);
+      expect(JSON.parse(duplicate.body)).toMatchObject({ accepted: true, duplicate: true });
+      expect(secondSend).not.toHaveBeenCalled();
+    } finally {
+      await Promise.all(bridges.map((bridge) => bridge.stop()));
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  });
+
+  it('claims concurrent duplicate deliveries only once', async () => {
+    const state = new MemoryStateStore();
+    let resolveSend: ((messageId: string) => void) | undefined;
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43135),
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const body = JSON.stringify({
+      event: 'minecraft.server_message',
+      event_id: 'concurrent-event',
+      data: { message: 'Maintenance soon' },
+    });
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => request(body, undefined, 43135)),
+    );
+
+    expect(responses.every((response) => response.status === 202)).toBe(true);
+    expect(
+      responses.filter((response) => JSON.parse(response.body).duplicate === false),
+    ).toHaveLength(1);
+    expect(
+      responses.filter((response) => JSON.parse(response.body).duplicate === true),
+    ).toHaveLength(7);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(send).toHaveBeenCalledOnce();
+    expect(recordedEventIds(state.state)).toEqual(['concurrent-event']);
+
+    resolveSend?.('discord-event-message');
+  });
+
+  it('deduplicates every supported event type through the shared receiver', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43136),
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const events: Array<Record<string, unknown>> = [
+      {
+        event: 'minecraft.chat',
+        player: { name: 'Alex', uuid: 'same-player' },
+        message: 'Hello',
+      },
+      {
+        event: 'minecraft.player_join',
+        player: { name: 'Alex', uuid: 'same-player' },
+      },
+      {
+        event: 'minecraft.player_quit',
+        player: { name: 'Alex', uuid: 'same-player' },
+      },
+      {
+        event: 'minecraft.player_death',
+        player: { name: 'Alex', uuid: 'same-player' },
+      },
+      {
+        event: 'minecraft.player_command',
+        player: { name: 'Alex', uuid: 'same-player' },
+        data: { command: '/spawn' },
+      },
+      { event: 'minecraft.server_start' },
+      { event: 'minecraft.server_stop' },
+      { event: 'minecraft.server_message', data: { message: 'Restarting' } },
+      { event: 'minecraft.minigame_start', data: { minigame: 'bedwars' } },
+      { event: 'minecraft.minigame_end', data: { minigame: 'bedwars' } },
+    ];
+
+    for (const [index, event] of events.entries()) {
+      const eventId = `generic-event-${index}`;
+      const body = JSON.stringify({ ...event, event_id: eventId });
+      const first = await request(body, undefined, 43136);
+      const retry = await request(body, undefined, 43136);
+
+      expect(first.status).toBe(202);
+      expect(JSON.parse(first.body)).toMatchObject({ accepted: true, duplicate: false });
+      expect(retry.status).toBe(202);
+      expect(JSON.parse(retry.body)).toMatchObject({ accepted: true, duplicate: true });
+    }
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(send).toHaveBeenCalledTimes(events.length);
+    expect(recordedEventIds(state.state)).toEqual(
+      events.map((_event, index) => `generic-event-${index}`),
+    );
+  });
+
+  it('expires old claims while retaining recent event IDs', async () => {
+    const state = new MemoryStateStore();
+    state.state = {
+      chatDiscordBridge: {
+        version: 2,
+        processedEvents: [
+          {
+            eventId: 'expired-event',
+            recordedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+          },
+          {
+            eventId: 'recent-event',
+            recordedAt: Date.now(),
+          },
+        ],
+      },
+    };
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43137),
+      publisher: { send },
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const expiredAgain = await request(
+      JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: 'expired-event',
+        player: { name: 'Alex', uuid: 'same-player' },
+      }),
+      undefined,
+      43137,
+    );
+    const recentRetry = await request(
+      JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: 'recent-event',
+        player: { name: 'Alex', uuid: 'same-player' },
+      }),
+      undefined,
+      43137,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(JSON.parse(expiredAgain.body)).toMatchObject({ accepted: true, duplicate: false });
+    expect(JSON.parse(recentRetry.body)).toMatchObject({ accepted: true, duplicate: true });
+    expect(send).toHaveBeenCalledOnce();
+    expect(recordedEventIds(state.state)).toEqual(['recent-event', 'expired-event']);
   });
 
   it('publishes structured Minecraft events as embeds with mentions disabled', async () => {
@@ -307,7 +652,7 @@ describe('Minecraft chat Discord bridge', () => {
         43129,
       );
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       expect(JSON.parse(response.body)).toMatchObject({ accepted: true, duplicate: false });
 
       const call = send.mock.calls[index];
@@ -402,9 +747,69 @@ describe('Minecraft chat Discord bridge', () => {
         43130,
       );
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       expect(send.mock.calls[index]?.[0]).toBe(channelId);
     }
+  });
+
+  it('suppresses only ignored join/leave announcements while processing other events', async () => {
+    const state = new MemoryStateStore();
+    const send = vi.fn().mockResolvedValue('discord-event-message');
+    const playerNotifications = createPlayerNotificationService({ state, logger });
+    await playerNotifications.addIgnoredPlayer({
+      username: 'Alex',
+      uuid: '0123456789abcdef0123456789abcdef',
+    });
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43131),
+      publisher: { send },
+      state,
+      logger,
+      playerNotifications,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const join = await request(
+      JSON.stringify({
+        event: 'minecraft.player_join',
+        event_id: 'ignored-join',
+        player: { name: 'Alex', uuid: '01234567-89ab-cdef-0123-456789abcdef' },
+      }),
+      undefined,
+      43131,
+    );
+    const quit = await request(
+      JSON.stringify({
+        event: 'minecraft.player_quit',
+        event_id: 'ignored-quit',
+        player: { name: 'Alex', uuid: '01234567-89ab-cdef-0123-456789abcdef' },
+      }),
+      undefined,
+      43131,
+    );
+    const death = await request(
+      JSON.stringify({
+        event: 'minecraft.player_death',
+        event_id: 'not-ignored-death',
+        player: { name: 'Alex', uuid: '01234567-89ab-cdef-0123-456789abcdef' },
+        data: { message: 'Alex fell' },
+      }),
+      undefined,
+      43131,
+    );
+
+    expect(join.status).toBe(202);
+    expect(quit.status).toBe(202);
+    expect(death.status).toBe(202);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('discord-channel', '💀 Alex fell');
+    expect(recordedEventIds(state.state)).toEqual([
+      'ignored-join',
+      'ignored-quit',
+      'not-ignored-death',
+    ]);
   });
 
   it('rejects missing or invalid bearer tokens before reading the event', async () => {
@@ -424,6 +829,41 @@ describe('Minecraft chat Discord bridge', () => {
     );
 
     expect(response.status).toBe(401);
+    expect(publisher.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing or mismatched STEMCraft event IDs', async () => {
+    const state = new MemoryStateStore();
+    const publisher: ChatDiscordBridgePublisher = { send: vi.fn() };
+    const bridge = new HttpChatDiscordBridge({
+      config: config(43138),
+      publisher,
+      state,
+      logger,
+      serverFactory: createServer,
+    });
+    activeBridges.push(bridge);
+    await bridge.start();
+
+    const body = JSON.stringify({
+      event: 'minecraft.server_start',
+      event_id: 'body-event-id',
+    });
+    const commonHeaders = {
+      authorization: 'Bearer test-token',
+      'content-type': 'application/json',
+    };
+    const missing = await request(body, commonHeaders, 43138);
+    const mismatched = await request(
+      body,
+      { ...commonHeaders, 'x-stemcraft-event-id': 'header-event-id' },
+      43138,
+    );
+
+    expect(missing.status).toBe(400);
+    expect(JSON.parse(missing.body)).toEqual({ error: 'event_id_mismatch' });
+    expect(mismatched.status).toBe(400);
+    expect(JSON.parse(mismatched.body)).toEqual({ error: 'event_id_mismatch' });
     expect(publisher.send).not.toHaveBeenCalled();
   });
 });

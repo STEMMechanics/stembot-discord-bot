@@ -13,6 +13,14 @@ import { createOpenAIScrambleWordGenerator } from './integrations/openai-scrambl
 import { createOpenAIStemWordChainValidator } from './integrations/openai-word-chain.js';
 import { createOpenAIWordRevealGenerator } from './integrations/openai-word-reveal.js';
 import { createOpenAICodeFixEngine } from './integrations/openai-code-fix.js';
+import {
+  createMinecraftProfileLookup,
+  type MinecraftProfileLookup,
+} from './integrations/minecraft-profile.js';
+import {
+  createMinecraftPlayerProfileLookup,
+  type MinecraftPlayerProfileLookup,
+} from './integrations/minecraft-player-profile.js';
 import { createStemCraftIntegration, type StemCraftIntegration } from './integrations/stemcraft.js';
 import {
   createUptimeKumaIntegration,
@@ -60,6 +68,10 @@ import {
   type UserLevelAnnouncement,
   type UserLevelService,
 } from './services/user-levels.js';
+import {
+  createPlayerNotificationService,
+  type PlayerNotificationService,
+} from './services/player-notifications.js';
 import { createJsonFileStateStore } from './state/json-file-state-store.js';
 import type { JsonState, StateStore } from './state/state-store.js';
 
@@ -86,6 +98,9 @@ export interface ApplicationDependencies {
   reminders?: AdminReminderService;
   ask?: StemAskService;
   chatDiscordBridge?: ChatDiscordBridge;
+  minecraftProfiles?: MinecraftProfileLookup;
+  minecraftPlayerProfiles?: MinecraftPlayerProfileLookup;
+  playerNotifications?: PlayerNotificationService;
   userLevels?: UserLevelService;
   numberGame?: NumberGameService;
   ticTacToe?: TicTacToeService;
@@ -124,6 +139,22 @@ export function createApplication(
         })
       : undefined);
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
+  const minecraftProfiles =
+    dependencies?.minecraftProfiles ??
+    createMinecraftProfileLookup({ requestTimeoutMs: config.stemcraft.requestTimeoutMs });
+  const minecraftPlayerProfiles =
+    dependencies?.minecraftPlayerProfiles ??
+    (config.stemcraft.playerApiToken
+      ? createMinecraftPlayerProfileLookup({
+          apiUrl:
+            config.stemcraft.playerApiUrl ??
+            deriveMinecraftPlayerApiUrl(config.stemcraft.statusUrl),
+          token: config.stemcraft.playerApiToken,
+          requestTimeoutMs: config.stemcraft.requestTimeoutMs,
+        })
+      : undefined);
+  const playerNotifications =
+    dependencies?.playerNotifications ?? createPlayerNotificationService({ state, logger });
   const discordGatewayRef: { current?: DiscordGateway } = {};
   const serverStatusNotifications =
     dependencies?.serverStatusNotifications ??
@@ -513,6 +544,7 @@ export function createApplication(
           },
           state,
           logger,
+          playerNotifications,
         })
       : undefined);
   const discord =
@@ -536,6 +568,9 @@ export function createApplication(
       ...(globalChase ? { globalChase } : {}),
       ...(uptime ? { uptime } : {}),
       ...(chatDiscordBridge ? { chatDiscordBridge } : {}),
+      minecraftProfiles,
+      ...(minecraftPlayerProfiles ? { minecraftPlayerProfiles } : {}),
+      playerNotifications,
     });
   discordGatewayRef.current = discord;
   const cakeDayAnnouncementChannelId = config.cakeDays.announcementChannelId;
@@ -787,4 +822,13 @@ export function createApplication(
       logger.info('STEMBot application stopped');
     },
   };
+}
+
+function deriveMinecraftPlayerApiUrl(statusUrl: string): string {
+  const url = new URL(statusUrl);
+  const statusPath = url.pathname.replace(/\/status\/?$/i, '').replace(/\/+$/, '');
+  url.pathname = `${statusPath}/api/v1`;
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
 }

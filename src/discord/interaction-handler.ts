@@ -8,6 +8,9 @@ import type { WebsiteIntegration } from '../integrations/website.js';
 import type { StemScrambleService } from '../services/scramble.js';
 import type { StemCodeFixService } from '../services/code-fix.js';
 import type { StemWordRevealService } from '../services/word-reveal.js';
+import type { MinecraftProfileLookup } from '../integrations/minecraft-profile.js';
+import type { MinecraftPlayerProfileLookup } from '../integrations/minecraft-player-profile.js';
+import type { PlayerNotificationService } from '../services/player-notifications.js';
 import { commands, type CommandContext } from './commands.js';
 
 const INTERACTION_DEDUPLICATION_WINDOW_MS = 10 * 60 * 1000;
@@ -22,6 +25,9 @@ export interface InteractionHandlerContext extends CommandContext {
   codeFix?: StemCodeFixService;
   uptime?: UptimeKumaIntegration;
   timeZone?: string;
+  minecraftProfiles?: MinecraftProfileLookup;
+  minecraftPlayerProfiles?: MinecraftPlayerProfileLookup;
+  playerNotifications?: PlayerNotificationService;
 }
 
 export async function handleInteraction(
@@ -72,6 +78,11 @@ export async function handleInteraction(
     ...(context.requestCountingChainReview
       ? { requestCountingChainReview: context.requestCountingChainReview }
       : {}),
+    ...(context.minecraftProfiles ? { minecraftProfiles: context.minecraftProfiles } : {}),
+    ...(context.minecraftPlayerProfiles
+      ? { minecraftPlayerProfiles: context.minecraftPlayerProfiles }
+      : {}),
+    ...(context.playerNotifications ? { playerNotifications: context.playerNotifications } : {}),
   };
 
   const commandStartedAtMs = Date.now();

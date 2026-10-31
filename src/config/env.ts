@@ -167,6 +167,8 @@ const environmentSchema = z.object({
   WORKSHOP_POLL_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
   STEMCRAFT_STATUS_URL: z.string().trim().url().default('http://play.stemcraft.com.au:8950/status'),
   STEMCRAFT_STATUS_TOKEN: optionalSecret,
+  STEMCRAFT_PLAYER_API_URL: optionalUrl,
+  STEMCRAFT_PLAYER_API_TOKEN: optionalSecret,
   STEMCRAFT_REQUEST_TIMEOUT_MS: positiveMilliseconds(5000, 120000),
   STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED: booleanFromEnvironment(false),
   STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID: optionalDiscordId,
@@ -339,6 +341,8 @@ export interface AppConfig {
     statusUrl: string;
     requestTimeoutMs: number;
     token?: string;
+    playerApiUrl?: string;
+    playerApiToken?: string;
   };
   serverStatus: {
     offlineAlertsEnabled: boolean;
@@ -707,6 +711,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       statusUrl: values.STEMCRAFT_STATUS_URL,
       requestTimeoutMs: values.STEMCRAFT_REQUEST_TIMEOUT_MS,
       ...(values.STEMCRAFT_STATUS_TOKEN ? { token: values.STEMCRAFT_STATUS_TOKEN } : {}),
+      ...(values.STEMCRAFT_PLAYER_API_URL ? { playerApiUrl: values.STEMCRAFT_PLAYER_API_URL } : {}),
+      ...(values.STEMCRAFT_PLAYER_API_TOKEN
+        ? { playerApiToken: values.STEMCRAFT_PLAYER_API_TOKEN }
+        : {}),
     },
     serverStatus: {
       offlineAlertsEnabled: values.STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED,

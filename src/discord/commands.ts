@@ -19,6 +19,19 @@ import {
   type StemCraftIntegration,
 } from '../integrations/stemcraft.js';
 import {
+  InvalidMinecraftUsernameError,
+  MinecraftProfileLookupError,
+  InvalidMinecraftUuidError,
+  type MinecraftProfile,
+  type MinecraftProfileLookup,
+  normalizeMinecraftUuid,
+} from '../integrations/minecraft-profile.js';
+import {
+  MinecraftPlayerProfileLookupError,
+  type MinecraftPlayerProfileLookup,
+  type MinecraftPlayerStats,
+} from '../integrations/minecraft-player-profile.js';
+import {
   getWorkshopStatusCode,
   type WebsiteIntegration,
   type WorkshopRecord,
@@ -37,6 +50,10 @@ import type { NumberGameService } from '../services/number-game.js';
 import type { StemWordRevealService } from '../services/word-reveal.js';
 import type { TicTacToeService } from '../services/tic-tac-toe.js';
 import type { ConnectFourService } from '../services/connect-four.js';
+import type {
+  IgnoredMinecraftPlayer,
+  PlayerNotificationService,
+} from '../services/player-notifications.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -55,6 +72,9 @@ export interface CommandContext {
   numberGame?: NumberGameService;
   ticTacToe?: TicTacToeService;
   connectFour?: ConnectFourService;
+  minecraftProfiles?: MinecraftProfileLookup;
+  minecraftPlayerProfiles?: MinecraftPlayerProfileLookup;
+  playerNotifications?: PlayerNotificationService;
 }
 
 export interface DiscordCommand {
@@ -701,6 +721,240 @@ export const minecraftCommand: DiscordCommand = {
   },
 };
 
+export const playerInfoCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('playerinfo')
+    .setDescription("Show a Minecraft player's profile and STEMCraft statistics.")
+    .addStringOption((option) =>
+      option
+        .setName('username')
+        .setDescription('The Minecraft username or UUID to look up.')
+        .setMaxLength(36)
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('period')
+        .setDescription('The statistics period to display.')
+        .setRequired(false)
+        .addChoices(
+          { name: 'All time', value: 'all' },
+          { name: 'Today', value: '1d' },
+          { name: 'Last 7 days', value: '7d' },
+          { name: 'Last 28 days', value: '28d' },
+          { name: 'Last 30 days', value: '30d' },
+          { name: 'Last 365 days', value: '365d' },
+        ),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const profiles = requireMinecraftProfiles(context);
+    const identifier = interaction.options.getString('username', true).trim();
+    const period = interaction.options.getString('period') ?? 'all';
+    await interaction.deferReply();
+
+    let profile: MinecraftProfile | undefined;
+    let playerStats: MinecraftPlayerStats | undefined;
+    let statsLookupAttempted = false;
+    const uuid = normalizeMinecraftUuid(identifier);
+
+    try {
+      if (uuid && context.minecraftPlayerProfiles) {
+        statsLookupAttempted = true;
+        try {
+          const snapshot = await context.minecraftPlayerProfiles.findByUuid(uuid, {
+            include: ['stats'],
+            period,
+          });
+          if (snapshot) {
+            profile = snapshot.profile;
+            playerStats = snapshot.stats ?? unavailableMinecraftPlayerStats(period);
+          } else {
+            playerStats = unavailableMinecraftPlayerStats(period);
+          }
+        } catch (error: unknown) {
+          if (!(error instanceof MinecraftPlayerProfileLookupError)) {
+            throw error;
+          }
+          playerStats = unavailableMinecraftPlayerStats(period);
+        }
+      }
+
+      if (!profile && uuid && profiles.findByUuid) {
+        profile = await profiles.findByUuid(uuid);
+      }
+
+      if (!profile && !uuid) {
+        profile = await profiles.findByUsername(identifier);
+      }
+    } catch (error: unknown) {
+      if (
+        error instanceof InvalidMinecraftUsernameError ||
+        error instanceof InvalidMinecraftUuidError
+      ) {
+        await interaction.editReply({
+          content: uuid
+            ? 'That Minecraft UUID is not valid.'
+            : 'Minecraft usernames must contain 1 to 16 letters, numbers, or underscores.',
+        });
+        return;
+      }
+
+      if (
+        !(error instanceof MinecraftProfileLookupError) &&
+        !(error instanceof MinecraftPlayerProfileLookupError)
+      ) {
+        throw error;
+      }
+
+      await interaction.editReply({
+        content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
+      });
+      return;
+    }
+
+    if (!profile) {
+      await interaction.editReply({
+        content: `No Minecraft player profile was found for **${identifier}**.`,
+      });
+      return;
+    }
+
+    if (!statsLookupAttempted && context.minecraftPlayerProfiles) {
+      try {
+        const snapshot = await context.minecraftPlayerProfiles.findByUuid(profile.uuid, {
+          include: ['stats'],
+          period,
+        });
+        if (snapshot) {
+          profile = snapshot.profile;
+          playerStats = snapshot.stats ?? unavailableMinecraftPlayerStats(period);
+        } else {
+          playerStats = unavailableMinecraftPlayerStats(period);
+        }
+      } catch (error: unknown) {
+        if (!(error instanceof MinecraftPlayerProfileLookupError)) {
+          throw error;
+        }
+        playerStats = unavailableMinecraftPlayerStats(period);
+      }
+    }
+
+    const playerStatus = await getMinecraftPlayerInfoStatus(profile, context);
+    await interaction.editReply({
+      embeds: [buildMinecraftPlayerInfoEmbed(profile, playerStatus, playerStats)],
+      allowedMentions: { parse: [] },
+    });
+  },
+};
+
+export const playerNotificationsCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('playernotifications')
+    .setDescription('Manage Minecraft join and leave announcements.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages.toString())
+    .addSubcommandGroup((group) =>
+      group
+        .setName('ignore')
+        .setDescription('Manage players excluded from join and leave announcements.')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('add')
+            .setDescription('Exclude a player from join and leave announcements.')
+            .addStringOption((option) =>
+              option
+                .setName('username')
+                .setDescription('The Minecraft username to exclude.')
+                .setMaxLength(16)
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('remove')
+            .setDescription("Restore a player's join and leave announcements.")
+            .addStringOption((option) =>
+              option
+                .setName('username')
+                .setDescription('The Minecraft username to restore.')
+                .setMaxLength(16)
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('list')
+            .setDescription('List players excluded from join and leave announcements.'),
+        ),
+    ),
+
+  async execute(interaction, context): Promise<void> {
+    const hasModeratorPermission =
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) === true ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
+    if (!hasModeratorPermission) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to manage player notifications.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const playerNotifications = context.playerNotifications;
+    if (!playerNotifications) {
+      await interaction.reply({
+        content: 'Player notifications are not configured.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand(true);
+    if (subcommand === 'list') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const players = await playerNotifications.listIgnoredPlayers();
+      await interaction.editReply({
+        content: formatIgnoredMinecraftPlayers(players),
+      });
+      return;
+    }
+
+    const profiles = requireMinecraftProfiles(context);
+    const username = interaction.options.getString('username', true).trim();
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (subcommand === 'add') {
+      const profile = await lookupMinecraftProfile(profiles, username, interaction, true);
+      if (!profile) {
+        return;
+      }
+
+      const result = await playerNotifications.addIgnoredPlayer(profile);
+      await interaction.editReply({
+        content: result.alreadyIgnored
+          ? `Join/leave announcements are already suppressed for **${result.player.username}**.`
+          : `Join/leave announcements will now be suppressed for **${result.player.username}**.`,
+      });
+      return;
+    }
+
+    const profile = await lookupMinecraftProfile(profiles, username, interaction);
+    const ignoredPlayer = profile
+      ? await playerNotifications.removeIgnoredPlayer(profile.uuid)
+      : await playerNotifications.findIgnoredPlayerByUsername(username);
+    if (!ignoredPlayer) {
+      await interaction.editReply({
+        content: `No ignored player was found for **${username}**.`,
+      });
+      return;
+    }
+
+    await interaction.editReply({
+      content: `Join/leave announcements have been restored for **${ignoredPlayer.username}**.`,
+    });
+  },
+};
+
 export const commands: readonly DiscordCommand[] = [
   pingCommand,
   workshopsCommand,
@@ -718,6 +972,8 @@ export const commands: readonly DiscordCommand[] = [
   countingChainCommand,
   remindCommand,
   minecraftCommand,
+  playerInfoCommand,
+  playerNotificationsCommand,
 ];
 
 export function getCommandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
@@ -784,6 +1040,126 @@ export function formatPlayers(players: readonly MinecraftPlayer[]): string {
   }
 
   return `Online Minecraft players:\n${players.map((player) => `• ${player.username}`).join('\n')}`;
+}
+
+export interface MinecraftPlayerInfoStatus {
+  playerStatus: 'Online' | 'Offline' | 'Unknown';
+  serverStatus: string;
+}
+
+export function buildMinecraftPlayerInfoEmbed(
+  profile: MinecraftProfile,
+  status: MinecraftPlayerInfoStatus,
+  stats?: MinecraftPlayerStats,
+): APIEmbed {
+  const avatarUrl = getMinecraftAvatarUrl(profile.username, 128);
+  const color =
+    status.playerStatus === 'Online'
+      ? 0x2ecc71
+      : status.playerStatus === 'Offline'
+        ? 0xe74c3c
+        : 0x5865f2;
+
+  const fields: NonNullable<APIEmbed['fields']> = [
+    { name: 'UUID', value: `\`${profile.uuid}\`` },
+    { name: 'Player status', value: status.playerStatus, inline: true },
+    { name: 'Server', value: status.serverStatus, inline: true },
+  ];
+
+  if (stats) {
+    fields.push(...buildMinecraftStatsFields(stats));
+  }
+
+  return {
+    color,
+    author: {
+      name: `${profile.username}'s Minecraft profile`,
+      icon_url: avatarUrl,
+    },
+    thumbnail: { url: avatarUrl },
+    fields,
+    footer: { text: 'Minecraft profile' },
+  };
+}
+
+function buildMinecraftStatsFields(stats: MinecraftPlayerStats): NonNullable<APIEmbed['fields']> {
+  if (!stats.available) {
+    return [
+      {
+        name: 'Statistics',
+        value: 'STEMCraft statistics are not available for this player right now.',
+      },
+    ];
+  }
+
+  if (stats.items.length === 0) {
+    return [
+      {
+        name: `Statistics (${formatMinecraftStatsPeriod(stats.period)})`,
+        value: 'No statistics are available for this period.',
+      },
+    ];
+  }
+
+  const lines = stats.items.map(
+    (item) => `**${escapeEmbedText(item.title)}**: ${formatMinecraftStatValue(item.value)}`,
+  );
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+    if (candidate.length > 900 && current) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.map((value, index) => ({
+    name:
+      index === 0
+        ? `Statistics (${formatMinecraftStatsPeriod(stats.period)})`
+        : 'Statistics (continued)',
+    value,
+  }));
+}
+
+function formatMinecraftStatsPeriod(period: string): string {
+  return (
+    {
+      all: 'all time',
+      '1d': 'today',
+      '7d': 'last 7 days',
+      '28d': 'last 28 days',
+      '30d': 'last 30 days',
+      '365d': 'last 365 days',
+    }[period] ?? period
+  );
+}
+
+function formatMinecraftStatValue(value: number): string {
+  return Number.isInteger(value)
+    ? value.toLocaleString('en-AU')
+    : value.toLocaleString('en-AU', { maximumFractionDigits: 2 });
+}
+
+function unavailableMinecraftPlayerStats(period: string): MinecraftPlayerStats {
+  return { available: false, period, items: [] };
+}
+
+export function formatIgnoredMinecraftPlayers(players: readonly IgnoredMinecraftPlayer[]): string {
+  if (players.length === 0) {
+    return 'No Minecraft players are excluded from join/leave announcements.';
+  }
+
+  return [
+    '**Players excluded from join/leave announcements:**',
+    ...players.map((player) => `• **${player.username}** — \`${player.uuid}\``),
+  ].join('\n');
 }
 
 export function formatUserLevel(profile: UserLevelProfile): string {
@@ -1066,6 +1442,90 @@ function requireStemCraft(context: CommandContext): StemCraftIntegration {
   }
 
   return context.stemcraft;
+}
+
+function requireMinecraftProfiles(context: CommandContext): MinecraftProfileLookup {
+  if (!context.minecraftProfiles) {
+    throw new Error('The Minecraft profile lookup is not available');
+  }
+
+  return context.minecraftProfiles;
+}
+
+async function getMinecraftPlayerInfoStatus(
+  profile: MinecraftProfile,
+  context: CommandContext,
+): Promise<MinecraftPlayerInfoStatus> {
+  if (!context.stemcraft) {
+    return { playerStatus: 'Unknown', serverStatus: 'Unavailable' };
+  }
+
+  try {
+    const players = await context.stemcraft.getOnlinePlayers();
+    const isOnline = players.some(
+      (player) => player.username.toLocaleLowerCase() === profile.username.toLocaleLowerCase(),
+    );
+    return {
+      playerStatus: isOnline ? 'Online' : 'Offline',
+      serverStatus: `${players.length} players online`,
+    };
+  } catch (error: unknown) {
+    if (!(error instanceof PlayerListUnavailableError)) {
+      return { playerStatus: 'Unknown', serverStatus: 'Unavailable' };
+    }
+  }
+
+  try {
+    const server = await context.stemcraft.getServerStatus();
+    const state = server.maintenance ? 'Maintenance' : server.online ? 'Online' : 'Offline';
+    const capacity =
+      server.maxPlayers === undefined
+        ? `${server.playerCount} players online`
+        : `${server.playerCount}/${server.maxPlayers} players online`;
+    return {
+      playerStatus: server.online ? 'Unknown' : 'Offline',
+      serverStatus: `${state} · ${capacity}`,
+    };
+  } catch {
+    return { playerStatus: 'Unknown', serverStatus: 'Unavailable' };
+  }
+}
+
+function getMinecraftAvatarUrl(username: string, size: number): string {
+  return `https://mc-heads.net/avatar/${encodeURIComponent(username)}/${size}.png`;
+}
+
+async function lookupMinecraftProfile(
+  profiles: MinecraftProfileLookup,
+  username: string,
+  interaction: ChatInputCommandInteraction,
+  reportNotFound = false,
+): Promise<MinecraftProfile | undefined> {
+  try {
+    const profile = await profiles.findByUsername(username);
+    if (!profile && reportNotFound) {
+      await interaction.editReply({
+        content: `No Minecraft player profile was found for **${username}**.`,
+      });
+    }
+    return profile;
+  } catch (error: unknown) {
+    if (error instanceof InvalidMinecraftUsernameError) {
+      await interaction.editReply({
+        content: 'Minecraft usernames must contain 1 to 16 letters, numbers, or underscores.',
+      });
+      return undefined;
+    }
+
+    if (error instanceof MinecraftProfileLookupError) {
+      await interaction.editReply({
+        content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
+      });
+      return undefined;
+    }
+
+    throw error;
+  }
 }
 
 function formatProgressBar(percent: number): string {
