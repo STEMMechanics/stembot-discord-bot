@@ -46,6 +46,8 @@ Synchronize these application commands with `npm run sync:commands`:
 - `/review` — ask a moderator to review the last counting-chain post that ended the game.
 - `/counting-chain number:<number>` — set the next counting-chain number; requires Manage Messages.
 - `/minecraft` — server availability, player count, capacity, maintenance state, version, and online Minecraft usernames. If the configured STEMCraft response has no permitted player list, it reports that names are unavailable.
+- `/playerinfo username:<username-or-uuid> period:<all|1d|7d|28d|30d|365d>` — show a public Minecraft profile embed with the player's avatar, current username, UUID, live status, server population, and (when the STEMCraft player API is enabled) statistics for the selected period.
+- `/playernotifications ignore add|remove|list` — manage players excluded from join and leave announcements; requires Manage Messages.
 - `/level` — your persisted XP, level and activity counts, or the public level card for another member.
 - `/leaderboard` — the top ten members by XP.
 - `/status` — the current public Uptime Kuma service status, when enabled.
@@ -377,13 +379,20 @@ incoming `server` and `channel` values are accepted but configured Discord
 channels remain authoritative. `minecraft.server_start`,
 `minecraft.server_stop`, and `minecraft.server_message` can each use their own
 optional channel override. The `X-STEMCraft-Event-Id` header must match the
-JSON `event_id` when supplied, and retries with an already delivered event ID
+JSON `event_id`, and retries with an already recorded event ID
 are acknowledged without a second Discord message. The receiver accepts
 `minecraft.chat`, `minecraft.player_join`, `minecraft.player_quit`,
 `minecraft.player_death`, `minecraft.player_command`,
 `minecraft.server_start`, `minecraft.server_stop`,
 `minecraft.server_message`, `minecraft.minigame_start` and
-`minecraft.minigame_end` on this same endpoint.
+`minecraft.minigame_end` on this same endpoint. Valid events are claimed by
+`event_id` in the persistent state file before the receiver returns HTTP 202;
+Discord delivery is queued asynchronously. A repeated event ID is acknowledged
+without another Discord message, while a later event with the same player UUID
+is still delivered. Event-ID claims are retained for seven days and expired
+claims are cleaned during the next event claim, which comfortably covers the
+current live STEMCraft webhook configuration: `max-retries=3` allows one initial
+delivery plus three retries, or up to four delivery attempts.
 
 When `CHAT_DISCORD_BRIDGE_STEMCRAFT_URL` is set, the same channel also
 forwards human Discord messages to STEMCraft with the same
@@ -397,6 +406,20 @@ events use compact embeds; command, minigame, server lifecycle, and server
 message events use structured embeds. Server messages are rendered as a bold
 message-only amber embed, with no additional label. Embed mentions are disabled,
 and valid `occurred_at` timestamps appear in the embed timestamp.
+
+Join and leave announcements can be excluded without affecting the underlying
+STEMCraft event or the player's ability to join and play. Use
+`/playernotifications ignore add username:<username>` to resolve and store a
+player's UUID, `/playernotifications ignore remove username:<username>` to
+restore announcements, and `/playernotifications ignore list` to review the
+current list. The exclusion is checked only for `minecraft.player_join` and
+`minecraft.player_quit`; chat, death, command, minigame, and server events are
+processed normally. `/playerinfo username:<username-or-uuid>` is public and
+displays the player's avatar, current username and UUID, plus live online
+status and server population when the STEMCraft player list is available.
+Configure the authenticated STEMCraft player API variables below to include
+server-provided statistics; the command requests only the `stats` section and
+passes the selected period.
 
 Set `STEMCRAFT_SERVER_OFFLINE_ALERT_ENABLED=true` with a public
 `STEMCRAFT_SERVER_OFFLINE_ALERT_CHANNEL_ID` to enable the separate extended
@@ -547,6 +570,8 @@ npm run validate
 | `WEBSITE_REQUEST_TIMEOUT_MS`                | No                  | RSS request timeout; defaults to 15 seconds.                                                |
 | `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.               |
 | `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                      |
+| `STEMCRAFT_PLAYER_API_URL`                  | No                  | Optional player API base URL; defaults to the status host's `/api/v1`.                      |
+| `STEMCRAFT_PLAYER_API_TOKEN`                | No                  | Bearer key for STEMCraft's authenticated player profile API.                                |
 | `STEMCRAFT_REQUEST_TIMEOUT_MS`              | No                  | Status request timeout; defaults to 5 seconds.                                              |
 | `UPTIME_KUMA_ENABLED`                       | No                  | Enable the persistent Uptime Kuma Discord status card; defaults to `false`.                 |
 | `UPTIME_KUMA_STATUS_PAGE_URL`               | When enabled        | Published Uptime Kuma URL such as `https://uptime.example.com/status/stemmechanics`.        |
@@ -678,7 +703,7 @@ The scheduler performs an initial synchronization after Discord connects and rep
 
 Workshop announcements and reminders use the same plain-message style as the existing STEMMechanics announcements. Each message has an emoji prefix and a bold linked title (`📣 New:`, `✏️ Updated:`, `❌ Cancelled:`, or `⏰ Starts in ...`), the available workshop description, a labelled details section, and the HTTPS hero image as a normal Discord attachment. Lifecycle workshop announcements are automatically published to followers when the configured channel is a Discord Announcement channel. The bot must be able to send messages there; ordinary text channels are left unchanged, and crosspost failures are logged without causing a duplicate retry. Future lifecycle announcements are held until the workshop is within `WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS`; cancellation transitions remain eligible immediately. The registration call to action is separated from the details by blank lines; ticket links use `Book now`, while interest links use `Register interest`. The RSS adapter prefers `content:encoded` when a feed supplies it, then falls back to `description`. When the feed supplies a truncated summary, the adapter follows the existing workshop link and extracts the page's content article. Feed descriptions retain paragraph and basic emphasis formatting where supplied, exclude the generated date/location suffix, and stop before `Learning Outcomes`. The Website feed's `?md` image transform is removed before download.
 
-The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, delivered Minecraft event IDs, server offline-alert state and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
+The JSON state file stores the current workshop fingerprint, pending lifecycle event, pending announcement time, last delivered Discord message ID, reminder delivery markers, counting-chain state, AI quiz state, scramble state, themed word-chain state, Mystery Lab state, Code Fix state, STEM ask rate-limit counters, user-level profiles, Minecraft event-ID claims retained for seven days, the Minecraft join/leave notification exclusion list, server offline-alert state and the Uptime Kuma status-card message ID. It is written atomically, mounted at `/app/data` in Compose, and survives container restarts. Lifecycle announcements wait for `WORKSHOP_ANNOUNCEMENT_DELAY_MINUTES` before delivery; a later feed poll can update the pending content during that window. Set it to `0` during testing to deliver on the next synchronization. The first synchronization records the current feed without announcing it unless `WORKSHOP_ANNOUNCE_INITIAL_SYNC=true`. The uptime service creates its status message when no saved message ID exists, then edits that message on every poll; if the message is deleted, it creates and persists a replacement.
 
 The counting-chain record has this shape; keep the other top-level state keys
 when editing it offline:

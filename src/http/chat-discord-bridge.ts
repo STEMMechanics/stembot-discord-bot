@@ -5,6 +5,7 @@ import type { APIEmbed, MessageMentionOptions } from 'discord.js';
 import { z } from 'zod';
 
 import type { AppLogger } from '../logging/logger.js';
+import type { PlayerNotificationService } from '../services/player-notifications.js';
 import type { JsonState, StateStore } from '../state/state-store.js';
 
 export interface ChatDiscordBridgeConfig {
@@ -48,6 +49,7 @@ interface ChatDiscordBridgeDependencies {
   publisher: ChatDiscordBridgePublisher;
   state: StateStore<JsonState>;
   logger: AppLogger;
+  playerNotifications?: PlayerNotificationService;
   serverFactory?: typeof createServer;
   fetchImplementation?: typeof fetch;
 }
@@ -135,19 +137,25 @@ type MinecraftEmbedEvent = Exclude<
   MinecraftChatEvent | MinecraftPlayerDeathEvent | MinecraftPlayerCommandEvent
 >;
 
-interface ChatDiscordBridgeState {
-  version: 1;
-  processedEventIds: string[];
+interface ProcessedMinecraftEvent {
+  eventId: string;
+  recordedAt: number;
 }
 
-const MAX_PROCESSED_EVENT_IDS = 1000;
+interface ChatDiscordBridgeState {
+  version: 2;
+  processedEvents: ProcessedMinecraftEvent[];
+}
+
+const PROCESSED_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DISCORD_TO_MINECRAFT_TIMEOUT_MS = 5_000;
 const DISCORD_TO_MINECRAFT_MAX_RETRIES = 3;
 export class HttpChatDiscordBridge implements ChatDiscordBridge {
   private readonly serverFactory: typeof createServer;
   private readonly fetchImplementation: typeof fetch;
   private server: Server | undefined;
-  private eventQueue: Promise<void> = Promise.resolve();
+  private eventPersistenceQueue: Promise<void> = Promise.resolve();
+  private minecraftEventQueue: Promise<void> = Promise.resolve();
   private discordMessageQueue: Promise<void> = Promise.resolve();
 
   public constructor(private readonly dependencies: ChatDiscordBridgeDependencies) {
@@ -354,33 +362,67 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
     }
 
     const headerEventId = readHeaderValue(request.headers['x-stemcraft-event-id']);
-    if (headerEventId && headerEventId !== result.data.event_id) {
+    if (!headerEventId || headerEventId !== result.data.event_id) {
       writeJson(response, 400, { error: 'event_id_mismatch' });
       return;
     }
 
     try {
-      const duplicate = await this.enqueue(() => this.publishEvent(result.data));
-      writeJson(response, 200, { accepted: true, duplicate });
+      const duplicate = await this.enqueueEventPersistence(() =>
+        this.recordEvent(result.data.event_id),
+      );
+      if (!duplicate) {
+        this.enqueueMinecraftEvent(result.data);
+      }
+      writeJson(response, 202, { accepted: true, duplicate });
     } catch (error: unknown) {
       this.dependencies.logger.error(
         { err: error },
-        'Minecraft event bridge could not publish event',
+        'Minecraft event bridge could not record event',
       );
-      writeJson(response, 502, { error: 'discord_publish_failed' });
+      writeJson(response, 503, { error: 'event_not_recorded' });
     }
   }
 
-  private async publishEvent(event: MinecraftEvent): Promise<boolean> {
+  private async recordEvent(eventId: string): Promise<boolean> {
+    const now = Date.now();
     const rootState = await this.dependencies.state.load();
-    const state = readBridgeState(rootState.chatDiscordBridge);
-    if (state.processedEventIds.includes(event.event_id)) {
-      this.dependencies.logger.info(
-        { eventId: event.event_id },
-        'Duplicate Minecraft event ignored',
-      );
+    const state = readBridgeState(rootState.chatDiscordBridge, now);
+    const duplicate = state.processedEvents.some((record) => record.eventId === eventId);
+    if (!duplicate) {
+      state.processedEvents.push({ eventId, recordedAt: now });
+    }
+    rootState.chatDiscordBridge = state;
+    await this.dependencies.state.save(rootState);
+
+    if (duplicate) {
+      this.dependencies.logger.info({ eventId }, 'Duplicate Minecraft event ignored');
       return true;
     }
+
+    return false;
+  }
+
+  private enqueueMinecraftEvent(event: MinecraftEvent): void {
+    const next = this.minecraftEventQueue
+      .catch(() => undefined)
+      .then(() => this.publishEvent(event));
+    this.minecraftEventQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    void next.catch((error: unknown) => {
+      this.dependencies.logger.error(
+        { err: error, eventId: event.event_id, eventType: event.event },
+        'Minecraft event bridge could not publish event to Discord',
+      );
+    });
+  }
+
+  private async publishEvent(event: MinecraftEvent): Promise<void> {
+    const suppressDiscordAnnouncement =
+      (event.event === 'minecraft.player_join' || event.event === 'minecraft.player_quit') &&
+      (await this.dependencies.playerNotifications?.isIgnored(event.player.uuid)) === true;
 
     const message =
       event.event === 'minecraft.chat'
@@ -393,15 +435,25 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
                 embeds: [buildMinecraftEventEmbed(event)],
                 allowedMentions: { parse: [] },
               };
-    const messageId = await this.dependencies.publisher.send(
-      channelForMinecraftEvent(this.dependencies.config, event),
-      message,
-    );
-    state.processedEventIds = [...state.processedEventIds, event.event_id].slice(
-      -MAX_PROCESSED_EVENT_IDS,
-    );
-    rootState.chatDiscordBridge = state;
-    await this.dependencies.state.save(rootState);
+    let messageId: string | undefined;
+    if (!suppressDiscordAnnouncement) {
+      messageId = await this.dependencies.publisher.send(
+        channelForMinecraftEvent(this.dependencies.config, event),
+        message,
+      );
+    }
+    if (suppressDiscordAnnouncement) {
+      this.dependencies.logger.debug(
+        { eventId: event.event_id, eventType: event.event, player: event.player.name },
+        'Minecraft join/leave Discord announcement suppressed',
+      );
+      return;
+    }
+
+    if (!messageId) {
+      throw new Error('Minecraft Discord announcement was not published');
+    }
+
     if (event.event === 'minecraft.chat') {
       this.dependencies.logger.info(
         {
@@ -438,12 +490,11 @@ export class HttpChatDiscordBridge implements ChatDiscordBridge {
         'Minecraft event embed published to Discord',
       );
     }
-    return false;
   }
 
-  private async enqueue<T>(work: () => Promise<T>): Promise<T> {
-    const next = this.eventQueue.catch(() => undefined).then(work);
-    this.eventQueue = next.then(
+  private async enqueueEventPersistence<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.eventPersistenceQueue.catch(() => undefined).then(work);
+    this.eventPersistenceQueue = next.then(
       () => undefined,
       () => undefined,
     );
@@ -734,23 +785,52 @@ function normalizeHttpPath(path: string): string {
   return trimmed.replace(/\/+$/, '') || '/';
 }
 
-function readBridgeState(value: unknown): ChatDiscordBridgeState {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    'version' in value &&
-    value.version === 1 &&
-    'processedEventIds' in value &&
-    Array.isArray(value.processedEventIds)
-  ) {
+function readBridgeState(value: unknown, now: number): ChatDiscordBridgeState {
+  if (isRecord(value) && value.version === 2 && Array.isArray(value.processedEvents)) {
     return {
-      version: 1,
-      processedEventIds: value.processedEventIds
-        .filter((eventId): eventId is string => typeof eventId === 'string')
-        .slice(-MAX_PROCESSED_EVENT_IDS),
+      version: 2,
+      processedEvents: normalizeProcessedEvents(value.processedEvents, now),
     };
   }
 
-  return { version: 1, processedEventIds: [] };
+  if (isRecord(value) && value.version === 1 && Array.isArray(value.processedEventIds)) {
+    return {
+      version: 2,
+      processedEvents: normalizeProcessedEvents(
+        value.processedEventIds.map((eventId) => ({ eventId, recordedAt: now })),
+        now,
+      ),
+    };
+  }
+
+  return { version: 2, processedEvents: [] };
+}
+
+function normalizeProcessedEvents(value: unknown[], now: number): ProcessedMinecraftEvent[] {
+  const earliestRetainedAt = now - PROCESSED_EVENT_RETENTION_MS;
+  const seen = new Set<string>();
+  const processedEvents: ProcessedMinecraftEvent[] = [];
+
+  for (const candidate of value) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+
+    const eventId = typeof candidate.eventId === 'string' ? candidate.eventId.trim() : '';
+    const recordedAt = candidate.recordedAt;
+    if (
+      !eventId ||
+      seen.has(eventId) ||
+      typeof recordedAt !== 'number' ||
+      !Number.isFinite(recordedAt) ||
+      recordedAt < earliestRetainedAt
+    ) {
+      continue;
+    }
+
+    seen.add(eventId);
+    processedEvents.push({ eventId, recordedAt });
+  }
+
+  return processedEvents;
 }

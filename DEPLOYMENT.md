@@ -45,7 +45,10 @@ and OPENAI_API_KEY. To maintain the live counting information embed, also set
 COUNTING_CHAIN_INFO_CHANNEL_ID and optionally
 COUNTING_CHAIN_INFO_MESSAGE_ID. Set
 STEMCRAFT_STATUS_URL and STEMCRAFT_STATUS_TOKEN to the protected STEMCraft
-path agreed with the plugin and infrastructure owners. Do not expose port
+path agreed with the plugin and infrastructure owners. To enable `/playerinfo`
+statistics, also set `STEMCRAFT_PLAYER_API_TOKEN` to the key configured by
+STEMCraft's `web-server.player-api`; set `STEMCRAFT_PLAYER_API_URL` only when
+the player API is not at the status URL's `/api/v1` base. Do not expose port
 8950 directly to the Internet.
 
 The production Compose file pulls

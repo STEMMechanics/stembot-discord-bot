@@ -195,6 +195,8 @@ describe('loadConfig', () => {
       DISCORD_WORKSHOP_ANNOUNCEMENT_CHANNEL_ID: '123456789012345678',
       DISCORD_WORKSHOP_REMINDER_CHANNEL_ID: '223456789012345678',
       STEMCRAFT_STATUS_TOKEN: 'status-token',
+      STEMCRAFT_PLAYER_API_URL: 'https://play.example.test/api/v1',
+      STEMCRAFT_PLAYER_API_TOKEN: 'player-api-token',
       WORKSHOP_ANNOUNCEMENTS_ENABLED: 'false',
       WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS: '14',
       WORKSHOP_POLL_INTERVAL_MS: '60000',
@@ -214,6 +216,11 @@ describe('loadConfig', () => {
       reminderChannelId: '223456789012345678',
     });
     expect(config.stemcraft.token).toBe('status-token');
+    expect(config.stemcraft).toMatchObject({
+      playerApiUrl: 'https://play.example.test/api/v1',
+      playerApiToken: 'player-api-token',
+      token: 'status-token',
+    });
   });
 
   it('parses cake-day settings and requires an announcement channel when enabled', () => {
