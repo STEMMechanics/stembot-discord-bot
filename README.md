@@ -40,6 +40,7 @@ The command layer depends on `WebsiteIntegration` and `StemCraftIntegration` int
 Synchronize these application commands with `npm run sync:commands`:
 
 - `/ping` — Discord gateway latency.
+- `/botinfo` — moderator-only deployed build information: version, branch, commit, pull request, and release.
 - `/workshops` — upcoming public workshops, sorted by start time with local formatting and a `Details` link for each workshop.
 - `/joke` — a randomly selected robot-themed joke from the local joke set.
 - `/number` — STEMBot thinks of a number from 1 to 20; reply to its message with your one guess.

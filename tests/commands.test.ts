@@ -14,6 +14,8 @@ import {
   getRandomRobotJoke,
   getCommandDefinitions,
   getUpcomingWorkshops,
+  botInfoCommand,
+  formatBotInfo,
   minecraftCommand,
   playerInfoCommand,
   playerNotificationsCommand,
@@ -53,6 +55,7 @@ describe('Discord commands', () => {
     const definitions = getCommandDefinitions();
 
     expect(definitions.map((definition) => definition.name)).toEqual([
+      'botinfo',
       'ping',
       'workshops',
       'joke',
@@ -73,6 +76,40 @@ describe('Discord commands', () => {
       'playernotifications',
     ]);
     expect(definitions.find((definition) => definition.name === 'review')?.options).toEqual([]);
+  });
+
+  it('formats deployed bot build information', () => {
+    expect(
+      formatBotInfo({
+        version: '0.5.2',
+        branch: 'main',
+        commit: '401847aba3acc3612c8502a55ca50cf5264fd84e',
+        pullRequest: '19',
+        release: 'v0.5.2',
+      }),
+    ).toBe(
+      '**STEMBot build information**\n' +
+        'Version: `0.5.2`\n' +
+        'Branch: `main`\n' +
+        'Commit: `401847aba3acc3612c8502a55ca50cf5264fd84e`\n' +
+        'Pull request: `#19`\n' +
+        'Release: `v0.5.2`',
+    );
+  });
+
+  it('restricts bot build information to moderators', async () => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      memberPermissions: { has: vi.fn().mockReturnValue(false) },
+      reply,
+    } as unknown as ChatInputCommandInteraction;
+
+    await botInfoCommand.execute(interaction, { getGatewayPing: () => 0 });
+
+    expect(reply).toHaveBeenCalledWith({
+      content: 'You need Manage Messages permission to view bot information.',
+      flags: 64,
+    });
   });
 
   it('filters cancelled and past workshops and sorts by start time', () => {
