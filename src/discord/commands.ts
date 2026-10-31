@@ -54,9 +54,11 @@ import type {
   IgnoredMinecraftPlayer,
   PlayerNotificationService,
 } from '../services/player-notifications.js';
+import type { AppLogger } from '../logging/logger.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
+  logger?: AppLogger;
   website?: WebsiteIntegration;
   stemcraft?: StemCraftIntegration;
   timeZone?: string;
@@ -776,6 +778,10 @@ export const playerInfoCommand: DiscordCommand = {
           if (!(error instanceof MinecraftPlayerProfileLookupError)) {
             throw error;
           }
+          context.logger?.warn(
+            { err: error, uuid },
+            'STEMCraft player profile lookup failed; continuing without statistics',
+          );
           playerStats = unavailableMinecraftPlayerStats(period);
         }
       }
@@ -807,6 +813,14 @@ export const playerInfoCommand: DiscordCommand = {
         throw error;
       }
 
+      context.logger?.warn(
+        {
+          err: error,
+          identifier,
+          lookupType: uuid ? 'uuid' : 'username',
+        },
+        'Minecraft profile lookup failed; returning a temporary-unavailable response',
+      );
       await interaction.editReply({
         content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
       });
@@ -836,6 +850,10 @@ export const playerInfoCommand: DiscordCommand = {
         if (!(error instanceof MinecraftPlayerProfileLookupError)) {
           throw error;
         }
+        context.logger?.warn(
+          { err: error, uuid: profile.uuid },
+          'STEMCraft player profile lookup failed; continuing without statistics',
+        );
         playerStats = unavailableMinecraftPlayerStats(period);
       }
     }
@@ -924,7 +942,13 @@ export const playerNotificationsCommand: DiscordCommand = {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (subcommand === 'add') {
-      const profile = await lookupMinecraftProfile(profiles, username, interaction, true);
+      const profile = await lookupMinecraftProfile(
+        profiles,
+        username,
+        interaction,
+        true,
+        context.logger,
+      );
       if (!profile) {
         return;
       }
@@ -938,7 +962,13 @@ export const playerNotificationsCommand: DiscordCommand = {
       return;
     }
 
-    const profile = await lookupMinecraftProfile(profiles, username, interaction);
+    const profile = await lookupMinecraftProfile(
+      profiles,
+      username,
+      interaction,
+      false,
+      context.logger,
+    );
     const ignoredPlayer = profile
       ? await playerNotifications.removeIgnoredPlayer(profile.uuid)
       : await playerNotifications.findIgnoredPlayerByUsername(username);
@@ -1500,6 +1530,7 @@ async function lookupMinecraftProfile(
   username: string,
   interaction: ChatInputCommandInteraction,
   reportNotFound = false,
+  logger?: AppLogger,
 ): Promise<MinecraftProfile | undefined> {
   try {
     const profile = await profiles.findByUsername(username);
@@ -1518,6 +1549,10 @@ async function lookupMinecraftProfile(
     }
 
     if (error instanceof MinecraftProfileLookupError) {
+      logger?.warn(
+        { err: error, username },
+        'Minecraft profile lookup failed; returning a temporary-unavailable response',
+      );
       await interaction.editReply({
         content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
       });

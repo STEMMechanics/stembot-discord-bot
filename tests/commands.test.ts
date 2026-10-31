@@ -27,7 +27,9 @@ import {
   statusCommand,
 } from '../src/discord/commands.js';
 import { PlayerListUnavailableError, type MinecraftPlayer } from '../src/integrations/stemcraft.js';
+import { MinecraftProfileLookupError } from '../src/integrations/minecraft-profile.js';
 import { formatWorkshopRegistration, type WorkshopRecord } from '../src/integrations/website.js';
+import type { AppLogger } from '../src/logging/logger.js';
 import type { StemScrambleService } from '../src/services/scramble.js';
 import type { ConnectFourService } from '../src/services/connect-four.js';
 import type { CountingChainService } from '../src/services/counting-chain.js';
@@ -585,6 +587,40 @@ describe('Discord commands', () => {
     });
   });
 
+  it('logs Minecraft profile lookup failures before returning the generic playerinfo response', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const lookupError = new MinecraftProfileLookupError('Minecraft profile lookup request failed', {
+      cause: new Error('connect timeout'),
+    });
+    const warn = vi.fn();
+    const interaction = {
+      deferReply,
+      editReply,
+      options: { getString: vi.fn().mockReturnValue('MCList') },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerInfoCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      logger: { warn } as unknown as AppLogger,
+      minecraftProfiles: {
+        findByUsername: vi.fn().mockRejectedValue(lookupError),
+      },
+    });
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        err: lookupError,
+        identifier: 'MCList',
+        lookupType: 'username',
+      },
+      'Minecraft profile lookup failed; returning a temporary-unavailable response',
+    );
+  });
+
   it('shows STEMCraft statistics for a username and supports a selected period', async () => {
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
@@ -735,5 +771,44 @@ describe('Discord commands', () => {
     expect(editReply).toHaveBeenCalledWith({
       content: 'Join/leave announcements will now be suppressed for **Alex**.',
     });
+  });
+
+  it('logs profile lookup failures when adding a player to the notification ignore list', async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const lookupError = new MinecraftProfileLookupError('Minecraft profile lookup request failed');
+    const warn = vi.fn();
+    const interaction = {
+      memberPermissions: { has: vi.fn().mockReturnValue(true) },
+      deferReply,
+      editReply,
+      options: {
+        getSubcommand: vi.fn().mockReturnValue('add'),
+        getString: vi.fn().mockReturnValue('MCList'),
+      },
+    } as unknown as ChatInputCommandInteraction;
+
+    await playerNotificationsCommand.execute(interaction, {
+      getGatewayPing: () => 0,
+      logger: { warn } as unknown as AppLogger,
+      minecraftProfiles: {
+        findByUsername: vi.fn().mockRejectedValue(lookupError),
+      },
+      playerNotifications: {
+        addIgnoredPlayer: vi.fn(),
+        findIgnoredPlayerByUsername: vi.fn(),
+        removeIgnoredPlayer: vi.fn(),
+        listIgnoredPlayers: vi.fn(),
+        isIgnored: vi.fn(),
+      },
+    });
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Minecraft profile lookup is temporarily unavailable. Please try again later.',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      { err: lookupError, username: 'MCList' },
+      'Minecraft profile lookup failed; returning a temporary-unavailable response',
+    );
   });
 });

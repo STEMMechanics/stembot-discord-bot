@@ -568,6 +568,7 @@ npm run validate
 | `DISCORD_GUILD_ID`                          | Yes                 | The single Discord guild where STEMBot commands are registered.                             |
 | `WORKSHOP_FEED_URL`                         | No                  | Website RSS URL; defaults to the STEMMechanics workshop feed.                               |
 | `WEBSITE_REQUEST_TIMEOUT_MS`                | No                  | RSS request timeout; defaults to 15 seconds.                                                |
+| `MINECRAFT_PROFILE_REQUEST_TIMEOUT_MS`      | No                  | Mojang profile lookup timeout; defaults to 15 seconds.                                      |
 | `STEMCRAFT_STATUS_URL`                      | No                  | STEMCraft status URL; defaults to `http://play.stemcraft.com.au:8950/status`.               |
 | `STEMCRAFT_STATUS_TOKEN`                    | No                  | Optional bearer token for a protected status endpoint.                                      |
 | `STEMCRAFT_PLAYER_API_URL`                  | No                  | Optional player API base URL; defaults to the status host's `/api/v1`.                      |

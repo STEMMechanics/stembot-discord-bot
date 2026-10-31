@@ -63,6 +63,7 @@ export async function handleInteraction(
 
   const commandContext: CommandContext = {
     getGatewayPing: context.getGatewayPing,
+    logger: context.logger,
     ...(context.website ? { website: context.website } : {}),
     ...(context.stemcraft ? { stemcraft: context.stemcraft } : {}),
     ...(context.scramble ? { scramble: context.scramble } : {}),

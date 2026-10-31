@@ -23,6 +23,9 @@ describe('loadConfig', () => {
         feedUrl: 'https://www.stemmechanics.com.au/workshops/feed',
         requestTimeoutMs: 15000,
       },
+      minecraft: {
+        profileRequestTimeoutMs: 15000,
+      },
       stemcraft: {
         requestTimeoutMs: 5000,
         statusUrl: 'http://play.stemcraft.com.au:8950/status',
@@ -197,6 +200,7 @@ describe('loadConfig', () => {
       STEMCRAFT_STATUS_TOKEN: 'status-token',
       STEMCRAFT_PLAYER_API_URL: 'https://play.example.test/api/v1',
       STEMCRAFT_PLAYER_API_TOKEN: 'player-api-token',
+      MINECRAFT_PROFILE_REQUEST_TIMEOUT_MS: '20000',
       WORKSHOP_ANNOUNCEMENTS_ENABLED: 'false',
       WORKSHOP_ANNOUNCEMENT_WINDOW_DAYS: '14',
       WORKSHOP_POLL_INTERVAL_MS: '60000',
@@ -221,6 +225,7 @@ describe('loadConfig', () => {
       playerApiToken: 'player-api-token',
       token: 'status-token',
     });
+    expect(config.minecraft.profileRequestTimeoutMs).toBe(20000);
   });
 
   it('parses cake-day settings and requires an announcement channel when enabled', () => {
