@@ -55,6 +55,7 @@ import type {
   PlayerNotificationService,
 } from '../services/player-notifications.js';
 import type { AppLogger } from '../logging/logger.js';
+import { getBotBuildInfo, type BotBuildInfo } from '../build-info.js';
 
 export interface CommandContext {
   getGatewayPing(): number;
@@ -237,6 +238,47 @@ export function getPingResponse(gatewayPing: number): string {
     Number.isFinite(gatewayPing) && gatewayPing >= 0 ? `${gatewayPing}ms` : 'not available yet';
   return `Pong! Gateway latency: ${latency}`;
 }
+
+export function formatBotInfo(info: BotBuildInfo): string {
+  const pullRequest = info.pullRequest.startsWith('#')
+    ? info.pullRequest
+    : info.pullRequest === 'unknown'
+      ? info.pullRequest
+      : `#${info.pullRequest}`;
+  return [
+    '**STEMBot build information**',
+    `Version: \`${info.version}\``,
+    `Branch: \`${info.branch}\``,
+    `Commit: \`${info.commit}\``,
+    `Pull request: \`${pullRequest}\``,
+    `Release: \`${info.release}\``,
+  ].join('\n');
+}
+
+export const botInfoCommand: DiscordCommand = {
+  data: new SlashCommandBuilder()
+    .setName('botinfo')
+    .setDescription('Show STEMBot build information.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages.toString()),
+
+  async execute(interaction): Promise<void> {
+    const hasModeratorPermission =
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) === true ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
+    if (!hasModeratorPermission) {
+      await interaction.reply({
+        content: 'You need Manage Messages permission to view bot information.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: formatBotInfo(getBotBuildInfo()),
+      flags: MessageFlags.Ephemeral,
+    });
+  },
+};
 
 export const pingCommand: DiscordCommand = {
   data: new SlashCommandBuilder()
@@ -986,6 +1028,7 @@ export const playerNotificationsCommand: DiscordCommand = {
 };
 
 export const commands: readonly DiscordCommand[] = [
+  botInfoCommand,
   pingCommand,
   workshopsCommand,
   jokeCommand,
