@@ -141,7 +141,7 @@ export function createApplication(
   const state = dependencies?.state ?? createJsonFileStateStore(config.statePath, logger);
   const minecraftProfiles =
     dependencies?.minecraftProfiles ??
-    createMinecraftProfileLookup({ requestTimeoutMs: config.stemcraft.requestTimeoutMs });
+    createMinecraftProfileLookup({ requestTimeoutMs: config.minecraft.profileRequestTimeoutMs });
   const minecraftPlayerProfiles =
     dependencies?.minecraftPlayerProfiles ??
     (config.stemcraft.playerApiToken

@@ -165,6 +165,7 @@ const environmentSchema = z.object({
     .default('https://www.stemmechanics.com.au/workshops/feed'),
   WEBSITE_REQUEST_TIMEOUT_MS: positiveMilliseconds(15000, 120000),
   WORKSHOP_POLL_INTERVAL_MS: positiveMilliseconds(300000, 86400000),
+  MINECRAFT_PROFILE_REQUEST_TIMEOUT_MS: positiveMilliseconds(15000, 120000),
   STEMCRAFT_STATUS_URL: z.string().trim().url().default('http://play.stemcraft.com.au:8950/status'),
   STEMCRAFT_STATUS_TOKEN: optionalSecret,
   STEMCRAFT_PLAYER_API_URL: optionalUrl,
@@ -336,6 +337,9 @@ export interface AppConfig {
   website: {
     feedUrl: string;
     requestTimeoutMs: number;
+  };
+  minecraft: {
+    profileRequestTimeoutMs: number;
   };
   stemcraft: {
     statusUrl: string;
@@ -706,6 +710,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     website: {
       feedUrl: values.WORKSHOP_FEED_URL,
       requestTimeoutMs: values.WEBSITE_REQUEST_TIMEOUT_MS,
+    },
+    minecraft: {
+      profileRequestTimeoutMs: values.MINECRAFT_PROFILE_REQUEST_TIMEOUT_MS,
     },
     stemcraft: {
       statusUrl: values.STEMCRAFT_STATUS_URL,
