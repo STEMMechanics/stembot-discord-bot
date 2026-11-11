@@ -144,4 +144,24 @@ describe('Connect 4 service', () => {
       },
     });
   });
+
+  it('does not mark an unstarted round as reset', async () => {
+    const state = new MemoryStateStore();
+    const publisher = {
+      send: vi.fn().mockResolvedValueOnce('board-0').mockResolvedValueOnce('board-1'),
+      edit: vi.fn().mockResolvedValue(true),
+    };
+    const service = createService(state, publisher);
+    await service.initialize();
+
+    await expect(service.resetRound()).resolves.toBe(true);
+
+    expect(publisher.edit).not.toHaveBeenCalled();
+    expect(publisher.send).toHaveBeenLastCalledWith(
+      'game-channel',
+      expect.objectContaining({
+        content: expect.stringContaining('A moderator reset Connect 4.'),
+      }),
+    );
+  });
 });
