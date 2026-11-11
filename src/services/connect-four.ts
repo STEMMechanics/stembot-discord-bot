@@ -147,7 +147,7 @@ export class PersistentConnectFourService implements ConnectFourService {
       writeConnectFourState(rootState, state);
       await this.dependencies.state.save(rootState);
 
-      if (previousGame) {
+      if (previousGame?.playerId) {
         await this.editSafely(previousGame, formatConnectFourBoard(previousGame, 'reset'));
       }
 
